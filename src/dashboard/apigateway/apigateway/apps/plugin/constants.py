@@ -31,6 +31,9 @@ class PluginTypeCodeEnum(StructuredEnum):
         "bk-verified-user-exempted-apps", label=_("免用户认证应用白名单(不推荐)")
     )
     BK_MOCK = EnumField("bk-mock", label=_("mocking 插件"))
+    API_BREAKER = EnumField("api-breaker", label=_("API 熔断"))
+    REQUEST_VALIDATION = EnumField("request-validation", label=_("请求校验"))
+    FAULT_INJECTION = EnumField("fault-injection", label=_("故障注入"))
 
 
 class PluginTypeScopeEnum(StructuredEnum):
@@ -54,3 +57,84 @@ class PluginStyleEnum(StructuredEnum):
 class PluginBindingSourceEnum(StructuredEnum):
     YAML_IMPORT = EnumField("yaml_import", label=_("yaml导入"))
     USER_CREATE = EnumField("user_create", label=_("用户创建"))
+
+
+Draft7Schema = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://json-schema.org/draft-07/schema#",
+    "title": "Core schema meta-schema",
+    "definitions": {
+        "schemaArray": {"type": "array", "minItems": 1, "items": {"$ref": "#"}},
+        "nonNegativeInteger": {"type": "integer", "minimum": 0},
+        "nonNegativeIntegerDefault0": {"allOf": [{"$ref": "#/definitions/nonNegativeInteger"}, {"default": 0}]},
+        "simpleTypes": {"enum": ["array", "boolean", "integer", "null", "number", "object", "string"]},
+        "stringArray": {"type": "array", "items": {"type": "string"}, "uniqueItems": True, "default": []},
+    },
+    "type": ["object", "boolean"],
+    "properties": {
+        "$id": {"type": "string", "format": "uri-reference"},
+        "$schema": {"type": "string", "format": "uri"},
+        "$ref": {"type": "string", "format": "uri-reference"},
+        "$comment": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "default": True,
+        "readOnly": {"type": "boolean", "default": False},
+        "writeOnly": {"type": "boolean", "default": False},
+        "examples": {"type": "array", "items": True},
+        "multipleOf": {"type": "number", "exclusiveMinimum": 0},
+        "maximum": {"type": "number"},
+        "exclusiveMaximum": {"type": "number"},
+        "minimum": {"type": "number"},
+        "exclusiveMinimum": {"type": "number"},
+        "maxLength": {"$ref": "#/definitions/nonNegativeInteger"},
+        "minLength": {"$ref": "#/definitions/nonNegativeIntegerDefault0"},
+        "pattern": {"type": "string", "format": "regex"},
+        "additionalItems": {"$ref": "#"},
+        "items": {"anyOf": [{"$ref": "#"}, {"$ref": "#/definitions/schemaArray"}], "default": True},
+        "maxItems": {"$ref": "#/definitions/nonNegativeInteger"},
+        "minItems": {"$ref": "#/definitions/nonNegativeIntegerDefault0"},
+        "uniqueItems": {"type": "boolean", "default": False},
+        "contains": {"$ref": "#"},
+        "maxProperties": {"$ref": "#/definitions/nonNegativeInteger"},
+        "minProperties": {"$ref": "#/definitions/nonNegativeIntegerDefault0"},
+        "required": {"$ref": "#/definitions/stringArray"},
+        "additionalProperties": {"$ref": "#"},
+        "definitions": {"type": "object", "additionalProperties": {"$ref": "#"}, "default": {}},
+        "properties": {"type": "object", "additionalProperties": {"$ref": "#"}, "default": {}},
+        "patternProperties": {
+            "type": "object",
+            "additionalProperties": {"$ref": "#"},
+            "propertyNames": {"format": "regex"},
+            "default": {},
+        },
+        "dependencies": {
+            "type": "object",
+            "additionalProperties": {"anyOf": [{"$ref": "#"}, {"$ref": "#/definitions/stringArray"}]},
+        },
+        "propertyNames": {"$ref": "#"},
+        "const": True,
+        "enum": {"type": "array", "items": True, "minItems": 1, "uniqueItems": True},
+        "type": {
+            "anyOf": [
+                {"$ref": "#/definitions/simpleTypes"},
+                {"type": "array", "items": {"$ref": "#/definitions/simpleTypes"}, "minItems": 1, "uniqueItems": True},
+            ]
+        },
+        "format": {"type": "string"},
+        "contentMediaType": {"type": "string"},
+        "contentEncoding": {"type": "string"},
+        "if": {"$ref": "#"},
+        "then": {"$ref": "#"},
+        "else": {"$ref": "#"},
+        "allOf": {"$ref": "#/definitions/schemaArray"},
+        "anyOf": {"$ref": "#/definitions/schemaArray"},
+        "oneOf": {"$ref": "#/definitions/schemaArray"},
+        "not": {"$ref": "#"},
+    },
+    "default": True,
+}
+
+VARS_ALLOWED_COMPARISON_SYMBOLS = {"==", "~=", ">", ">=", "<", "<=", "~~", "~*", "in", "has", "!", "ipmatch"}
+
+VARS_ALLOWED_LOGICAL_SYMBOLS = {"AND", "OR", "!AND", "!OR"}

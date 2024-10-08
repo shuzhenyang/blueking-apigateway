@@ -37,7 +37,7 @@
                 <i class="ml5 bk-icon icon-question-circle" v-bk-tooltips="t('应用访问该网关API时，是否需提供应用认证信息')">
                 </i>
               </div>
-              <div class="v">{{curComponent.app_verified_required ? t('是') : t('否')}}</div>
+              <div class="v">{{curComponent.verified_app_required ? t('是') : t('否')}}</div>
             </div>
             <div class="kv-row">
               <div class="k">
@@ -45,18 +45,23 @@
                 <i class="ml5 bk-icon icon-question-circle" v-bk-tooltips="t('应用访问该组件API时，是否需要提供用户认证信息')">
                 </i>
               </div>
-              <div class="v">{{curComponent.user_verified_required ? t('是') : t('否')}}</div>
+              <div class="v">{{curComponent.verified_user_required ? t('是') : t('否')}}</div>
             </div>
             <div class="kv-row">
               <div class="k">
                 {{ t('是否需申请权限') }}：
                 <i class="ml5 bk-icon icon-question-circle" v-bk-tooltips="t('应用访问该网关API前，是否需要在开发者中心申请该网关API权限')"></i>
               </div>
-              <div class="v">{{curComponent.resource_perm_required ? t('是') : t('否')}}</div>
+              <div class="v">{{curComponent.allow_apply_permission ? t('是') : t('否')}}</div>
             </div>
           </div>
           <!-- eslint-disable-next-line vue/no-v-html -->
-          <div class="ag-markdown-view" id="markdown" :key="renderHtmlIndex" v-html="curComponent.markdownHtml"></div>
+          <div
+            class="ag-markdown-view"
+            id="markdown"
+            :key="renderHtmlIndex"
+            v-dompurify-html="curComponent.markdownHtml"
+          ></div>
         </bk-tab-panel>
         <!-- <bk-tab-panel
           :name="'sdk'"
@@ -80,7 +85,7 @@
             </div>
 
             <h3 class="f16 mt20"> {{ t('SDK使用样例') }} </h3>
-            <div class="ag-markdown-view mt20" :key="renderHtmlIndex" v-html="sdkMarkdownHtml"></div>
+            <div class="ag-markdown-view mt20" :key="renderHtmlIndex" v-dompurify-html="sdkMarkdownHtml"></div>
           </div>
         </bk-tab-panel> -->
       </bk-tab>

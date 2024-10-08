@@ -217,7 +217,7 @@
                   <DownShape class="expand-icon" v-else />
                   <span
                     class="vm resource-title"
-                    v-html="renderTitle(addItem)"
+                    v-dompurify-html="renderTitle(addItem)"
                     :title="`【${addItem?.method}】${addItem?.path}`"
                   ></span>
                 </div>
@@ -249,7 +249,7 @@
                   <DownShape class="expand-icon" v-else />
                   <span
                     class="vm resource-title"
-                    v-html="renderTitle(deleteItem)"
+                    v-dompurify-html="renderTitle(deleteItem)"
                     :title="`【${deleteItem?.method}】${deleteItem?.path}`"
                   ></span>
                 </div>
@@ -275,7 +275,7 @@
                   <DownShape class="expand-icon" v-else />
                   <span
                     class="vm resource-title"
-                    v-html="renderTitle(deleteItem)"
+                    v-dompurify-html="renderTitle(deleteItem)"
                     :title="`【${deleteItem?.method}】${deleteItem?.path}`"
                   ></span>
                 </div>
@@ -311,7 +311,7 @@
                   <DownShape class="expand-icon" v-else />
                   <span
                     class="vm resource-title"
-                    v-html="renderTitle(updateItem.source)"
+                    v-dompurify-html="renderTitle(updateItem.source)"
                     :title="`【${updateItem?.source?.method}】${updateItem?.source?.path}`"
                   ></span>
                 </div>
@@ -340,7 +340,7 @@
                   <DownShape class="expand-icon" v-else />
                   <span
                     class="vm resource-title"
-                    v-html="renderTitle(updateItem.target)"
+                    v-dompurify-html="renderTitle(updateItem.target)"
                     :title="`【${updateItem?.target?.method}】${updateItem?.target?.path}`"
                   ></span>
                 </div>
@@ -521,20 +521,20 @@ const handleToggle = (item: any) => {
   item.isExpanded = !item.isExpanded;
 };
 
-const handleSearch = () => {
-  searchKeyword.value = searchParams.keyword;
+const handleSearch = (keyword?: string) => {
+  searchKeyword.value = keyword || '';
 };
 
 const handleClear = () => {
   searchKeyword.value = '';
 };
 
-const handleSwitch = () => {
+const handleSwitch = async () => {
   [localSourceId.value, localTargetId.value] = [
     localTargetId.value,
     localSourceId.value,
   ];
-  getDiffData();
+  await getDiffData();
 };
 
 const checkMatch = (item: any, type: any) => {
@@ -606,31 +606,27 @@ const updateTableEmptyConfig = () => {
   tableEmptyConf.value.keyword = '';
 };
 
-const handleClearFilterKey = () => {
+const handleClearFilterKey = async () => {
   searchParams.keyword = '';
   searchParams.diffType = '';
   searchKeyword.value = '';
-  getDiffData();
+  await getDiffData();
   updateTableEmptyConfig();
 };
 
-const handleVersionChange = () => {
+const handleVersionChange = async () => {
   searchParams.keyword = '';
   searchParams.diffType = '';
   searchParams.onlyUpdated = false;
-
   searchKeyword.value = '';
-  getDiffData();
+  await getDiffData();
 };
 
 const getDiffData = async () => {
-  // if (!localSourceId.value) {
-  //   return false;
-  // }
-
-  if (isDataLoading.value) {
+  if (isDataLoading.value || !localSourceId.value) {
     return false;
   }
+
   isDataLoading.value = true;
 
   diffData.add = [];
@@ -763,12 +759,12 @@ const localTargetTriggerLabel = computed(() => {
 
 watch(
   () => [props.sourceId, props.targetId],
-  (newArr) => {
+  async (newArr) => {
     const [sourceId, targetId] = newArr;
     localSourceId.value = sourceId;
     localTargetId.value = targetId || 'current';
     isDataLoading.value = false;
-    getDiffData();
+    await getDiffData();
   },
 );
 

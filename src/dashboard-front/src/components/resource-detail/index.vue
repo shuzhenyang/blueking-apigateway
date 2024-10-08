@@ -662,30 +662,17 @@
       </bk-row>
     </bk-container>
 
-    <!-- <template v-if="localData.proxy?.banckend_id"> -->
-    <div :class="{ 'container-diff': checkPluginsDiff() }" v-if="localData.plugins?.length">
+    <!--  插件  -->
+    <div v-if="localData.plugins?.length">
       <template v-for="plugin in localData.plugins" :key="plugin.id">
-        <p class="title mt15" :class="{ 'ag-diff': checkPluginsDiff() }">
-          {{ $t('插件:{name}', { name: plugin.name }) }}
-        </p>
-        <bk-container class="ag-kv-box" :col="14" :margin="6">
-          <bk-row
-            v-for="key in Object.keys(plugin.config)"
-            :key="key"
-          >
-            <bk-col :span="5">
-              <label class="ag-key">{{ key }}:</label>
-            </bk-col>
-            <bk-col :span="9">
-              <div class="ag-value">
-                {{ plugin.config[key] || "--" }}
-              </div>
-            </bk-col>
-          </bk-row>
-        </bk-container>
+        <div :class="{ 'container-diff': checkPluginDiff(plugin) }">
+          <p class="title mt15">
+            {{ $t('插件:{name}', { name: plugin.name }) }}
+          </p>
+          <ConfigDisplayTable :plugin="plugin" first-col-width="auto" />
+        </div>
       </template>
     </div>
-    <!-- </template> -->
   </div>
 </template>
 
@@ -695,6 +682,7 @@ import cookie from 'cookie';
 // import dayjs from 'dayjs';
 import { useI18n } from 'vue-i18n';
 import { useCommon } from '@/store';
+import ConfigDisplayTable from '@/views/components/plugin-manage/config-display-table.vue';
 
 const common = useCommon();
 
@@ -893,9 +881,16 @@ const checkDiff = (path: any) => {
 //   );
 // };
 
-const checkPluginsDiff = () => {
+const checkPluginDiff = (plugin: any) => {
+  // 检查传入的 plugin 是否记录在 diffMap 中
+  const diffMapPluginKey = `localData.plugins.${plugin.code || plugin.type}`;
   const keys = Object.keys(diffMap.value);
-  return keys.some(item => item.startsWith('localData.plugins'));
+  const hasMatchingDiffMapKey = keys.some(item => item.startsWith(diffMapPluginKey));
+  // 检查传入的 plugin 是否存在于 curResource.diff.plugins 中
+  const diffPlugins = props.curResource?.diff?.plugins ?? {};
+  const hasMatchingDiffPluginCode = Object.keys(diffPlugins)
+    .some((pluginCode: string) => pluginCode === (plugin.type || plugin.code));
+  return hasMatchingDiffMapKey || hasMatchingDiffPluginCode;
 };
 
 // 网关标签

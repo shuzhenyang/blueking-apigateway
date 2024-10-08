@@ -38,7 +38,7 @@
           </div>
         </template>
         <template #content>
-          <BackConfig ref="backConfigRef" :detail="resourceDetail"></BackConfig>
+          <BackConfig ref="backConfigRef" :detail="resourceDetail" @service-init="setupFormDataBack"></BackConfig>
         </template>
       </bk-collapse-panel>
     </bk-collapse>
@@ -114,11 +114,33 @@ const getResourceDetails = async () => {
 
 // 提交
 const handleSubmit = async () => {
-  await Promise.all([
-    baseInfoRef.value?.validate(),
-    frontConfigRef.value?.validate(),
-    backConfigRef.value?.validate(),
-  ]);
+  try {
+    // 校验表单数据
+    await Promise.all([
+      baseInfoRef.value?.validate(),
+      frontConfigRef.value?.validate(),
+      backConfigRef.value?.validate(),
+    ]);
+  } catch {
+    // 校验失败，获取非法表单项的 #id
+    const invalidFormElementIds = [
+      ...baseInfoRef.value?.invalidFormElementIds,
+      ...frontConfigRef.value?.invalidFormElementIds,
+      ...backConfigRef.value?.invalidFormElementIds,
+    ];
+    if (invalidFormElementIds.length) {
+      // 根据表单项 #id 获取元素，滚动到视图中间，并 focus
+      const el = document.querySelector(`#${invalidFormElementIds[0]}`);
+      if (el) {
+        el.scrollIntoView({
+          behavior: 'smooth', // 平滑滚动
+          block: 'center',
+        });
+        el.focus?.();
+      }
+    }
+    return;
+  }
   const baseFormData = baseInfoRef.value.formData;
   const frontFormData = frontConfigRef.value.frontConfigData;
   const backFormData = backConfigRef.value.backConfigData;
@@ -167,17 +189,24 @@ const handleCancel = async () => {
   }
 };
 
-onMounted(async () => {
-  await init();
+// 设置离开界面时检查是否有修改过表单时用的数据
+// 页面加载完会默认执行一次，等 back-config 初始化数据之后会再执行一次，避免了错误判断表单是否已修改过的bug
+const setupFormDataBack = () => {
   formDataBack.value = {
     baseFormData: baseInfoRef.value?.formData,
     frontFormData: frontConfigRef.value?.frontConfigData,
     backFormData: backConfigRef.value?.backConfigData,
   };
-  mitt.emit('on-leave-page-change', formDataBack.value);
+
   nextTick(() => {
+    mitt.emit('on-leave-page-change', formDataBack.value);
     initSidebarFormData(formDataBack.value);
   });
+};
+
+onMounted(async () => {
+  await init();
+  setupFormDataBack();
 });
 </script>
 <style lang="scss" scoped>

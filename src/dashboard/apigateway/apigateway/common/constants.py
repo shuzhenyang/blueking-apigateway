@@ -16,18 +16,11 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-from typing import Any, Dict, Optional
 
 from blue_krill.data_types.enum import EnumField, StructuredEnum
 
 CACHE_TIME_5_MINUTES = 5 * 60
 CACHE_TIME_24_HOURS = 24 * 3600
-
-
-class ExtendEnumField(EnumField):
-    def __init__(self, *args, metadata: Optional[Dict[str, Any]] = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.metadata = metadata or {}
 
 
 CACHE_MAXSIZE = 2000
@@ -51,3 +44,7 @@ class LanguageCodeEnum(StructuredEnum):
 # )
 
 HEADER_BKAPI_AUTHORIZATION = "X-Bkapi-Authorization"
+
+
+# release gateway interval
+RELEASE_GATEWAY_INTERVAL_SECOND = 15

@@ -93,6 +93,7 @@
             <ag-dropdown
               :text="t('导入')"
               :dropdown-list="importDropData"
+              v-show="!showBatch"
               @on-change="handleImport"></ag-dropdown>
             <ag-dropdown
               :text="t('导出')"
@@ -118,7 +119,7 @@
                 class="operate-btn"
                 @click="handleCreateResourceVersion"
                 v-bk-tooltips="{
-                  content: t('资源有更新，可生产新版本'),
+                  content: t('资源有更新，可生成新版本'),
                 }"
               >
                 <i class="apigateway-icon icon-ag-version"></i>
@@ -148,13 +149,13 @@
             {{ t('退出批量编辑') }}
           </bk-button>
         </div>
-        <div class="flex-1 flex-row justify-content-end">
+        <div class="search-select-wrap">
           <bk-search-select
             v-show="!isDetail"
             v-model="searchValue"
             :data="searchData"
             unique-select
-            style="width: 450px; background:#fff"
+            style="width: 100%; background:#fff"
             :placeholder="t('请输入资源名称或选择条件搜索, 按Enter确认')"
             :value-split-code="'+'"
           />
@@ -179,7 +180,7 @@
             :max-height="660"
             remote-pagination
             :pagination="pagination"
-            :key="tableDataKey"
+            row-key="id"
             :show-overflow-tooltip="true"
             @page-limit-change="handlePageSizeChange"
             @page-value-change="handlePageChange"
@@ -471,6 +472,7 @@
             <div class="edit-labels-container">
               <bk-switcher
                 v-model="batchEditData.isUpdateLabels"
+                @change="handleUpdateLabelsChange"
                 theme="primary"
               />
               <SelectCheckBox
@@ -579,7 +581,7 @@ import PluginManage from '@/views/components/plugin-manage/index.vue';
 import ResourcesDoc from '@/views/components/resources-doc/index.vue';
 import TableEmpty from '@/components/table-empty.vue';
 // import RenderCustomColumn from '@/components/custom-table-header-filter';
-import ResourceSettingTopBar from '@/components/resource-setting-top-bar.vue';
+import ResourceSettingTopBar from '@/views/resource/setting/comps/resource-setting-top-bar.vue';
 import mitt from '@/common/event-bus';
 import { IDialog, IDropList, MethodsEnum } from '@/types';
 import { is24HoursAgo } from '@/common/util';
@@ -796,9 +798,6 @@ const handleMethodFilter = () => true;
 
 // const curSelectMethod = ref('ALL');
 
-// const tableKey =  ref(-1);
-const tableDataKey = ref(-1);
-
 // const renderMethodsLabel = () => {
 //   return h('div', { class: 'resource-setting-custom-label' }, [
 //     h(
@@ -846,7 +845,6 @@ const labelsList = computed(() => {
   if (!labelsData?.value.length) {
     return [];
   }
-  tableDataKey.value = +new Date();
   return labelsData.value?.map((item: any) => {
     return {
       text: item.name,
@@ -1072,7 +1070,6 @@ const handleShowBatch = () => {
 const handleOutBatch = () => {
   showBatch.value = false;
   selections.value = [];
-  tableDataKey.value = +new Date();
 };
 
 // 版本对比
@@ -1177,6 +1174,7 @@ const handleBatchConfirm = async () => {
   }
   dialogData.isShow = false;
   batchEditData.value.isUpdateLabels = false;
+  batchEditData.value.labelIds = [];
   Message({
     message: t(`${isBatchDelete.value ? '删除' : '编辑'}成功`),
     theme: 'success',
@@ -1298,6 +1296,12 @@ const handleUpdateLabelSuccess = () => {
 const handleDeleteSuccess = () => {
   getList();
   handleShowList();
+};
+
+const handleUpdateLabelsChange = (v: Boolean) => {
+  if (!v) {
+    batchEditData.value.labelIds = [];
+  }
 };
 
 const handleRowClass = (v: any) => {
@@ -1445,12 +1449,10 @@ watch(
 
       if (filter?.length && (choose?.join(',') !== filter?.join(','))) { // 值有变化时，同步给表头筛选
         chooseMethod.value = filterData.value?.method?.split(',');
-        tableDataKey.value = +new Date();
       }
 
       if (!filter?.length && chooseMethod.value?.length) { // 清空筛选时，同步给表头筛选
         chooseMethod.value = [];
-        tableDataKey.value = +new Date();
       }
     });
 
@@ -1607,8 +1609,15 @@ onBeforeMount(() => {
     }
   }
   .operate{
+    gap: 8px;
+
     &-input{
       width: 450px;
+    }
+
+    .search-select-wrap {
+      flex-grow: 1;
+      max-width: 450px;
     }
   }
   .left-wraper{

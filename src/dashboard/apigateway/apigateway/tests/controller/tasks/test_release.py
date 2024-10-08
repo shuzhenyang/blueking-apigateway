@@ -19,74 +19,19 @@ import pytest
 from ddf import G
 
 from apigateway.controller import tasks
-from apigateway.core.constants import ReleaseStatusEnum
-from apigateway.core.models import Gateway, MicroGatewayReleaseHistory, ReleaseHistory
+from apigateway.controller.tasks.release import clear_unreleased_resource
+from apigateway.core.models import (
+    Gateway,
+    Release,
+    ReleasedResource,
+    ReleaseHistory,
+    ResourceVersion,
+)
 
 
 @pytest.fixture()
 def release_history():
     return G(ReleaseHistory)
-
-
-@pytest.fixture()
-def micro_gateway_release_history():
-    return G(MicroGatewayReleaseHistory)
-
-
-class TestReleaseGaterwayByHelm:
-    @pytest.fixture(autouse=True)
-    def setup(self, mocker):
-        self.distributor = mocker.MagicMock()
-        self.distributor_factory = mocker.patch("apigateway.controller.tasks.release.HelmDistributor")
-        self.distributor_factory.return_value = self.distributor
-
-        self.chart_helper = mocker.MagicMock()
-        self.chart_helper_factory = mocker.patch("apigateway.controller.tasks.release.ChartHelper")
-        self.chart_helper_factory.return_value = self.chart_helper
-
-        self.release_helper = mocker.MagicMock()
-        self.release_helper_factory = mocker.patch("apigateway.controller.tasks.release.ReleaseHelper")
-        self.release_helper_factory.return_value = self.release_helper
-
-    def test_micro_gateway_not_exist(self, edge_release, micro_gateway_release_history):
-        edge_release.stage.micro_gateway.delete()
-
-        assert not tasks.release_gateway_by_helm(
-            edge_release.id, micro_gateway_release_history.id, "user", {"bk_ticket": "access_token"}
-        )
-
-    def test_success(self, mocker, edge_release, micro_gateway, micro_gateway_release_history):
-        self.distributor.distribute.return_value = True, ""
-
-        username = "user"
-        access_token = "access_token"
-        assert tasks.release_gateway_by_helm(
-            edge_release.id, micro_gateway_release_history.id, username, {"bk_ticket": access_token}
-        )
-
-        self.chart_helper_factory.assert_called_once_with(user_credentials={"bk_ticket": access_token})
-        self.release_helper_factory.assert_called_once_with(user_credentials={"bk_ticket": access_token})
-        self.distributor_factory.assert_called_once_with(
-            chart_helper=self.chart_helper,
-            release_helper=self.release_helper,
-            generate_chart=True,
-            operator=username,
-        )
-
-        micro_gateway_release_history.refresh_from_db()
-        micro_gateway_release_history.status = ReleaseStatusEnum.SUCCESS.value
-
-    def test_fail(self, mocker, edge_release, micro_gateway, micro_gateway_release_history):
-        self.distributor.distribute.return_value = False, "Fail"
-
-        username = "user"
-        access_token = "access_token"
-        assert not tasks.release_gateway_by_helm(
-            edge_release.id, micro_gateway_release_history.id, username, {"bk_ticket": access_token}
-        )
-
-        micro_gateway_release_history.refresh_from_db()
-        micro_gateway_release_history.status = ReleaseStatusEnum.FAILURE.value
 
 
 class TestReleaseGatewayByRegistry:
@@ -97,48 +42,44 @@ class TestReleaseGatewayByRegistry:
             "apigateway.controller.tasks.release.EtcdDistributor", return_value=self.distributor
         )
 
-    def test_success_for_shared_gateway(
-        self, mocker, edge_release, micro_gateway, micro_gateway_release_history, release_history
-    ):
+    def test_success_for_shared_gateway(self, mocker, edge_release, micro_gateway, release_history):
         edge_release.gateway = G(Gateway)
         edge_release.save()
 
         self.distributor.distribute.return_value = True, ""
 
-        assert tasks.release_gateway_by_registry(
-            micro_gateway.id, micro_gateway_release_history.id, release_history.id
-        )
+        assert tasks.release_gateway_by_registry(micro_gateway.id, release_history.id)
 
         self.distributor_factory.assert_called_once_with(include_gateway_global_config=False)
 
-        micro_gateway_release_history.refresh_from_db()
-        micro_gateway_release_history.status = ReleaseStatusEnum.SUCCESS.value
-
-    def test_success_for_owned_gateway(
-        self, mocker, edge_release, micro_gateway, micro_gateway_release_history, release_history
-    ):
+    def test_success_for_owned_gateway(self, mocker, edge_release, micro_gateway, release_history):
         edge_release.gateway = micro_gateway.gateway
         edge_release.save()
 
         self.distributor.distribute.return_value = True, ""
 
-        assert tasks.release_gateway_by_registry(
-            micro_gateway.id, micro_gateway_release_history.id, release_history.id
-        )
+        assert tasks.release_gateway_by_registry(micro_gateway.id, release_history.id)
 
         self.distributor_factory.assert_called_once_with(include_gateway_global_config=False)
 
-        micro_gateway_release_history.refresh_from_db()
-        micro_gateway_release_history.status = ReleaseStatusEnum.SUCCESS.value
-
-    def test_fail(self, mocker, edge_release, micro_gateway, micro_gateway_release_history, release_history):
+    def test_fail(self, mocker, edge_release, micro_gateway, release_history):
         self.distributor.distribute.return_value = False, "Fail"
 
         assert not tasks.release_gateway_by_registry(
             micro_gateway.id,
-            micro_gateway_release_history.id,
             release_history.id,
         )
 
-        micro_gateway_release_history.refresh_from_db()
-        micro_gateway_release_history.status = ReleaseStatusEnum.FAILURE.value
+    def test_clear_unreleased_resource(self, fake_gateway, fake_stage):
+        rv1 = G(ResourceVersion, gateway=fake_gateway)
+        rv2 = G(ResourceVersion, gateway=fake_gateway)
+
+        G(Release, gateway=fake_gateway, stage=fake_stage, resource_version=rv1)
+
+        G(ReleasedResource, gateway=fake_gateway, resource_version_id=rv1.id, data={})
+        G(ReleasedResource, gateway=fake_gateway, resource_version_id=rv2.id, data={})
+
+        clear_unreleased_resource(fake_gateway.id)
+
+        assert ReleasedResource.objects.filter(resource_version_id=rv1.id).exists()
+        assert not ReleasedResource.objects.filter(resource_version_id=rv2.id).exists()

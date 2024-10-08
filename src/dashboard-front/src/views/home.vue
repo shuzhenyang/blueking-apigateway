@@ -140,7 +140,7 @@
       </div>
       Copyright © 2012-{{curYear}} Tencent BlueKing. All Rights Reserved. V{{GLOBAL_CONFIG.FOOT_INFO.VERSION}} -->
       <!-- eslint-disable-next-line vue/no-v-html -->
-      <p class="contact" v-html="contact"></p>
+      <p class="contact" v-dompurify-html="contact"></p>
       <p class="copyright">{{copyright}}</p>
     </div>
 
@@ -286,7 +286,7 @@ const rules = {
         const reg = /^[a-z][a-z0-9-]*$/;
         return reg.test(value);
       },
-      message: '由小写字母、数字、连接符（-）组成，首字符必须是字母，长度大于3小于30个字符',
+      message: t('由小写字母、数字、连接符（-）组成，首字符必须是小写字母，长度大于3小于30个字符'),
       trigger: 'change',
     },
   ],
@@ -495,6 +495,9 @@ watch(
     }
   }
   .select-cls {
+    flex-shrink: 0;
+    width: 126px;
+
     :deep(.bk-select-trigger) {
       background-color: #fff;
     }
