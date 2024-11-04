@@ -25,20 +25,16 @@
                   :title="system.description"
                   @click="handleSystemChange(system)"
                 >
-                  <span class="f14">{{ system.description }}</span>
+                  <span class="f14">
+                    <span class="ag-strong fw-normal mr5">{{ system.description }}</span>
+                    ({{ system.name }})
+                  </span>
                 </bk-dropdown-item>
               </bk-dropdown-menu>
             </template>
           </bk-dropdown>
         </aside>
       </main>
-      <!--  展示右侧网关/组件基础信息的开关  -->
-      <aside
-        class="detail-toggle"
-        :class="{ 'active': isAsideVisible }"
-        @click="toggleAsideVisible()"
-      ><i class="apigateway-icon icon-ag-document f14"></i>
-      </aside>
     </header>
     <!--  正文  -->
     <main class="page-content">
@@ -51,7 +47,6 @@
         :max="480"
         :min="293"
         style="flex-grow: 1;"
-        @collapse-change="updateIsRightAsideCollapsed"
       >
         <template #main>
           <bk-resize-layout
@@ -105,19 +100,33 @@
                   <!--  API 列表  -->
                   <main class="resource-list custom-scroll-bar">
                     <template v-if="filteredApiList.length">
-                      <article
-                        class="resource-item"
-                        v-for="api in filteredApiList"
-                        :key="api.id"
-                        :class="{ active: api.id === curApi?.id }"
-                        @click="handleApiClick(api.id)"
-                      >
-                        <!-- eslint-disable-next-line vue/no-v-html -->
-                        <header class="res-item-name" v-dompurify-html="getHighlightedHtml(api.name)" v-bk-overflow-tips
-                        ></header>
-                        <!-- eslint-disable-next-line vue/no-v-html -->
-                        <main class="res-item-desc" v-dompurify-html="getHighlightedHtml(api.description)"></main>
-                      </article>
+                      <bk-collapse class="api-group-collapse" v-model="activeGroupPanelNames">
+                        <bk-collapse-panel v-for="group of apiGroupList" :key="group.id" :name="group.name">
+                          <template #header>
+                            <div class="api-group-collapse-header">
+                              <angle-up-fill
+                                class="menu-header-icon"
+                                :class="{ fold: !activeGroupPanelNames.includes(group.name) }"
+                              />
+                              <div class="api-group-collapse-title">{{ group.name }}</div>
+                            </div>
+                          </template>
+                          <template #content>
+                            <article
+                              class="resource-item"
+                              v-for="api in group.apiList"
+                              :key="api.id"
+                              :class="{ active: api.id === curApi?.id }"
+                              @click="handleApiClick(api.id)"
+                            >
+                              <header
+                                class="res-item-name" v-dompurify-html="getHighlightedHtml(api.name)" v-bk-overflow-tips
+                              ></header>
+                              <main class="res-item-desc" v-dompurify-html="getHighlightedHtml(api.description)"></main>
+                            </article>
+                          </template>
+                        </bk-collapse-panel>
+                      </bk-collapse>
                     </template>
                     <template v-else-if="keyword">
                       <TableEmpty
@@ -151,8 +160,7 @@
               <DocDetailSideContent
                 :basics="curTargetBasics"
                 :sdks="sdks"
-                @lang-change="handleLangChange"
-              ></DocDetailSideContent>
+              />
             </main>
           </aside>
         </template>
@@ -166,10 +174,10 @@
 <script lang="ts" setup>
 import {
   computed,
-  nextTick,
   onBeforeMount,
   provide,
   ref,
+  watch,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
@@ -179,7 +187,6 @@ import {
 import {
   getApigwResourceDocDocs,
   getApigwResourcesDocs,
-  getApigwSDKDocs,
   getApigwStagesDocs,
   getComponenSystemDetail,
   getComponentSystemList,
@@ -198,7 +205,6 @@ import {
   IStage,
   IBoard,
   ISystemBasics,
-  LanguageType,
   TabType,
   ISystem,
 } from '@/views/apiDocs/types';
@@ -208,6 +214,8 @@ import DocDetailMainContent from '@/views/apiDocs/components/doc-detail-main-con
 import DocDetailSideContent from '@/views/apiDocs/components/doc-detail-side-content.vue';
 import SdkInstructionSlider from '@/views/apiDocs/components/sdk-instruction-slider.vue';
 import TableEmpty from '@/components/table-empty.vue';
+import { AngleUpFill } from 'bkui-vue/lib/icon';
+import hljs from 'highlight.js';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -234,10 +242,9 @@ const sdks = ref<IApiGatewaySdkDoc[] & IComponentSdk[]>([]);
 const isSdkInstructionSliderShow = ref(false);
 const navList = ref<INavItem[]>([]);
 const outerResizeLayoutRef = ref<InstanceType<typeof ResizeLayout> | null>(null);
-// 记录右栏折叠状态
-const isAsideVisible = ref(true);
 const isLoading = ref(false);
 const keyword = ref('');  // 筛选器输入框的搜索关键字
+const activeGroupPanelNames = ref<string[]>([]);  // API分类 collapse 展开的 panel
 
 const searchPlaceholder = computed(() => {
   return t(
@@ -250,7 +257,32 @@ const searchPlaceholder = computed(() => {
 });
 
 const filteredApiList = computed(() => {
-  return apiList.value.filter(res => res.name.includes(keyword.value) || res.description.includes(keyword.value));
+  const regex = new RegExp(keyword.value, 'i');
+  return apiList.value.filter(api => regex.test(api.name) || regex.test(api.description));
+});
+
+// API 分类列表
+const apiGroupList = computed(() => {
+  return filteredApiList.value.reduce((groupList, api) => {
+    const { id, name } = api.labels[0];
+    const group = groupList.find(item => item.id === id);
+
+    if (group) {
+      group.apiList.push(api);
+    } else {
+      groupList.push({
+        id,
+        name,
+        apiList: [api],
+      });
+    }
+    return groupList;
+  }, [] as { id: number, name: string, apiList: typeof apiList.value }[]);
+});
+
+// 分类列表变化时更新 collapse 展开状态
+watch(apiGroupList, () => {
+  activeGroupPanelNames.value = apiGroupList.value.map(item => item.name);
 });
 
 const allSystemList = computed(() => {
@@ -263,7 +295,9 @@ const allSystemList = computed(() => {
 const fetchTargetBasics = async () => {
   try {
     if (curTab.value === 'apigw') {
-      curTargetBasics.value = await getGatewaysDetailsDocs(curTargetName.value);
+      const { sdks: sdksResponse, ...restResponse } = await getGatewaysDetailsDocs(curTargetName.value);
+      curTargetBasics.value = restResponse;
+      sdks.value = sdksResponse;
     } else if (curTab.value === 'component') {
       curTargetBasics.value = await getComponenSystemDetail(board.value, curTargetName.value);
     }
@@ -272,26 +306,16 @@ const fetchTargetBasics = async () => {
   }
 };
 
-const fetchSdks = async (language: LanguageType = 'python') => {
+const fetchEsbSdks = async () => {
+  if (curTab.value !== 'component') {
+    return;
+  }
   try {
-    if (curTab.value === 'apigw') {
-      const query = {
-        limit: 10000,
-        offset: 0,
-        language,
-      };
-      sdks.value = await getApigwSDKDocs(curTargetName.value, query);
-    } else if (curTab.value === 'component') {
-      const res = await getESBSDKDetail(board.value, { language });
-      sdks.value = res ? [{ language, ...res }] : [];
-    }
+    const response = await getESBSDKDetail(board.value, { language: 'python' });
+    sdks.value = [{ language: 'python', ...response }];
   } catch {
     sdks.value = [];
   }
-};
-
-const handleLangChange = async (language: LanguageType) => {
-  await fetchSdks(language);
 };
 
 const fetchApigwStages = async () => {
@@ -323,6 +347,13 @@ const fetchApiList = async () => {
       res = await getSystemAPIList(board.value, curTargetName.value) as (IResource & IComponent)[];
     }
     apiList.value = res ?? [];
+    // 为 api 添加默认分类
+    apiList.value.forEach((api) => {
+      if (!api.labels?.length) {
+        api.labels = [{ id: -1, name: t('默认分类') }];
+      }
+    });
+
     if (curComponentApiName.value) {
       curApi.value = apiList.value.find(api => api.name === curComponentApiName.value) ?? null;
     } else {
@@ -349,6 +380,16 @@ const md = new MarkdownIt({
   linkify: false,
   html: true,
   breaks: true,
+  highlight(str: string, lang: string) {
+    try {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
+      }
+    } catch {
+      return str;
+    }
+    return str;
+  },
 });
 
 // markdown 解析器自定义规则，用于给 ### 标题添加 id，导航要用
@@ -363,8 +404,13 @@ md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
       headingText = `${headingText}${count}`;
       count = count + 1;
     }
-    curToken.attrPush(['id', headingText]);
-    navList.value.push({ id: headingText, name: headingText });
+    // 给标题元素ID一个前缀，便于导航目录识别
+    const idPrefix = 'doc-heading-';
+    curToken.attrPush([
+      'id',
+      `${idPrefix}${headingText}`,
+    ]);
+    navList.value.push({ id: `${idPrefix}${headingText}`, name: headingText });
   }
   return self.renderToken(tokens, idx, options);
 };
@@ -395,7 +441,7 @@ const handleStageChange = async () => {
 
 const getHighlightedHtml = (value: string) => {
   if (keyword.value) {
-    return value.replace(new RegExp(`(${keyword.value})`), '<em class="ag-keyword">$1</em>');
+    return value.replace(new RegExp(`(${keyword.value})`, 'i'), '<em class="ag-keyword">$1</em>');
   }
   return value;
 };
@@ -423,22 +469,12 @@ const init = async () => {
   }
   await Promise.all([
     fetchTargetBasics(),
-    fetchSdks(),
+    fetchEsbSdks(),
     fetchApiList(),
   ]);
   if (curTab.value === 'component') {
     await fetchBoardList();
   }
-};
-
-const toggleAsideVisible = () => {
-  nextTick(() => {
-    outerResizeLayoutRef.value?.setCollapse(isAsideVisible.value);
-  });
-};
-
-const updateIsRightAsideCollapsed = (collapsed: boolean) => {
-  isAsideVisible.value = !collapsed;
 };
 
 const handleGoBack = () => {
@@ -588,6 +624,107 @@ onBeforeMount(() => {
       height: calc(100vh - 282px);
       overflow-y: scroll;
 
+      .api-group-collapse {
+        max-height: 100%;
+        overflow: auto;
+
+        :deep(.bk-collapse-item) {
+          margin-bottom: 12px;
+        }
+
+        :deep(.icon-angle-right) {
+          display: none;
+        }
+
+        &::-webkit-scrollbar {
+          width: 4px;
+          background-color: lighten(#c4c6cc, 80%);
+        }
+
+        &::-webkit-scrollbar-thumb {
+          height: 5px;
+          border-radius: 2px;
+          background-color: #c4c6cc;
+        }
+
+        .custom-icon {
+          margin: -3px 6px 0 0;
+          font-size: 13px;
+          vertical-align: middle;
+          display: inline-block;
+        }
+
+        .api-group-collapse-header {
+          padding: 4px 6px;
+          display: flex;
+          align-items: center;
+          cursor: pointer;
+
+          .api-group-collapse-title {
+            color: #63656e;
+            margin-left: 4px;
+            font-weight: bold;
+          }
+
+          .menu-header-icon {
+            transition: all .2s;
+            color: #979ba5;
+            font-size: 14px;
+
+            &.fold {
+              transform: rotate(-90deg);
+            }
+          }
+        }
+
+        :deep(.bk-collapse-content) {
+          padding: 2px 0;
+        }
+
+        .component-list {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+
+          > li {
+            font-size: 12px;
+            position: relative;
+            padding: 6px 36px 6px 56px;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+
+            &:hover,
+            &.active {
+              background: #f0f5ff;
+
+              .name,
+              .label {
+                color: #3a84ff;
+              }
+            }
+          }
+
+          .name {
+            color: #63656e;
+            font-weight: 700;
+          }
+
+          .label {
+            color: #979ba5;
+          }
+
+          .name,
+          .label {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            line-height: 20px;
+          }
+        }
+      }
+
       .resource-item {
         padding-left: 24px;
         height: 52px;
@@ -641,19 +778,24 @@ onBeforeMount(() => {
   }
 
   // 去掉左侧伸缩栏的拉伸线
-  :deep(.bk-resize-layout-left>.bk-resize-layout-aside) {
+  :deep(.bk-resize-layout-left > .bk-resize-layout-aside) {
     padding-right: 8px;
     border-right: none;
   }
 
   // 去掉右侧伸缩栏的拉伸线
-  :deep(.bk-resize-layout-right>.bk-resize-layout-aside) {
+  :deep(.bk-resize-layout-right > .bk-resize-layout-aside) {
     border-left: none;
+    transition: none !important;
   }
 
   // 隐藏的折叠按钮
   :deep(.bk-resize-layout > .bk-resize-layout-aside .bk-resize-collapse) {
-    display: none !important;
+    // 避免折叠按钮溢出制造横向滚动条
+    svg {
+      width: 16px !important;
+      height: 16px !important;
+    }
   }
 }
 

@@ -177,7 +177,6 @@
           <bk-table
             class="table-layout"
             :data="tableData"
-            :max-height="660"
             remote-pagination
             :pagination="pagination"
             row-key="id"
@@ -348,7 +347,7 @@
 
                 <bk-pop-confirm
                   :title="t('确认删除资源{resourceName}？', { resourceName: data?.name || '' })"
-                  content="删除操作无法撤回，请谨慎操作！"
+                  :content="t('删除操作无法撤回，请谨慎操作')"
                   width="288"
                   trigger="click"
                   @confirm="handleDeleteResource(data.id)">
@@ -561,7 +560,10 @@
 import { reactive, ref, watch, onMounted, onBeforeMount, shallowRef, h, computed, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter, useRoute } from 'vue-router';
-import { cloneDeep, differenceBy } from 'lodash';
+import {
+  cloneDeep,
+  differenceBy,
+} from 'lodash';
 import { Message } from 'bkui-vue';
 
 import { useQueryList, useSelection } from '@/hooks';
@@ -854,8 +856,7 @@ const labelsList = computed(() => {
 });
 
 // 当前视口高度能展示最多多少条表格数据
-const maxTableLimit = ref(10);
-maxTableLimit.value = useMaxTableLimit();
+const maxTableLimit = useMaxTableLimit();
 
 // 列表hooks
 const {
@@ -865,12 +866,10 @@ const {
   handlePageChange,
   handlePageSizeChange,
   getList,
-} = useQueryList(getResourceListData, filterData, 0, true);
-
-// 注意，pagination 的 limit 必须在 limitList 里才能生效
-// 所以要先放进 limitList 里
-pagination.value.limitList.unshift(maxTableLimit.value);
-pagination.value.limit = maxTableLimit.value;
+} = useQueryList(getResourceListData, filterData, 0, false, {
+  limitList: [maxTableLimit, 10, 20, 50, 100],
+  limit: maxTableLimit,
+});
 
 // checkbox hooks
 const {
@@ -1075,8 +1074,12 @@ const handleOutBatch = () => {
 // 版本对比
 const handleShowDiff = async () => {
   try {
-    const res = await getResourceVersionsList(props.apigwId, { offset: 0, limit: 999 });
-    diffSourceId.value = res.results[0]?.id || '';
+    const response = await getResourceVersionsList(props.apigwId, { offset: 0, limit: 10 });
+    if (!response.results.length) {
+      diffSourceId.value = 'current';
+    } else {
+      diffSourceId.value = response.results[0]?.id || '';
+    }
     diffSidesliderConf.width = window.innerWidth <= 1280 ? 1040 : 1280;
     diffSidesliderConf.isShow = true;
   } catch (e) {
@@ -1085,7 +1088,6 @@ const handleShowDiff = async () => {
       theme: 'error',
       width: 'auto',
     });
-    console.log(e);
   }
 };
 
@@ -1260,6 +1262,12 @@ const handleEditLabel = (data: any) => {
 
 // 生成版本功能
 const handleCreateResourceVersion = async () => {
+  const response = await getResourceVersionsList(props.apigwId, { offset: 0, limit: 10 });
+  if (!response.results.length) {
+    diffSourceId.value = 'current';
+  } else {
+    diffSourceId.value = response.results[0]?.id || '';
+  }
   versionSidesliderRef.value.showReleaseSideslider();
 };
 
@@ -1542,7 +1550,7 @@ onMounted(() => {
   dragTwoColDiv('resourceId', 'resourceLf', 'resourceLine'/* , 'resourceRg' */);
   // 监听其他组件是否触发了资源更新，获取最新的列表数据
   mitt.on('on-update-plugin', () => {
-    pagination.value = Object.assign(pagination.value, { current: 0, limit: maxTableLimit.value });
+    pagination.value = Object.assign(pagination.value, { current: 0, limit: maxTableLimit });
     getList();
     handleShowVersion();
   });

@@ -16,7 +16,6 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-from typing import Optional
 
 from django.http import Http404
 from django.utils.decorators import method_decorator
@@ -24,11 +23,9 @@ from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
 from apigateway.apis.open.permissions import (
-    OpenAPIGatewayIdPermission,
     OpenAPIGatewayNamePermission,
 )
 from apigateway.apis.open.released import serializers
-from apigateway.biz.resource_label import ResourceLabelHandler
 from apigateway.biz.resource_url import ResourceURLHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.core.models import Release, ReleasedResource
@@ -40,14 +37,14 @@ from apigateway.utils.responses import V1OKJsonResponse
     name="get",
     decorator=swagger_auto_schema(
         responses={status.HTTP_200_OK: serializers.ReleasedResourceOutputSLZ()},
-        tags=["OpenAPI.Resource"],
+        tags=["OpenAPI.V1"],
     ),
 )
 class ReleasedResourceRetrieveApi(generics.RetrieveAPIView):
-    permission_classes = [OpenAPIGatewayIdPermission]
+    permission_classes = [OpenAPIGatewayNamePermission]
 
     serializer_class = serializers.ReleasedResourceOutputSLZ
-    lookup_field = "id"
+    lookup_field = "name"
 
     def get_queryset(self):
         return ReleasedResource.objects.filter(gateway=self.request.gateway)
@@ -70,6 +67,9 @@ class ReleasedResourceRetrieveApi(generics.RetrieveAPIView):
         if not resource or not resource["is_public"]:
             raise Http404
 
+        # 查询资源schema
+        resource["schema"] = ResourceVersionHandler.get_resource_schema(resource_version_id, resource["id"])
+
         return resource
 
     def retrieve(self, request, *args, **kwargs):
@@ -81,43 +81,8 @@ class ReleasedResourceRetrieveApi(generics.RetrieveAPIView):
 @method_decorator(
     name="get",
     decorator=swagger_auto_schema(
-        responses={status.HTTP_200_OK: serializers.ReleasedResourceListV1OutputSLZ(many=True)},
-        tags=["OpenAPI.Resource"],
-    ),
-)
-class ReleasedResourceListApi(generics.ListAPIView):
-    permission_classes = [OpenAPIGatewayIdPermission]
-    lookup_field = "id"
-
-    def get_queryset(self):
-        return ReleasedResource.objects.filter(gateway=self.request.gateway)
-
-    def list(self, request, stage_name: Optional[str] = None, *args, **kwargs):
-        if not request.gateway.is_active_and_public:
-            raise Http404
-
-        resources = ResourceVersionHandler.get_released_public_resources(
-            request.gateway.id,
-            stage_name=stage_name,
-        )
-        resource_ids = [resource["id"] for resource in resources]
-        paginator = LimitOffsetPaginator(count=len(resources), offset=0, limit=len(resources))
-
-        slz = serializers.ReleasedResourceListV1OutputSLZ(
-            resources,
-            many=True,
-            context={
-                "resource_labels": ResourceLabelHandler.get_labels(resource_ids),
-            },
-        )
-        return V1OKJsonResponse("OK", data=paginator.get_paginated_data(slz.data))
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
         responses={status.HTTP_200_OK: serializers.ReleasedResourceListV1InputSLZ(many=True)},
-        tags=["OpenAPI.Resource"],
+        tags=["OpenAPI.V1"],
     ),
 )
 class ReleasedResourceListByGatewayNameApi(generics.ListAPIView):

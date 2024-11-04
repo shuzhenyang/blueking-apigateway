@@ -24,7 +24,9 @@
             <div class="response-status flex" @click="stopPropa" v-show="activeIndex?.includes(1)">
               <div class="response-status-item">
                 <span class="label">Status：</span>
-                <span class="value">{{ data?.status_code || '--' }}</span>
+                <span :class="statusColor">
+                  {{ data?.status_code || '--' }}
+                </span>
               </div>
               <div class="response-status-item">
                 <span class="label">Time：</span>
@@ -133,7 +135,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, watch } from 'vue';
+import { ref, watch, computed, nextTick } from 'vue';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
 import { useI18n } from 'vue-i18n';
 import editorMonaco from '@/components/ag-editor.vue';
@@ -188,22 +190,37 @@ const editorText = ref<any>('');
 const resourceEditorRef: any = ref<InstanceType<typeof editorMonaco>>();
 const data = ref<any>({});
 
+const statusColor = computed(() => {
+  let color = 'value';
+  const code = String(data.value?.status_code);
+  if (code?.startsWith('4')) {
+    color = 'warning';
+  }
+  if (code?.startsWith('5')) {
+    color = 'error';
+  }
+
+  return color;
+});
+
 const stopPropa = (e: Event) => {
   e?.stopPropagation();
 };
 
 const formatBody = () => {
-  resourceEditorRef.value?.updateOptions({
-    readOnly: false,
-  });
-  setTimeout(() => {
-    resourceEditorRef.value?.handleFormat();
-  });
-  setTimeout(() => {
+  nextTick(() => {
     resourceEditorRef.value?.updateOptions({
-      readOnly: true,
+      readOnly: false,
     });
-  }, 200);
+    setTimeout(() => {
+      resourceEditorRef.value?.handleFormat();
+    });
+    setTimeout(() => {
+      resourceEditorRef.value?.updateOptions({
+        readOnly: true,
+      });
+    }, 200);
+  });
 };
 
 const handleBodyTypeChange = (type: string) => {
@@ -323,6 +340,12 @@ watch(
         }
         .value {
           color: #1CAB88;
+        }
+        .warning {
+          color: #FF9C01;
+        }
+        .error {
+          color: #EA3636;
         }
       }
     }

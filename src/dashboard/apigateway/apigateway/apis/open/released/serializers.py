@@ -38,17 +38,7 @@ class ReleasedResourceOutputSLZ(serializers.Serializer):
     name = serializers.CharField(read_only=True)
     method = serializers.CharField(read_only=True)
     path = serializers.CharField(read_only=True)
-
-
-class ReleasedResourceListV1OutputSLZ(ResourceV1SLZ):
-    app_verified_required = serializers.BooleanField()
-    resource_perm_required = serializers.BooleanField()
-    user_verified_required = serializers.BooleanField()
-    labels = serializers.SerializerMethodField()
-    description = SerializerTranslatedField(translated_fields={"en": "description_en"})
-
-    def get_labels(self, obj):
-        return self.context["resource_labels"].get(obj["id"], [])
+    schema = serializers.DictField(help_text="参数协议")
 
 
 class ReleasedResourceListV1InputSLZ(ResourceV1SLZ):

@@ -16,7 +16,6 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-import math
 
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
@@ -26,57 +25,28 @@ from apigateway.apps.metrics.constants import MetricsInstantEnum, MetricsRangeEn
 from apigateway.apps.metrics.prometheus.dimension import MetricsInstantFactory, MetricsRangeFactory
 from apigateway.core.models import Resource, Stage
 from apigateway.utils.responses import OKJsonResponse
-from apigateway.utils.time import SmartTimeRange
+from apigateway.utils.time import MetricsSmartTimeRange
 
 from .serializers import MetricsQueryInstantInputSLZ, MetricsQueryRangeInputSLZ
 
 
-class MetricsSmartTimeRange(SmartTimeRange):
-    def get_recommended_step(self) -> str:
-        """根据 time_start, time_end，获取推荐的步长"""
-        start, end = self.get_head_and_tail()
-
-        return self._calculate_step(start, end)
-
-    def _calculate_step(self, start: int, end: int) -> str:
-        """
-        :param start: 起始时间戳
-        :param end: 结束时间戳
-        :returns: 推荐步长
-
-        step via the gap of query time
-        1m  <- 1h
-        5m  <- 6h
-        10m <- 12h
-        30m <- 24h
-        1h  <- 72h
-        3h  <- 7d
-        12h <- >7d
-        """
-        step_options = ["1m", "5m", "10m", "30m", "1h", "3h", "12h"]
-
-        gap_minutes = math.ceil((end - start) / 60)
-        if gap_minutes <= 60:
-            index = 0
-        elif gap_minutes <= 360:
-            index = 1
-        elif gap_minutes <= 720:
-            index = 2
-        elif gap_minutes <= 1440:
-            index = 3
-        elif gap_minutes <= 4320:
-            index = 4
-        elif gap_minutes <= 10080:
-            index = 5
-        else:
-            index = 6
-
-        return step_options[index]
-
-
 class QueryRangeApi(generics.ListAPIView):
+
+    @staticmethod
+    def get_series_resource_id_index_map(series):
+        ids_data = {}
+
+        for index in range(len(series)):
+            try:
+                id_ = int(series[index]["target"].split('"')[1].split(".")[2])
+                ids_data[id_] = index
+            except Exception:
+                pass
+
+        return ids_data
+
     @swagger_auto_schema(
-        query_serializer=MetricsQueryRangeInputSLZ,
+        query_serializer=MetricsQueryRangeInputSLZ(),
         responses={status.HTTP_200_OK: ""},
         operation_description="查询 metrics",
         tags=["WebAPI.Metrics"],
@@ -104,9 +74,10 @@ class QueryRangeApi(generics.ListAPIView):
             data.get("time_range"),
         )
         time_start, time_end = smart_time_range.get_head_and_tail()
-        step = smart_time_range.get_recommended_step()
+        step = smart_time_range.get_interval()
 
-        metrics = MetricsRangeFactory.create_metrics(MetricsRangeEnum(data["metrics"]))
+        metrics_name = data["metrics"]
+        metrics = MetricsRangeFactory.create_metrics(MetricsRangeEnum(metrics_name))
 
         data = metrics.query_range(
             gateway_name=request.gateway.name,
@@ -118,12 +89,22 @@ class QueryRangeApi(generics.ListAPIView):
             end=time_end,
             step=step,
         )
+
+        if metrics_name in ["ingress", "egress"]:
+            series = data.get("data", {}).get("series", [])
+            ids_data = self.get_series_resource_id_index_map(series)
+
+            if ids_data:
+                resources = Resource.objects.filter(id__in=ids_data.keys()).values("id", "name")
+                for obj in resources:
+                    series[ids_data[obj["id"]]]["target"] = obj["name"]
+
         return OKJsonResponse(data=data)
 
 
 class QueryInstantApi(generics.ListAPIView):
     @swagger_auto_schema(
-        query_serializer=MetricsQueryInstantInputSLZ,
+        query_serializer=MetricsQueryInstantInputSLZ(),
         responses={status.HTTP_200_OK: ""},
         operation_description="查询 metrics",
         tags=["WebAPI.Metrics"],
@@ -149,7 +130,8 @@ class QueryInstantApi(generics.ListAPIView):
             data.get("time_range"),
         )
         time_start, time_end = smart_time_range.get_head_and_tail()
-        step = smart_time_range.get_recommended_step()
+
+        step = smart_time_range.get_interval()
 
         # 暂时只有总数和健康率，所以总数是必需需要计算的
         metrics = MetricsInstantFactory.create_metrics(MetricsInstantEnum.REQUESTS_TOTAL)
@@ -181,7 +163,9 @@ class QueryInstantApi(generics.ListAPIView):
 
             # 健康率 = 1 - (500 状态码数量 / 请求总数)
             health_rate = 1 - (health_rate_data["instant"] / requests_total_result["instant"])
-            health_rate_result["instant"] = health_rate
+            percent = health_rate * 100
+            # 保留2位小数
+            health_rate_result["instant"] = f"{percent:.2f}"
             return OKJsonResponse(data=health_rate_result)
 
         return OKJsonResponse(data=requests_total_result)

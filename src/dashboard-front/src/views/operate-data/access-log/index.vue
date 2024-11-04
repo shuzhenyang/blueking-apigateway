@@ -58,7 +58,7 @@
                 </bk-form-item>
                 <bk-form-item :label="t('查询语句')" class="ag-form-item-inline">
                   <SearchInput
-                    v-model:modeValue="keyword"
+                    v-model:mode-value="keyword"
                     @search="handleSearch"
                     @choose="handleChoose"
                     class="top-search-input"
@@ -76,7 +76,8 @@
           <funnel class="icon" />
           <span class="title">{{ t('检索项：') }}</span>
           <bk-tag closable v-for="item in searchConditions" :key="item" @close="handleTagClose(item)">
-            {{ item }}
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <span v-html="generateTagContent(item)"></span>
           </bk-tag>
           <bk-button theme="primary" text @click="handleClearSearch">
             {{ t('清除') }}
@@ -113,12 +114,14 @@
               <span class="panel-title">{{ t('日志详情') }}</span>
               <span class="panel-total">
                 {{ t('共') }}
-                <span>{{ table?.list?.length }}</span>
+                <span>{{ pageCount }}</span>
                 {{ t('条') }}
               </span>
-              <span class="download-logs" @click="handleDownload">
-                <i class="apigateway-icon icon-ag-download">
-                </i>
+              <span
+                :class="['download-logs', { 'disabled-logs': pageCount === 0 }]"
+                @click="handleDownload"
+                v-bk-tooltips="{ content: t('检索出的日志条数为 0，不需要下载'), disabled: pageCount !== 0 }">
+                <ag-icon name="download" size="16" />
                 {{ t('下载日志') }}
               </span>
               <bk-alert
@@ -174,17 +177,19 @@
                       </dt>
                       <dd class="value">
 
-                        <span class="respond" v-if="field === 'response_body' && row.status === 200">
+                        <span class="respond" v-if="field === 'response_body' && row.status === '200'">
                           <info-line class="respond-icon" /><span>{{ t('状态码为 200 时不记录响应正文') }}</span>
                         </span>
                         <span v-else>
                           {{ formatValue(row[field], field) }}
                         </span>
 
-                        <span class="opt-btns" v-if="showOpts(field)">
+                        <span class="opt-btns" v-if="row[field]">
                           <copy-shape v-bk-tooltips="t('复制')" @click="handleRowCopy(field, row)" class="opt-copy" />
-                          <enlarge-line v-bk-tooltips="t('添加到本次检索')" @click="handleInclude(field, row)" />
-                          <narrow-line v-bk-tooltips="t('从本次检索中排除')" @click="handleExclude(field, row)" />
+                          <template v-if="showOpts(field)">
+                            <enlarge-line v-bk-tooltips="t('添加到本次检索')" @click="handleInclude(field, row)" />
+                            <narrow-line v-bk-tooltips="t('从本次检索中排除')" @click="handleExclude(field, row)" />
+                          </template>
                         </span>
 
                       </dd>
@@ -222,7 +227,11 @@ import echarts from 'echarts';
 import 'echarts/lib/chart/bar';
 import 'echarts/lib/component/tooltip';
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, markRaw } from 'vue';
-import { merge } from 'lodash';
+import {
+  merge,
+  trim,
+  uniq,
+} from 'lodash';
 import { copy } from '@/common/util';
 import { SearchParamsInterface } from './common/type';
 import { useCommon, useAccessLog } from '@/store';
@@ -244,6 +253,8 @@ import {
   Funnel,
 } from 'bkui-vue/lib/icon';
 import { Message } from 'bkui-vue';
+import { useStorage } from '@vueuse/core';
+import AgIcon from '@/components/ag-icon.vue';
 
 const { t } = i18n.global;
 const { getChartIntervalOption } = userChartIntervalOption();
@@ -251,6 +262,8 @@ const commonStore = useCommon();
 const AccessLogStore = useAccessLog();
 // const globalProperties = useGetGlobalProperties();
 // const { GLOBAL_CONFIG } = globalProperties;
+// 从localStorage 提取搜索历史
+const queryHistory = useStorage('access-log-query-history', []);
 const activeIndex = ref<number[]>([1, 2, 3]);
 const keyword = ref('');
 const chartInstance = ref(null);
@@ -301,6 +314,10 @@ const searchConditions = computed(() => {
     res.push(`${tempArr[0]}!=${tempArr[1]}`);
   });
   return res;
+});
+
+const pageCount = computed(() => {
+  return pagination.value.count;
 });
 
 // const searchUsage = ref({
@@ -427,6 +444,10 @@ const renderChart = (data: Record<string, any>) => {
       feature: {
         dataZoom: {
           show: true,
+          yAxisIndex: 'none',
+          iconStyle: {
+            opacity: 0,
+          },
         },
       },
     },
@@ -434,6 +455,11 @@ const renderChart = (data: Record<string, any>) => {
   const timeDuration = timeline[timeline.length - 1] - timeline[0];
   const intervalOption = getChartIntervalOption(timeDuration, 'time', 'xAxis');
   chartInstance.value.setOption(merge(options, intervalOption));
+  chartInstance.value?.dispatchAction({
+    type: 'takeGlobalCursor',
+    key: 'dataZoomSelect',
+    dataZoomSelectActive: true,
+  });
   chartResize();
 };
 
@@ -637,6 +663,16 @@ const handleTagClose = (item: string) => {
   getSearchData();
 };
 
+const generateTagContent = (item: string) => {
+  if (!item) {
+    return;
+  }
+  if (item.indexOf('!=') !== -1) {
+    return item.replace('!=', '<span class="exclude-equal">!=</span>');
+  }
+  return item.replace('=', '<span class="include-equal">=</span>');
+};
+
 const handleClearSearch = () => {
   includeObj.value = [];
   excludeObj.value = [];
@@ -644,6 +680,9 @@ const handleClearSearch = () => {
 };
 
 const handleDownload = async (e: Event) => {
+  if (pagination.value.count === 0) {
+    return;
+  }
   e.stopPropagation();
   try {
     const { params, path } = getPayload();
@@ -711,6 +750,11 @@ const handleSearch = (value: string) => {
   keyword.value = value;
   searchParams.value.query = keyword.value;
   pagination.value.current = 1;
+  // 若是非空字符串则写入搜索历史
+  if (trim(value) !== '') {
+    queryHistory.value.unshift(value);
+    queryHistory.value = uniq(queryHistory.value).slice(0, 10);
+  }
   getSearchData();
 };
 
@@ -782,6 +826,31 @@ const initData = async () => {
 const initChart = async () => {
   chartInstance.value = markRaw(echarts.init(chartContainer.value));
   window.addEventListener('resize', chartResize);
+
+  chartInstance.value.on('datazoom', (event: {batch: {startValue: number, endValue: number}[]}) => {
+    const { startValue, endValue } = event.batch[0];
+
+    // 获取x轴缩放后的数据范围
+    const zoomedXAxisData = chartInstance.value.getOption().xAxis[0].data.slice(startValue, endValue + 1);
+    const startTime = zoomedXAxisData[0];
+    const endTime = zoomedXAxisData[zoomedXAxisData.length - 1];
+
+    if (startTime === endTime) {
+      dateTimeRange.value = [];
+      shortcutSelectedIndex.value = 1;
+      [datePickerRef.value.shortcut] = [AccessLogStore.datepickerShortcuts[1]];
+
+      chartInstance.value.dispatchAction({
+        type: 'restore',
+      });
+    } else {
+      shortcutSelectedIndex.value = -1;
+      dateTimeRange.value = [new Date(startTime), new Date(endTime)];
+    }
+
+    dateKey.value = String(+new Date());
+    handlePickerChange();
+  });
 };
 
 onMounted(() => {
@@ -829,6 +898,10 @@ onBeforeUnmount(() => {
         .icon-ag-download {
           font-size: 16px;
           margin-right: -4px;
+        }
+        &.disabled-logs {
+          color: #c4c6cc;
+          cursor: not-allowed;
         }
       }
       .panel-title-icon {
@@ -991,12 +1064,15 @@ onBeforeUnmount(() => {
           }
 
           .opt-btns {
-            color: #1768EF;
-            font-size: 18px;
+            color: #979BA5;
+            font-size: 16px;
             padding-top: 3px;
             margin-left: 10px;
+            &:hover {
+              color: #1768EF;
+            }
             .opt-copy {
-              font-size: 16px;
+              font-size: 14px;
             }
             span {
               cursor: pointer;
@@ -1125,5 +1201,17 @@ onBeforeUnmount(() => {
 <style>
 .access-log-popover {
   top: 10px !important;
+}
+.include-equal,
+.exclude-equal {
+  font-weight: bold;
+  font-size: 16px;
+  vertical-align: bottom;
+}
+.exclude-equal {
+  color: #EA3636;
+}
+.include-equal {
+  color: #2DCB56;
 }
 </style>

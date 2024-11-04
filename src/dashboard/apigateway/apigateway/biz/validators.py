@@ -188,7 +188,20 @@ class PublishValidator:
 
     def _validate_stage_backends(self):
         """校验待发布环境的backend配置"""
-        backend_configs = BackendConfig.objects.filter(stage=self.stage)
+        resource_version = self.resource_version
+
+        if resource_version and resource_version.data:
+            backend_ids = list(
+                {
+                    resource["proxy"]["backend_id"]
+                    for resource in resource_version.data
+                    if resource["proxy"].get("backend_id", None)
+                }
+            )
+            backend_configs = BackendConfig.objects.filter(backend_id__in=backend_ids)
+        else:
+            backend_configs = BackendConfig.objects.filter(stage=self.stage)
+
         for backend_config in backend_configs:
             for host in backend_config.config["hosts"]:
                 if not core_constants.HOST_WITHOUT_SCHEME_PATTERN.match(host["host"]):
@@ -261,6 +274,7 @@ class PublishValidator:
 
         if self.resource_version:
             self._validate_resource_version_schema()
+            # FIXME: 这里需要遍历所有的资源版本资源，进行校验，比较损耗性能
             self._validate_stage_vars(self.stage, self.resource_version.id)
 
 

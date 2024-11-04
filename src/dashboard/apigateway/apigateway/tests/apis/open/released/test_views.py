@@ -30,7 +30,7 @@ pytestmark = pytest.mark.django_db
 
 class TestReleasedResourceRetrieveApi:
     @pytest.mark.parametrize(
-        "mocked_resource_version_id, mocked_resource, will_error, expected",
+        "mocked_resource_version_id, mocked_resource,mocked_resource_schema_version, will_error, expected",
         [
             (
                 1,
@@ -41,12 +41,62 @@ class TestReleasedResourceRetrieveApi:
                     "method": "GET",
                     "path": "/test/",
                 },
+                {},
+                False,
+                {"id": 1, "name": "test", "method": "GET", "path": "/test/", "schema": {}},
+            ),
+            (
+                1,
+                {"is_public": True, "id": 1, "name": "test", "method": "GET", "path": "/test/"},
+                {
+                    "parameters": [
+                        {
+                            "name": "status",
+                            "in": "query",
+                            "description": "Status values that need to be considered for filter",
+                            "required": False,
+                            "explode": True,
+                            "schema": {"type": "string", "default": "available", "enum": ["test"], "example": "test"},
+                        },
+                        {
+                            "name": "api_key",
+                            "in": "header",
+                            "description": "",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                    ],
+                },
                 False,
                 {
                     "id": 1,
                     "name": "test",
                     "method": "GET",
                     "path": "/test/",
+                    "schema": {
+                        "parameters": [
+                            {
+                                "name": "status",
+                                "in": "query",
+                                "description": "Status values that need to be considered for filter",
+                                "required": False,
+                                "explode": True,
+                                "schema": {
+                                    "type": "string",
+                                    "default": "available",
+                                    "enum": ["test"],
+                                    "example": "test",
+                                },
+                            },
+                            {
+                                "name": "api_key",
+                                "in": "header",
+                                "description": "",
+                                "required": True,
+                                "schema": {"type": "string"},
+                            },
+                        ],
+                    },
                 },
             ),
             # resource_version_id is None
@@ -59,6 +109,7 @@ class TestReleasedResourceRetrieveApi:
                     "method": "GET",
                     "path": "/test/",
                 },
+                {},
                 True,
                 None,
             ),
@@ -66,6 +117,7 @@ class TestReleasedResourceRetrieveApi:
             (
                 1,
                 None,
+                {},
                 True,
                 None,
             ),
@@ -79,6 +131,7 @@ class TestReleasedResourceRetrieveApi:
                     "method": "GET",
                     "path": "/test/",
                 },
+                {},
                 True,
                 None,
             ),
@@ -91,6 +144,7 @@ class TestReleasedResourceRetrieveApi:
         fake_gateway,
         mocked_resource_version_id,
         mocked_resource,
+        mocked_resource_schema_version,
         will_error,
         expected,
     ):
@@ -103,6 +157,11 @@ class TestReleasedResourceRetrieveApi:
             return_value=mocked_resource,
         )
 
+        get_released_resource_schema_version_mock = mocker.patch(
+            "apigateway.apis.open.released.views.ResourceVersionHandler.get_resource_schema",
+            return_value=mocked_resource_schema_version,
+        )
+
         request = request_factory.get("/backend/api/v1/demo/")
         request.gateway = fake_gateway
         request.app = mock.MagicMock(app_code="test")
@@ -110,7 +169,7 @@ class TestReleasedResourceRetrieveApi:
         resource_name = mocked_resource and mocked_resource["name"]
 
         view = views.ReleasedResourceRetrieveApi.as_view()
-        response = view(request, gateway_id=fake_gateway.id, stage_name=stage_name, resource_name=resource_name)
+        response = view(request, gateway_name=fake_gateway.name, stage_name=stage_name, resource_name=resource_name)
         result = get_response_json(response)
 
         if will_error:
@@ -129,107 +188,6 @@ class TestReleasedResourceRetrieveApi:
             mocked_resource_version_id,
             resource_name,
         )
-
-
-class TestReleasedResourceListApi:
-    @pytest.mark.parametrize(
-        "stage_name, mocked_resources, mocked_labels, expected",
-        [
-            (
-                "prod",
-                [
-                    {
-                        "id": 1,
-                        "name": "test",
-                        "description": "test",
-                        "method": "GET",
-                        "path": "/test/",
-                        "app_verified_required": True,
-                        "resource_perm_required": True,
-                        "user_verified_required": True,
-                    },
-                    {
-                        "id": 2,
-                        "name": "test",
-                        "description": "test",
-                        "method": "POST",
-                        "path": "/test/",
-                        "app_verified_required": False,
-                        "resource_perm_required": False,
-                        "user_verified_required": False,
-                    },
-                ],
-                {
-                    1: ["a", "b"],
-                },
-                {
-                    "count": 2,
-                    "has_next": False,
-                    "has_previous": False,
-                    "results": [
-                        {
-                            "id": 1,
-                            "name": "test",
-                            "description": "test",
-                            "method": "GET",
-                            "path": "/test/",
-                            "app_verified_required": True,
-                            "resource_perm_required": True,
-                            "user_verified_required": True,
-                            "labels": ["a", "b"],
-                        },
-                        {
-                            "id": 2,
-                            "name": "test",
-                            "description": "test",
-                            "method": "POST",
-                            "path": "/test/",
-                            "app_verified_required": False,
-                            "resource_perm_required": False,
-                            "user_verified_required": False,
-                            "labels": [],
-                        },
-                    ],
-                },
-            )
-        ],
-    )
-    def test_list(
-        self,
-        mocker,
-        request_factory,
-        request_to_view,
-        fake_gateway,
-        stage_name,
-        mocked_resources,
-        mocked_labels,
-        expected,
-    ):
-        get_released_public_resources_mock = mocker.patch(
-            "apigateway.apis.open.released.views.ResourceVersionHandler.get_released_public_resources",
-            return_value=mocked_resources,
-        )
-        get_labels_mock = mocker.patch(
-            "apigateway.apis.open.released.views.ResourceLabelHandler.get_labels",
-            return_value=mocked_labels,
-        )
-
-        request = request_factory.get("/backend/api/v1/demo/")
-        request.gateway = fake_gateway
-        request.app = mock.MagicMock(app_code="test")
-
-        view = views.ReleasedResourceListApi.as_view()
-        response = view(request, gateway_id=fake_gateway.id, stage_name=stage_name)
-        result = get_response_json(response)
-
-        assert result["code"] == 0
-        assert result["data"] == expected
-
-        get_released_public_resources_mock.assert_called_once_with(
-            fake_gateway.id,
-            stage_name=stage_name,
-        )
-        get_labels_mock.assert_called_once_with([r["id"] for r in mocked_resources])
 
 
 class TestReleasedResourceListByGatewayNameApi:

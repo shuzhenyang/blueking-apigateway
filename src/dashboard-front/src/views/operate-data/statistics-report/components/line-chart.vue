@@ -1,13 +1,22 @@
 <template>
-  <div class="line-chart" :id="instanceId"></div>
+  <div v-show="!isEmpty" class="line-chart" :id="instanceId"></div>
+  <div v-show="isEmpty" class="ap-nodata">
+    <TableEmpty
+      :keyword="tableEmptyConf.keyword"
+      :abnormal="tableEmptyConf.isAbnormal"
+      @reacquire="handleInit"
+      @clear-filter="handleClearFilterKey"
+    />
+  </div>
 </template>
 
 <script lang="ts" setup>
-import { shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, shallowRef, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import * as echarts from 'echarts';
 import { merge } from 'lodash';
 import { userChartIntervalOption } from '@/hooks';
-import { SeriesItemType } from '../type';
+import { SeriesItemType, SearchParamsType } from '../type';
+import TableEmpty from '@/components/table-empty.vue';
 
 const props = defineProps({
   instanceId: { // 生成图表的元素id
@@ -24,9 +33,17 @@ const props = defineProps({
   },
 });
 
+const emit = defineEmits(['clear-params', 'report-init']);
+
 const { getChartIntervalOption } = userChartIntervalOption();
 
 const myChart = shallowRef();
+const searchParams = ref<SearchParamsType>();
+const isEmpty = ref<boolean>(false);
+const tableEmptyConf = ref<{keyword: string, isAbnormal: boolean}>({
+  keyword: '',
+  isAbnormal: false,
+});
 
 onMounted(() => {
   const chartDom = document.getElementById(props.instanceId);
@@ -42,14 +59,37 @@ onBeforeUnmount(() => {
 watch(
   () => props.chartData,
   (data) => {
-    if (props.instanceId === 'response_time'
-    && (!data.response_time_50th || !data.response_time_80th || !data.response_time_90th)) {
-      return;
+    if (!data?.series?.length) {
+      isEmpty.value = true;
+      updateTableEmptyConfig();
+    } else {
+      isEmpty.value = false;
+      renderChart();
     }
-    renderChart();
   },
   { deep: true },
 );
+
+const handleClearFilterKey = () => {
+  emit('clear-params');
+};
+
+const handleInit = () => {
+  emit('report-init');
+};
+
+const updateTableEmptyConfig = () => {
+  const list = Object.values(searchParams.value).filter(item => !!item);
+  if (list.length > 0) {
+    tableEmptyConf.value.keyword = 'placeholder';
+    return;
+  }
+  if (searchParams.value.stage_id) {
+    tableEmptyConf.value.keyword = '$CONSTANT';
+    return;
+  }
+  tableEmptyConf.value.keyword = '';
+};
 
 const chartResize = () => {
   nextTick(() => {
@@ -80,6 +120,7 @@ const getChartOption = () => {
       boundaryGap: false,
       axisLabel: { // 坐标轴刻度标签的相关设置
         color: '#666666',
+        rotate: 35,
       },
       axisLine: { // 坐标轴轴线相关设置
         lineStyle: {
@@ -128,8 +169,12 @@ const getChartOption = () => {
       show: true,
       type: 'scroll',
       orient: 'vertical', // 垂直排列
-      right: 24,
+      right: 10,
       top: 30,     // 垂直居中
+      height: 302,
+      pageIconSize: 12, // 翻页按钮的大小
+      pageIconColor: '#63656E', // 翻页按钮的颜色
+      pageIconInactiveColor: '#C4C6CC', // 翻页按钮不激活时（即翻页到头时）的颜色
       textStyle: {       // 图例文字的样式设置
         fontSize: 12,
         color: '#63656E',
@@ -161,17 +206,43 @@ const getChartOption = () => {
       let datapoints = item.datapoints || [];
       datapoints = datapoints.filter((value: Array<number>) => !isNaN(Math.round(value[0])));
       chartOption.series.push(merge({}, baseOption.series[0], {
-        name: item.target,
-        data: datapoints.map((item: Array<number>) => ([
-          item[1],
-          item[0],
-        ])),
+        name: (item.target?.split('=')[1])?.replace(/"/g, ''),
+        data: datapoints.map((item) => {
+          if (props.instanceId === 'ingress' || props.instanceId === 'egress') {
+            return [
+              item[1],
+              (item[0] / 1024).toFixed(2),
+            ];
+          }
+          return [
+            item[1],
+            item[0],
+          ];
+        }),
       }));
       moreOption = getChartMoreOption(datapoints);
     });
     if (props.instanceId === 'requests') {
       chartOption.legend.show = false;
-      chartOption.grid.right = '10%';
+      chartOption.grid.left = '14%';
+      chartOption.grid.right = '8%';
+    }
+
+    if (props.instanceId === 'non_200_status') {
+      chartOption.grid.left = '14%';
+      chartOption.grid.right = 80;
+    }
+
+    if (props.instanceId === 'ingress' || props.instanceId === 'egress') {
+      chartOption.yAxis.axisLabel = {
+        formatter: '{value} KB',
+      };
+    }
+
+    if (props.instanceId === 'response_time_90th') {
+      chartOption.yAxis.axisLabel = {
+        formatter: '{value} ms',
+      };
     }
   } else {
     const datapoints = [
@@ -179,8 +250,9 @@ const getChartOption = () => {
       (props.chartData?.response_time_80th?.series[0] || {})?.datapoints || [],
       (props.chartData?.response_time_50th?.series[0] || {})?.datapoints || [],
     ];
-    const seriesNames = ['90%', '80%', '50%'];
-    datapoints.forEach((data: Array<Array<number>>, index: number) => {
+    // const seriesNames = ['90%', '80%', '50%'];
+    const seriesNames = ['90%'];
+    datapoints.forEach((data, index: number) => {
       const values = data.filter((value: Array<number>) => !isNaN(Math.round(value[0])));
       chartOption.series.push(merge({}, baseOption.series[0], {
         name: seriesNames[index],
@@ -225,9 +297,17 @@ const renderChart = () => {
   nextTick(() => {
     const option = getChartOption();
     myChart.value?.setOption(option, { notMerge: true });
+    chartResize();
   });
 };
 
+const syncParams = (params: SearchParamsType) => {
+  searchParams.value = params;
+};
+
+defineExpose({
+  syncParams,
+});
 </script>
 
 <style lang="scss" scoped>
