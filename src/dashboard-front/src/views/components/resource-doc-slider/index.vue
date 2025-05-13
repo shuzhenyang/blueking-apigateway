@@ -1,7 +1,7 @@
 <template>
   <div class="res-doc-container">
     <bk-sideslider
-      v-model:isShow="isShow"
+      v-model:is-show="isShow"
       quick-close
       :title="resource.name"
       width="780"
@@ -58,7 +58,9 @@
                 </p>
               </div>
               <!-- eslint-disable vue/no-v-html -->
-              <div class="ag-markdown-view" v-dompurify-html="markdownHtml" v-show="!isEdited"></div>
+              <div
+                v-show="!isEdited" id="resource-doc-markdown" v-dompurify-html="markdownHtml" class="ag-markdown-view"
+              ></div>
               <div class="ag-markdown-editor" v-show="isEdited">
                 <mavon-editor
                   ref="markdownRef"
@@ -68,7 +70,7 @@
                   :box-shadow="false"
                   :subfield="false"
                   :ishljs="true"
-                  :code-style="'monokai'"
+                  code-style="vs2015"
                   :toolbars="toolbars"
                   :tab-size="4"
                   @full-screen="handleFullscreen"
@@ -100,7 +102,7 @@
             </bk-button>
             <bk-pop-confirm
               :title="t('确认要删除该文档？')"
-              content="将删除相关配置，不可恢复，请确认是否删除"
+              :content="t('将删除相关配置，不可恢复，请确认是否删除')"
               width="288"
               trigger="click"
               @confirm="handleDeleteMarkdown"
@@ -118,6 +120,7 @@
 <script setup lang="ts">
 import {
   defineModel,
+  nextTick,
   onMounted,
   onUnmounted,
   ref,
@@ -135,10 +138,13 @@ import { Message } from 'bkui-vue';
 import { useCommon } from '@/store';
 import { useI18n } from 'vue-i18n';
 import mitt from '@/common/event-bus';
+import { copy } from '../../../common/util';
 
-const { t } = useI18n();
-const common = useCommon();
-const { apigwId } = common; // 网关id
+const isShow = defineModel<boolean>({
+  required: true,
+  default: false,
+});
+// 网关id
 
 const props = defineProps({
   resource: { type: Object, default: () => ({}) },
@@ -147,13 +153,10 @@ const props = defineProps({
   isPreview: { type: Boolean, default: false }, // 是否获取预览文档，决定调用的接口
   previewLang: { type: [String, null], default: null },
 });
-
-const isShow = defineModel<boolean>({
-  required: true,
-  default: false,
-});
-
-const {
+const emit = defineEmits(['fetch', 'on-update']);
+const { t } = useI18n();
+const common = useCommon();
+const { apigwId } = common;const {
   resource,
   showFooter,
   showCreateBtn,
@@ -206,8 +209,6 @@ const toolbars = ref<any>({
   subfield: true,
   preview: true,
 });
-
-const emit = defineEmits(['fetch', 'on-update']);
 
 // 编辑markdown
 const handleEditMarkdown = (type: string) => {
@@ -331,6 +332,39 @@ const handleDocDataWithLanguage = () => {
     isEmpty.value = !docDataItem.id;
     markdownDoc.value = docDataItem.content;
     markdownHtml.value = markdownRef.value.markdownIt.render(docDataItem.content);
+    nextTick(() => {
+      const markdownDom = document.getElementById('resource-doc-markdown');
+      if (markdownDom) {
+        markdownDom.querySelectorAll('pre')?.forEach((preEl) => {
+          const parentDiv = document.createElement('div');
+          const codeBox = document.createElement('div');
+          const btn = document.createElement('button');
+          const code = preEl.querySelector('code')?.innerText || '';
+          parentDiv.className = 'pre-wrapper';
+          btn.className = 'ag-copy-btn';
+          codeBox.className = 'code-box';
+          btn.innerHTML = '<span title="复制"><i class="apigateway-icon icon-ag-copy-info"></i></span>';
+          btn.setAttribute('data-copy', code);
+          parentDiv.appendChild(btn);
+          codeBox.appendChild(preEl.querySelector('code'));
+          preEl.appendChild(codeBox);
+          preEl.parentNode?.replaceChild(parentDiv, preEl);
+          parentDiv.appendChild(preEl);
+        });
+
+        setTimeout(() => {
+          const copyBtnEls = Array.from(document.getElementsByClassName('ag-copy-btn'));
+
+          const handleCopy = function (this: any) {
+            copy(this.dataset?.copy);
+          };
+
+          copyBtnEls.forEach((dom: any) => {
+            dom.onclick = handleCopy;
+          });
+        }, 500);
+      }
+    });
   } else {
     // 预览资源文档会走到这里
     const doc = docData.value.find((d: any) => d.language === language.value);

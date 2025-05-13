@@ -105,7 +105,12 @@
                         <bk-tag theme="success" class="method-tag">{{ curResource?.method }}</bk-tag>
                         <span class="request-path">{{ curResource?.path }}</span>
                       </div>
-                      <bk-button class="fixed-w" theme="primary" @click="handleSend" :loading="isLoading">
+                      <bk-button
+                        class="fixed-w"
+                        theme="primary"
+                        @click="handleSend"
+                        :loading="isLoading"
+                        :disabled="isLoading">
                         {{ t('发送') }}
                       </bk-button>
                       <bk-button class="ml8 fixed-w" @click="viewDoc">{{ t('查看文档') }}</bk-button>
@@ -245,7 +250,12 @@
                         <bk-tag theme="success" class="method-tag">{{ curResource?.method }}</bk-tag>
                         <span class="request-path">{{ curResource?.path }}</span>
                       </div>
-                      <bk-button class="fixed-w" theme="primary" @click="handleSend" :loading="isLoading">
+                      <bk-button
+                        class="fixed-w"
+                        theme="primary"
+                        @click="handleSend"
+                        :loading="isLoading"
+                        :disabled="isLoading">
                         {{ t('发送') }}
                       </bk-button>
                       <bk-button class="ml8 fixed-w" @click="viewDoc">{{ t('查看文档') }}</bk-button>
@@ -267,7 +277,11 @@
         >
           <template #aside>
             <div class="request-response">
-              <response-content :res="response" @response-fold="handleResponseFold" />
+              <response-content
+                :res="response"
+                ref="responseContentRef"
+                @response-fold="handleResponseFold"
+                @response-unfold="handleResponseUnfold" />
             </div>
           </template>
           <template #main>
@@ -312,29 +326,45 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, computed, watch } from 'vue';
+import {
+  computed,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
 import onlineTestTop from '@/components/online-test-top.vue';
-import { RightShape, EditLine, InfoLine, AngleUpFill, Share, CloseLine } from 'bkui-vue/lib/icon';
+import {
+  AngleUpFill,
+  CloseLine,
+  EditLine,
+  InfoLine,
+  RightShape,
+  Share,
+} from 'bkui-vue/lib/icon';
 import requestPayload from '@/views/online-debug/components/request-payload.vue';
 import responseContent from '@/views/online-debug/components/response-content.vue';
 import doc from '@/views/online-debug/components/doc.vue';
 import TableEmpty from '@/components/table-empty.vue';
 import { useCommon } from '@/store';
-import { useRouter } from 'vue-router';
+import {
+  useRoute,
+  useRouter,
+} from 'vue-router';
 import { Message } from 'bkui-vue';
 import {
-  getStages,
-  getResourcesOnline,
   getApiDetail,
-  resourceSchema,
+  getResourcesOnline,
+  getStages,
   postAPITest,
+  resourceSchema,
 } from '@/http';
 
 
 const { t } = useI18n();
 const common = useCommon();
 const router = useRouter();
+const route = useRoute();
 
 const isLoading = ref<boolean>(false);
 const keyword = ref<string>('');
@@ -402,6 +432,7 @@ const defaultValue = {
 const formData = ref<any>({ ...defaultValue.formData });
 const isShowDoc = ref<boolean>(false);
 const requestPayloadRef = ref();
+const responseContentRef = ref();
 const showPath = ref<boolean>(false);
 const payloadType = reactive<any>({
   rawPayload: {},
@@ -573,6 +604,7 @@ const handleStageChange = (payload: number) => {
   const hasData = stageList.value.find((item: Record<string, number>) => item.id === payload);
   // 如果是未发布或者发布失败则不需要调资源列表
   if (!['unreleased', 'failure'].includes(hasData?.release?.status)) {
+    router.replace({ query: { stage_id: payload } });
     getApigwReleaseResources();
   } else {
     // formData.value = Object.assign(formData.value, { path: '', method: '' });
@@ -642,9 +674,14 @@ const matchPath = (resource: any) => {
 
 // 点击资源列表项
 const handleShowDoc = (resource: any) => {
+  if (resource.id === curResource.value?.id) {
+    return;
+  }
+
   curResource.value = resource;
   curComponentName.value = resource.name;
   getResourceParams();
+  responseContentRef.value?.setInit();
   response.value = {};
 };
 
@@ -666,8 +703,9 @@ const getApigwStages = async () => {
     stageList.value = res || [];
     if (stageList.value.length) {
       const { id, release } = stageList.value[0];
-      // params.value.stage_id = id;
-      stage.value = id;
+      if (!stage.value) {
+        stage.value = id;
+      }
       // 如果是未发布或者发布失败则不需要调资源列表
       if (!['unreleased', 'failure'].includes(release?.status)) {
         getApigwReleaseResources();
@@ -698,6 +736,10 @@ const setAsideHeight = (height: number) => {
 
 const handleResponseFold = () => {
   setAsideHeight(52);
+};
+
+const handleResponseUnfold = () => {
+  setAsideHeight(400);
 };
 
 const setUserToken = () => {
@@ -846,7 +888,7 @@ const handleSend = async (e: Event) => {
     const res = await postAPITest(common.apigwId, data);
     response.value = res;
 
-    setAsideHeight(600);
+    setAsideHeight(400);
   } catch (e) {
     console.log(e);
   } finally {
@@ -866,7 +908,7 @@ const openTab = (name?: string) => {
   const routeData = router.resolve({
     name: 'apiDocDetail',
     params: {
-      curTab: 'apigw',
+      curTab: 'gateway',
       targetName: common?.apigwName,
       componentName: name,
     },
@@ -924,6 +966,20 @@ watch(
     }
   },
 );
+
+watch(() => route, () => {
+  stage.value = null;
+  const stageId = route.query?.stage_id;
+  stage.value = Number(stageId) || null;
+  if (stage.value) {
+    handleStageChange(stage.value);
+  }
+}, { immediate: true });
+
+watch(() => common.curApigwData, () => {
+  router.replace({ query: null });
+}, { deep: true });
+
 </script>
 
 <style lang="scss" scoped>

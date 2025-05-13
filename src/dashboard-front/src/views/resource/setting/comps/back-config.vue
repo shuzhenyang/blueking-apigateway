@@ -132,7 +132,7 @@
       </div>
       <div class="common-form-tips">
         <!-- {{ t("后端接口地址的 Path，不包含域名或 IP，支持路径变量、环境变量，变量包含在\{\}中，比如：/users/{id}/{env.type}/。") }} -->
-        {{ t("后端接口地址的 Path，不包含域名或 IP，支持路径变量、环境变量，变量包含在\{\}中") }}
+        {{ t("后端接口地址的 Path，不包含域名或 IP，支持路径变量、环境变量，变量包含在{'{}'}中") }}
         <!-- <a :href="GLOBAL_CONFIG.DOC.TEMPLATE_VARS" target="_blank" class="ag-primary">{{ t('更多详情') }}</a> -->
       </div>
       <div v-if="servicesCheckData.length && isPathValid">
@@ -185,16 +185,20 @@
 
 <script setup lang="tsx">
 import {
+  computed,
+  onMounted,
   ref,
   unref,
   watch,
-  computed,
-  onMounted,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { cloneDeep } from 'lodash';
 import { Message } from 'bkui-vue';
-import { getBackendsListData, getBackendsDetailData, backendsPathCheck } from '@/http';
+import {
+  backendsPathCheck,
+  getBackendsDetailData,
+  getBackendsListData,
+} from '@/http';
 import { useCommon } from '../../../../store';
 import { useGetGlobalProperties } from '@/hooks';
 import mitt from '@/common/event-bus';
@@ -301,7 +305,10 @@ const handleTimeOutTotal = (value: any[]) => {
 
 const handleRefreshTime = () => {
   servicesConfigs.value = cloneDeep(servicesConfigsStorage.value);
-  handleTimeOutTotal(servicesConfigs.value)
+  // handleTimeOutTotal(servicesConfigs.value);
+  backConfigData.value.config.timeout = 0;
+  timeOutValue.value = '';
+  isTimeEmpty.value = false;
 };
 
 const handleShowPopover = () => {

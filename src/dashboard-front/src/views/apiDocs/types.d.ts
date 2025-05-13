@@ -1,4 +1,4 @@
-type TabType = 'apigw' | 'component';
+type TabType = 'gateway' | 'component';
 type LanguageType = 'python' | 'java' | 'golang';
 
 interface INavItem {
@@ -16,6 +16,14 @@ interface IApiGatewayBasics {
   is_official: boolean;
   api_url: string;
   sdks?: IApiGatewaySdk[];
+  doc_maintainers?: {
+    type: string;
+    contacts: string[];
+    service_account: {
+      name: string;
+      link: string;
+    };
+  };
 }
 
 interface IApiGatewaySdkDoc {

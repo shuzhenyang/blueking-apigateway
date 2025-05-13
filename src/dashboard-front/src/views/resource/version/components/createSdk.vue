@@ -14,7 +14,7 @@
       <bk-alert
         theme="info"
         class="mb15"
-        :title="$t('SDK仅包含公开资源，生成后会上传到pypi源或bkrepo')"
+        :title="$t('SDK 包含所有资源，生成后会上传到 pypi 源或 bkrepo')"
       />
       <bk-form ref="baseInfoRef" form-type="vertical" :model="formData" :rules="rules">
         <bk-form-item :label="$t('资源版本')" property="resource_version_id" required>
@@ -56,16 +56,16 @@ import { createSdks, getResourceVersionsList } from '@/http';
 import { useRoute } from 'vue-router';
 import { Message } from 'bkui-vue';
 
+const props = defineProps<{
+  versionList?: Array<any>;
+  resourceVersionId?: string;
+}>();
+const emit = defineEmits(['done']);
 const { t } = useI18n();
 const route = useRoute();
 
 // 网关id
 const apigwId = computed(() => +route.params.id);
-
-const props = defineProps<{
-  versionList?: Array<any>;
-  resourceVersionId?: string;
-}>();
 
 const baseInfoRef = ref(null);
 // 版本列表
@@ -95,8 +95,6 @@ const formData: CreateDialog = reactive({
   version: '',
   language: 'python',
 });
-
-const emit = defineEmits(['done']);
 
 // 生成sdk
 const handleCreate = async () => {

@@ -24,7 +24,7 @@ from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.biz.constants import SEMVER_PATTERN
 from apigateway.biz.validators import ResourceVersionValidator
 from apigateway.common.fields import CurrentGatewayDefault
-from apigateway.core.constants import ResourceVersionSchemaEnum
+from apigateway.core.constants import ResourceVersionSchemaEnum, ResourceVersionTypeEnum
 
 
 class ResourceVersionCreateInputSLZ(serializers.Serializer):
@@ -88,9 +88,11 @@ class ResourceInfoSLZ(serializers.Serializer):
 
         plugins = []
         override_plugins = set()
+        plugin_priority = self.context["plugin_priority"]
         for plugin in obj.get("plugins", []):
             plugin_type = plugin["type"]
             plugin["binding_type"] = PluginBindingScopeEnum.RESOURCE.value
+            plugin["priority"] = plugin_priority.get(plugin_type)
 
             # 根据 rules 配置确定是否资源插件配置覆盖环境插件配置
             # 如果类型是merge， 同一个类型的环境 + 资源插件将会同时存在
@@ -100,11 +102,15 @@ class ResourceInfoSLZ(serializers.Serializer):
 
             plugins.append(plugin)
 
-        plugins.extend(
-            [plugin for plugin_type, plugin in stage_plugins.items() if plugin_type not in override_plugins]
-        )
+        merge_plugins = []
+        for plugin_type, plugin in stage_plugins.items():
+            if plugin_type not in override_plugins:
+                plugin["priority"] = plugin_priority.get(plugin_type)
+                merge_plugins.append(plugin)
 
-        return plugins
+        plugins.extend(merge_plugins)
+
+        return sorted(plugins, key=lambda x: (x["priority"], x["binding_type"]))
 
 
 class ResourceVersionRetrieveOutputSLZ(serializers.Serializer):
@@ -172,3 +178,10 @@ class ResourceVersionDiffOutputSLZ(serializers.Serializer):
     add = ResourceVersionResourceSLZ()
     delete = ResourceVersionResourceSLZ()
     update = serializers.DictField(child=ResourceVersionResourceSLZ())
+
+
+class NextProgrammableDeployVersionGetInputSLZ(serializers.Serializer):
+    stage_name = serializers.CharField(required=True, help_text="环境name")
+    version_type = serializers.ChoiceField(
+        choices=ResourceVersionTypeEnum.get_choices(), help_text="版本类型：major/minor/patch"
+    )

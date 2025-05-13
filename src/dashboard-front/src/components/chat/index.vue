@@ -23,12 +23,17 @@
             <p> {{ $t('可以通过企业微信将需求的相关人员邀请到一个群里进行讨论') }} </p>
           </div>
         </div>
-        <bk-input
-          :placeholder="$t('请输入群成员')"
-          v-model="userlist"
-          :key="renderKey"
-          class="chat-selector"
-        />
+        <div
+          v-bk-tooltips="{ content: userlist.join(', ') }"
+        >
+          <bk-input
+            :show-overflow-tooltips="false"
+            :placeholder="$t('请输入群成员')"
+            v-model="userlist"
+            :key="renderKey"
+            class="chat-selector"
+          />
+        </div>
       </div>
     </bk-dialog>
   </div>
@@ -40,9 +45,6 @@ import { Message } from 'bkui-vue';
 import { useI18n } from 'vue-i18n';
 import { createChat, sendChat, getFeatures } from '@/http';
 import { useStage } from '@/store';
-
-const stageStore = useStage();
-const { t } = useI18n();
 
 const props = defineProps({
   name: {
@@ -68,6 +70,8 @@ const props = defineProps({
     default: false,
   },
 });
+const stageStore = useStage();
+const { t } = useI18n();
 
 const renderKey = ref<number>(0);
 const chatDialog = reactive<any>({

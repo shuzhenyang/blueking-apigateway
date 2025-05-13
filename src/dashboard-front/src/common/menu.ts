@@ -61,6 +61,8 @@ export const createMenuData = (): IMenu[] => {
           name: 'apigwResource',
           enabled: true,
           title: t('资源配置'),
+          // 是否在可编程网关中隐藏
+          hideInProgrammable: true,
         },
         {
           name: 'apigwResourceVersion',
@@ -85,11 +87,6 @@ export const createMenuData = (): IMenu[] => {
           enabled: true,
           title: t('应用权限'),
         },
-        {
-          name: 'apigwPermissionRecords',
-          enabled: true,
-          title: t('审批历史'),
-        },
       ],
     },
     {
@@ -102,6 +99,11 @@ export const createMenuData = (): IMenu[] => {
           name: 'apigwAccessLog',
           enabled: true,
           title: t('流水日志'),
+        },
+        {
+          name: 'apigwDashboard',
+          enabled: user.featureFlags?.ENABLE_RUN_DATA_METRICS,
+          title: t('仪表盘'),
         },
         {
           name: 'apigwReport',
@@ -311,5 +313,23 @@ export const componentsMenu: IMenu[] = [
     name: 'componentsRuntimeData',
     title: t('实时运行数据'),
     icon: 'runtime',
+  },
+];
+
+export const platformToolsMenu: IMenu[] = [
+  {
+    name: 'platformToolsToolbox',
+    title: t('工具箱'),
+    icon: 'gongjuxiang',
+  },
+  {
+    name: 'platformToolsAutomatedGateway',
+    title: t('自动化接入网关'),
+    icon: 'zidongjieru',
+  },
+  {
+    name: 'platformToolsProgrammableGateway',
+    title: t('可编程网关'),
+    icon: 'square-program',
   },
 ];

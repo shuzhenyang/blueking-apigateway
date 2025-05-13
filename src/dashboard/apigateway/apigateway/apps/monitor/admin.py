@@ -16,16 +16,20 @@
 # to the current version of the project delivered to anyone in the future.
 #
 from django.contrib import admin
+from djangoql.admin import DjangoQLSearchMixin
 
 from . import models
 
 
-class AlarmFilterConfigAdmin(admin.ModelAdmin):
+class AlarmFilterConfigAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
+    djangoql_completion_enabled_by_default = False
     list_display = ["alarm_type", "gateway"]
+    search_fields = ["gateway__id", "gateway__name"]
     list_filter = ["gateway", "alarm_type"]
 
 
-class AlarmStrategyAdmin(admin.ModelAdmin):
+class AlarmStrategyAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
+    djangoql_completion_enabled_by_default = False
     list_display = (
         "id",
         "gateway",
@@ -39,7 +43,8 @@ class AlarmStrategyAdmin(admin.ModelAdmin):
     filter_horizontal = ["api_labels"]
 
 
-class AlarmRecordAdmin(admin.ModelAdmin):
+class AlarmRecordAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
+    djangoql_completion_enabled_by_default = False
     list_display = (
         "gateway",
         "alarm_attr_id",
@@ -47,6 +52,7 @@ class AlarmRecordAdmin(admin.ModelAdmin):
         "source_time",
         "status",
     )
+    search_fields = ["gateway__id", "gateway__name", "alarm_attr_id", "alarm_id"]
     filter_horizontal = ["alarm_strategies"]
     list_filter = ["gateway", "status"]
 

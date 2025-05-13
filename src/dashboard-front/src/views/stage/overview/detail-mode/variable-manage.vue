@@ -5,8 +5,17 @@
         {{ t('变量列表') }}
       </span>
       <span class="title-tips">{{ t('（可在资源配置中使用）') }}</span>
-      <span class="title-edit">
-        <edit-line @click.stop="editTable" />
+      <span v-if="common.curApigwData?.kind !== 1" class="title-edit">
+        <AgIcon
+          v-bk-tooltips="{
+            content: t('当前有版本正在发布，请稍后再进行变量修改'),
+            disabled: getStatus(stageData) !== 'doing'
+          }"
+          class="ml5 mr5"
+          name="edit-line"
+          size="15"
+          @click.stop="editTable"
+        />
       </span>
     </div>
 
@@ -22,7 +31,12 @@
       >
         <bk-table-column :label="t('变量名称')" prop="name" :show-overflow-tooltip="false" :resizable="false">
           <template #default="{ row, index, column }">
-            <span v-if="!row.isEdit" class="no-edit-value">{{ row?.name }}</span>
+            <span
+              v-if="!row.isEdit"
+              v-bk-tooltips="{ content: row.name, disabled: !row.name }"
+              class="no-edit-value">
+              {{ row?.name }}
+            </span>
             <template v-if="row.isEdit">
               <bk-popover
                 placement="top-start"
@@ -55,7 +69,12 @@
         </bk-table-column>
         <bk-table-column :label="t('变量值')" prop="value" :show-overflow-tooltip="false" :resizable="false">
           <template #default="{ row, index, column }">
-            <span v-show="!row.isEdit" class="no-edit-value">{{ row?.value }}</span>
+            <span
+              v-show="!row.isEdit"
+              v-bk-tooltips="{ content: row.value, disabled: !row.value }"
+              class="no-edit-value">
+              {{ row?.value }}
+            </span>
             <template v-if="row.isEdit">
               <bk-form :ref="(el: HTMLElement) => setRefs(el, `value-${index}`)" :model="row" label-width="0">
                 <bk-form-item
@@ -141,19 +160,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue';
-import { EditLine } from 'bkui-vue/lib/icon';
+import {
+  computed,
+  nextTick,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getStageVars, updateStageVars } from '@/http';
-import { useCommon } from '@/store';
-import { Message, InfoBox } from 'bkui-vue';
-
-const common = useCommon();
-const { t } = useI18n();
+import {
+  getStageVars,
+  updateStageVars,
+} from '@/http';
+import {
+  useCommon,
+  useStage,
+} from '@/store';
+import {
+  InfoBox,
+  Message,
+} from 'bkui-vue';
+import { getStatus } from '@/common/util';
+import AgIcon from '@/components/ag-icon.vue';
 
 const props = defineProps({
   stageId: Number,
 });
+const common = useCommon();
+const { t } = useI18n();
+const stageStore = useStage();
 
 const tableIsEdit = ref<boolean>(false);
 const isShowVarPopover = ref(false);
@@ -169,6 +204,28 @@ const getVars = () => {
 
 const isLoading = ref<boolean>(false);
 const tableData = ref<any>([]);
+
+// 当前环境信息
+const stageData: any = computed(() => {
+  if (stageStore.curStageData.id !== null) {
+    return stageStore.curStageData;
+  }
+  return {
+    name: '',
+    description: '',
+    description_en: '',
+    status: 1,
+    created_time: '',
+    release: {
+      status: '',
+      created_time: null,
+      created_by: '',
+    },
+    resource_version: '',
+    new_resource_version: '',
+    publish_validate_msg: '',
+  };
+});
 
 const getCellClass = (payload: any) => {
   if (payload.index !== 2) {
@@ -287,6 +344,9 @@ const confirmRowEdit = async (index: number) => {
 // };
 
 const editTable = () => {
+  if (getStatus(stageData.value) === 'doing') {
+    return;
+  }
   tableIsEdit.value = true;
   if (tableData.value.length) {
     tableData.value.forEach((row: any, index: number) => {

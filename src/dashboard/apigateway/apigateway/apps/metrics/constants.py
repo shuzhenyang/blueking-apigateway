@@ -21,7 +21,7 @@ from blue_krill.data_types.enum import EnumField, StructuredEnum
 
 class MetricsRangeEnum(StructuredEnum):
     REQUESTS = EnumField("requests")
-    NON_200_STATUS = EnumField("non_200_status")
+    NON_20X_STATUS = EnumField("non_20x_status")
     APP_REQUESTS = EnumField("app_requests")
     RESOURCE_REQUESTS = EnumField("resource_requests")
     RESPONSE_TIME_90TH = EnumField("response_time_90th")
@@ -32,3 +32,14 @@ class MetricsRangeEnum(StructuredEnum):
 class MetricsInstantEnum(StructuredEnum):
     REQUESTS_TOTAL = EnumField("requests_total")
     HEALTH_RATE = EnumField("health_rate")
+
+
+class MetricsSummaryEnum(StructuredEnum):
+    REQUESTS_TOTAL = EnumField("requests_total", label="请求总数")
+    REQUESTS_FAILED_TOTAL = EnumField("requests_failed_total", label="请求失败总数")
+
+
+class MetricsSummaryTimeDimensionEnum(StructuredEnum):
+    DAY = EnumField("day", label="按天统计")
+    WEEK = EnumField("week", label="按周统计")
+    MONTH = EnumField("month", label="按月统计")

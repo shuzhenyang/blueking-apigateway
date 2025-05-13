@@ -14,7 +14,7 @@
         :side-title="sideTitle"
       >
         <template #side-icon>
-          <img :src="appLogo" class="api-logo" />
+          <img :src="appLogo" alt="" class="api-logo" />
         </template>
         <div class="content">
           <router-view v-if="userLoaded"></router-view>
@@ -51,15 +51,20 @@
 
 <script setup lang="ts">
 import {
-  ref,
   computed,
-  watch,
   onMounted,
-  // onBeforeMount,
+  ref,
+  watch,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRouter, useRoute } from 'vue-router';
-import { Message, ConfigProvider as BkConfigProvider } from 'bkui-vue';
+import {
+  useRoute,
+  useRouter,
+} from 'vue-router';
+import {
+  ConfigProvider as BkConfigProvider,
+  Message,
+} from 'bkui-vue';
 // @ts-ignore
 import zhCn from 'bkui-vue/dist/locale/zh-cn.esm';
 // @ts-ignore
@@ -74,12 +79,22 @@ import ProductInfo from '@/components/product-info.vue';
 import LanguageToggle from '@/components/language-toggle.vue';
 // import AppAuth from '@/components/auth/index.vue';
 import mitt from '@/common/event-bus';
-import { useUser, useCommon } from '@/store';
-import { getUser, getFeatureFlags } from '@/http';
+import {
+  useCommon,
+  useUser,
+} from '@/store';
+import {
+  getFeatureFlags,
+  getUser,
+} from '@/http';
 // import { ILoginData } from '@/common/auth';
 import { useSidebar } from '@/hooks';
 // @ts-ignore
-import { getPlatformConfig, setShortcutIcon, setDocumentTitle  } from '@blueking/platform-config';
+import {
+  getPlatformConfig,
+  setDocumentTitle,
+  setShortcutIcon,
+} from '@blueking/platform-config';
 // @ts-ignore
 import logoWithoutName from '@/images/APIgateway-logo.png';
 import { isChinese } from '@/language/i18n';
@@ -151,8 +166,6 @@ const getWebsiteConfig = async () => {
     websiteConfig.value = await getPlatformConfig(constantConfig.SITE_CONFIG);
   }
 
-  console.log('websiteConfig', websiteConfig.value);
-
   if (websiteConfig.value.i18n) {
     websiteConfig.value.i18n.appLogo = websiteConfig.value[isChinese ? 'appLogo' : 'appLogoEn'];
   }
@@ -217,40 +230,13 @@ const headerList = computed(() => ([
     enabled: true,
     link: '',
   },
-  // {
-  //   name: t('网关API文档'),
-  //   id: 3,
-  //   url: 'apigwDoc',
-  //   enabled: true,
-  //   link: '',
-  // },
-  // {
-  //   name: t('组件API文档'),
-  //   id: 4,
-  //   url: 'componentDoc',
-  //   enabled: user.featureFlags?.MENU_ITEM_ESB_API_DOC,
-  //   link: '',
-  // },
-  // {
-  //   name: t('网关API SDK'),
-  //   id: 5,
-  //   params: {
-  //     type: 'apigateway',
-  //   },
-  //   url: 'apigwSDK',
-  //   enabled: user.featureFlags?.ENABLE_SDK,
-  //   link: '',
-  // },
-  // {
-  //   name: t('组件API SDK'),
-  //   id: 6,
-  //   params: {
-  //     type: 'esb',
-  //   },
-  //   url: 'esbSDK',
-  //   enabled: user.featureFlags?.ENABLE_SDK,
-  //   link: '',
-  // },
+  {
+    name: t('平台工具'),
+    id: 4,
+    url: 'platformTools',
+    enabled: true,
+    link: '',
+  },
 ]));
 
 const systemCls = ref('mac');
@@ -294,8 +280,12 @@ const handleShowAlertChange = (payload: boolean) => {
 // };
 
 watch(
-  () => route.fullPath,
-  async () => {
+  // () => route.fullPath,
+  () => route.path,
+  async (val, prevVal) => {
+    if (val === prevVal) {
+      return;
+    }
     const { meta } = route;
     let index = 0;
     for (let i = 0; i < headerList.value.length; i++) {

@@ -2,16 +2,46 @@
   <div class="plugin-container">
     <bk-loading :loading="isBindingListLoading">
       <!-- 默认展示 -->
-      <bk-exception
-        class="exception-wrap-item" type="empty" :class="{ 'exception-gray': false }"
-        v-if="curBindingPlugins.length === 0">
-        {{ t('尚未添加插件，') }}
-        <bk-button text theme="primary" @click="handlePluginAdd">
-          {{ t('立即添加') }}
-        </bk-button>
-      </bk-exception>
+      <template v-if="curBindingPlugins.length === 0">
+        <bk-exception
+          v-if="common.curApigwData?.kind !== 1"
+          :class="{ 'exception-gray': false }"
+          class="exception-wrap-item"
+          type="empty"
+        >
+          {{ t('尚未添加插件，') }}
+          <bk-button
+            v-bk-tooltips="{
+              content: t('当前有版本正在发布，请稍后再操作'),
+              disabled: getStatus(stageData) !== 'doing'
+            }"
+            :disabled="getStatus(stageData) === 'doing'"
+            text
+            theme="primary"
+            @click="handlePluginAdd"
+          >
+            {{ t('立即添加') }}
+          </bk-button>
+        </bk-exception>
+        <bk-exception v-else type="empty">
+          {{ t('尚未添加插件') }}
+        </bk-exception>
+      </template>
       <div class="bindding-info p10" v-else>
-        <bk-button class="add-plugin-btn" @click="handlePluginAdd">
+        <div class="pb12 pl12">
+          <BkAlert closable>{{ t('插件按优先级从高到低排序，多个插件优先级高的先执行。') }}</BkAlert>
+        </div>
+        <bk-button
+          v-if="common.curApigwData?.kind !== 1"
+          v-bk-tooltips="{
+            content: t('当前有版本正在发布，请稍后再操作'),
+            disabled: getStatus(stageData) !== 'doing'
+          }"
+          :disabled="getStatus(stageData) === 'doing'"
+          class="add-plugin-btn"
+          theme="primary"
+          @click="handlePluginAdd"
+        >
           <i class="icon apigateway-icon icon-ag-plus pr10 f12"></i>
           {{ t('添加插件') }}
         </bk-button>
@@ -21,16 +51,30 @@
           v-model="activeIndex"
           class="binding-plugins mt20">
           <template #title="slotProps">
-            <span class="f15" @mouseenter="handleTitleHover(slotProps)" @mouseleave="handleTitleLeave">
+            <span class="f15">
               {{ slotProps.name }}
-              <span
-                class="icon apigateway-icon icon-ag-edit-line ml5 mr5 " @click.stop="handleEditePlugin(slotProps)"
-                v-if="slotProps.name === curHoverHead">
-              </span>
-              <span
-                class="icon apigateway-icon icon-ag-delet " @click.stop="handleDeletePlugin(slotProps)"
-                v-if="slotProps.name === curHoverHead">
-              </span>
+              <template v-if="common.curApigwData?.kind !== 1">
+                <AgIcon
+                  v-bk-tooltips="{
+                    content: t('当前有版本正在发布，请稍后再操作'),
+                    disabled: getStatus(stageData) !== 'doing'
+                  }"
+                  class="ml5 mr5"
+                  name="edit-line"
+                  size="15"
+                  @click.stop="handleEditePlugin(slotProps)"
+                />
+                <AgIcon
+                  v-bk-tooltips="{
+                    content: t('当前有版本正在发布，请稍后再操作'),
+                    disabled: getStatus(stageData) !== 'doing'
+                  }"
+                  class="ml5 mr5"
+                  name="delet"
+                  size="15"
+                  @click.stop="handleDeletePlugin(slotProps)"
+                />
+              </template>
             </span>
           </template>
           <template #content="slotProps">
@@ -44,7 +88,7 @@
 
     <!-- 添加插件 -->
     <bk-sideslider
-      v-model:isShow="isVisible"
+      v-model:is-show="isVisible"
       :title="t('添加插件')"
       quick-close
       ext-cls="plugin-add-slider"
@@ -60,6 +104,9 @@
         <div class="plugin-add-container">
           <!-- 选择插件 -->
           <div class="plugins pl20 pr20" v-if="state.curStep === 1">
+            <div class="pt16">
+              <BkAlert closable>{{ t('插件按优先级从高到低排序，多个插件优先级高的先执行。') }}</BkAlert>
+            </div>
             <div class="plugin-search">
               <bk-input
                 v-model="searchValue" clearable type="search" :placeholder="t('请输入插件关键字，按Enter搜索')"
@@ -196,7 +243,7 @@
 
     <!-- 修改插件 -->
     <bk-sideslider
-      v-model:isShow="isEditVisible"
+      v-model:is-show="isEditVisible"
       :title="t('修改插件')"
       quick-close
       ext-cls="plugin-add-slider"
@@ -222,25 +269,36 @@
 import pluginInfo from './plugin-info.vue';
 import TableEmpty from '@/components/table-empty.vue';
 import mitt from '@/common/event-bus';
-import { InfoBox, Message } from 'bkui-vue';
 import {
-  ref,
-  reactive,
+  InfoBox,
+  Message,
+} from 'bkui-vue';
+import {
   computed,
+  reactive,
+  ref,
   watch,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useCommon } from '@/store';
-import { useRoute, useRouter } from 'vue-router';
 import {
-  getPluginListData,
-  getPluginBindingsList,
-  getScopeBindingPluginList,
-  getPluginConfig,
+  useCommon,
+  useStage,
+} from '@/store';
+import {
+  useRoute,
+  useRouter,
+} from 'vue-router';
+import {
   deletePluginConfig,
+  getPluginBindingsList,
+  getPluginConfig,
+  getPluginListData,
+  getScopeBindingPluginList,
 } from '@/http';
 import ConfigDisplayTable from '@/views/components/plugin-manage/config-display-table.vue';
 import pluginIconList from '@/common/plugin-icon-list';
+import AgIcon from '@/components/ag-icon.vue';
+import { getStatus } from '@/common/util';
 
 const props = defineProps({
   resourceId: {
@@ -249,29 +307,29 @@ const props = defineProps({
   },
   stageId: Number,
 });
-const { t } = useI18n();
 const emit = defineEmits(['on-jump']);
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const common = useCommon();
+const stageStore = useStage();
 
 const { apigwId } = common; // 网关id
-const scopeType = ref<string>('');
-const scopeId = ref<number>(-1);
+const scopeType = ref('');
+const scopeId = ref(-1);
 const isBindingListLoading = ref(false);
 const isPluginListLoading = ref(false);
 const isVisible = ref(false);
-const curType = ref<string>('');
+const curType = ref('');
 const isEditVisible = ref(false);
 const isAddSuccess = ref(false);
-const searchValue = ref<string>('');
+const searchValue = ref('');
 const pluginListDate = ref([]);
 const curBindingScopeData = ref<any>({});
-const curHover = ref<string>('');
-const curHoverHead = ref<string>('');
+const curHover = ref('');
 const curBindingPlugins = ref<any>([]);
 const curChoosePlugin = ref(null);
-const curChooseCode = ref<string>('');
+const curChooseCode = ref('');
 const curEditPlugin = ref<any>({});
 const curScopeInfo = reactive({
   scopeType: '',
@@ -291,6 +349,28 @@ const tableEmptyConf = ref({
 });
 // 控制插件 slider 宽度，会在展示插件使用示例时变宽
 const pluginSliderWidth = ref(960);
+
+// 当前环境信息
+const stageData: any = computed(() => {
+  if (stageStore.curStageData.id !== null) {
+    return stageStore.curStageData;
+  }
+  return {
+    name: '',
+    description: '',
+    description_en: '',
+    status: 1,
+    created_time: '',
+    release: {
+      status: '',
+      created_time: null,
+      created_by: '',
+    },
+    resource_version: '',
+    new_resource_version: '',
+    publish_validate_msg: '',
+  };
+});
 
 // 监听是否成功添加
 watch(
@@ -387,14 +467,6 @@ const handlScopeLeave = () => {
   curHover.value = '';
 };
 
-// hover 已绑插件的title
-const handleTitleHover = (data: any) => {
-  curHoverHead.value = data.name;
-};
-const handleTitleLeave = () => {
-  curHoverHead.value = '';
-};
-
 const handleClearFilterKey = () => {
   searchValue.value = '';
   // handleSearch();
@@ -402,6 +474,9 @@ const handleClearFilterKey = () => {
 
 // 编辑插件
 const handleEditePlugin = async (item: any) => {
+  if (getStatus(stageData.value) === 'doing') {
+    return;
+  }
   curType.value = 'edit';
   const { code, config_id } = item;
   const curEditItem = curBindingPlugins.value.find((pluginItem: { code: string; }) => pluginItem.code === code);
@@ -410,7 +485,7 @@ const handleEditePlugin = async (item: any) => {
     const res = await getPluginConfig(apigwId, scopeType.value, scopeId.value, code, config_id);
     curEditPlugin.value = res;
     isEditVisible.value = true;
-    mitt.emit('on-update-plugin');
+    // mitt.emit('on-update-plugin');
   } catch (error) {
     console.log('error', error);
   }
@@ -420,6 +495,9 @@ const pluginDeleting = ref(false);
 
 // 删除插件
 const handleDeletePlugin = (item: any) => {
+  if (getStatus(stageData.value) === 'doing') {
+    return;
+  }
   const { code, config_id } = item;
   InfoBox({
     title: t('确定停用插件？'),
@@ -600,7 +678,10 @@ const updateTableEmptyConfig = () => {
 };
 
 watch(
-  () => props.stageId,
+  [
+    () => props.stageId,
+    () => props.resourceId,
+  ],
   () => {
     init();
   },
@@ -651,7 +732,7 @@ init();
   min-height: calc(100vh - 171px) !important;
 
   .plugin-search {
-    padding: 20px 0px;
+    padding: 12px 0 20px;
 
     .bk-input--default {
       width: 608px;

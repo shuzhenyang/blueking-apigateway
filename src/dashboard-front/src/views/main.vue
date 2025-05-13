@@ -32,14 +32,14 @@
                       theme="danger"
                       style="margin-left: 5px"
                       v-if="menu.name === 'apigwPermissionManage' && permission.count !== 0"
-                    >
-                    </bk-badge>
+                    />
                   </template>
                   <template v-for="child in menu.children">
                     <bk-menu-item
-                      v-if="child.enabled"
+                      v-if="child.enabled && !(child.hideInProgrammable && common.isProgrammableGateway)"
                       :key="child.name"
-                      @click.stop="handleGoPage(child.name, apigwId, 'menu')">
+                      @click.stop="handleGoPage(child.name, apigwId)"
+                    >
                       {{ child.title }}
                       <bk-badge
                         :count="permission.count"
@@ -55,11 +55,12 @@
               </template>
               <template v-else>
                 <bk-menu-item
+                  v-if="!(menu.hideInProgrammable && common.isProgrammableGateway)"
                   :key="menu.name"
-                  @click.stop="handleGoPage(menu.name, apigwId, 'menu')"
+                  @click.stop="handleGoPage(menu.name, apigwId)"
                 >
                   <template #icon>
-                    <i :class="['icon apigateway-icon', `icon-ag-${menu.icon}`]"></i>
+                    <i :class="['icon apigateway-icon', `icon-ag-${menu.icon}`]" />
                   </template>
                   {{ menu.title }}
                 </bk-menu-item>
@@ -74,8 +75,15 @@
           class="header-select"
           filterable
           v-model="apigwId"
-          @change="handleGoPage(activeMenuKey, apigwId, 'select')"
+          @change="handleGoPage(activeMenuKey, apigwId)"
           :clearable="false">
+          <!-- <template #prefix>
+            <span
+              class="kind-program"
+              v-if="currentGateway.kind === 1">
+              <i class="apigateway-icon icon-ag-square-program" />
+            </span>
+          </template> -->
           <bk-option
             v-for="item in gatewaysList" :key="item.id" :id="item.id" :name="item.name"
           />
@@ -85,18 +93,22 @@
       <tips-publish-bar v-show="stage.getNotUpdatedStages?.length" />
       <div class="content-view" :style="stage.getNotUpdatedStages?.length ? 'padding-top: 42px' : 'padding-top: 0px'">
         <!-- 默认头部 -->
-        <div class="flex-row align-items-center content-header" v-if="!route.meta.customHeader">
+        <div
+          v-if="!route.meta.customHeader"
+          class="flex-row align-items-center content-header"
+        >
           <i
-            class="icon apigateway-icon icon-ag-return-small"
             v-if="route.meta.showBackIcon"
-            @click="handleBack"></i>
+            class="icon apigateway-icon icon-ag-return-small"
+            @click="handleBack"
+          />
           {{ headerTitle }}
-          <div class="title-name" v-if="route.meta.showPageName && pageName">
+          <div v-if="route.meta.showPageName && pageName" class="title-name">
             <span></span>
             <div class="name">{{ pageName }}</div>
           </div>
         </div>
-        <div :class="route.meta.customHeader ? 'custom-header-view' : 'default-header-view'">
+        <div :class="routerViewWrapperClass">
           <router-view
             :key="apigwId" :apigw-id="apigwId">
           </router-view>
@@ -109,16 +121,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
+import {
+  useRoute,
+  useRouter,
+} from 'vue-router';
 import { createMenuData } from '@/common/menu';
-import { useGetApiList, useSidebar, useGetStageList } from '@/hooks';
-import { useCommon, usePermission, useStage } from '@/store';
-import { getPermissionApplyList, getGatewaysDetail } from '@/http';
+import {
+  useGetApiList,
+  useGetStageList,
+  useSidebar,
+} from '@/hooks';
+import {
+  useCommon,
+  usePermission,
+  useStage,
+} from '@/store';
+import {
+  getGatewaysDetail,
+  getPermissionApplyList,
+} from '@/http';
 import mitt from '@/common/event-bus';
 import { cloneDeep } from 'lodash';
 import versionReleaseNote from '@/components/version-release-note.vue';
 import tipsPublishBar from '@/components/tips-publish-bar.vue';
+import { IMenu } from '@/types';
 
 const { initSidebarFormData, isSidebarClosed } = useSidebar();
 const route = useRoute();
@@ -153,6 +186,18 @@ const headerTitle = ref('');
 // 当前离开页面的数据
 const curLeavePageData = ref({});
 
+// const currentGateway = computed(() => gatewaysList.value.find((apigw: any) => apigw.id === apigwId.value) || {});
+
+const routerViewWrapperClass = computed(() => {
+  if (route.meta.customHeader) {
+    return 'custom-header-view';
+  }
+  if (stage.getNotUpdatedStages?.length) {
+    return 'default-header-view has-notice';
+  }
+  return 'default-header-view';
+});
+
 const handleCollapse = (v: boolean) => {
   mitt.emit('side-toggle', v);
   collapse.value = !v;
@@ -178,7 +223,7 @@ const getStages = async () => {
 };
 
 const needMenu = ref(true);
-const menuData = ref([]);
+const menuData = ref<IMenu[]>([]);
 const pageName = ref<string>('');
 
 // 监听当前路由
@@ -211,7 +256,6 @@ watch(
         curOpenedKeys.push(item.name);
       }
     }
-    console.log('menuData', menuData.value);
     openedKeys.value = curOpenedKeys;
   },
   { immediate: true, deep: true },
@@ -227,8 +271,7 @@ const getPermList = async () => {
   }
 };
 
-const handleGoPage = async (routeName: string, id?: number, type?: string) => {
-  console.log(type);
+const handleGoPage = async (routeName: string, id?: number) => {
   let result = true;
   if (Object.keys(curLeavePageData.value).length > 0) {
     result = await isSidebarClosed(JSON.stringify(curLeavePageData.value)) as boolean;
@@ -284,7 +327,6 @@ onMounted(async () => {
     initSidebarFormData(payload);
   });
   gatewaysList.value = await getGatewaysListData();
-  console.log('gatewaysList', gatewaysList);
   // 初始化设置一次
   handleSetApigwName();
   getPermList();
@@ -452,6 +494,10 @@ onMounted(async () => {
       .default-header-view{
         height: calc(100vh - 105px);
         overflow: auto;
+
+        &.has-notice {
+          height: calc(100vh - 147px);
+        }
       }
       .custom-header-view{
         margin-top: 52px;
@@ -478,6 +524,13 @@ onMounted(async () => {
     }
   }
 }
+// .kind-program {
+//   margin: 6px 0px 6px 6px;
+//   font-size: 16px;
+//   line-height: 18px;
+//   text-align: center;
+//   color: #3A84FF;
+// }
 </style>
 <style lang="scss">
 .custom-height-navigation {

@@ -163,6 +163,28 @@ DATABASES = {
     },
 }
 
+## database ssl
+BK_ESB_DATABASE_TLS_ENABLED = env.bool("BK_ESB_DATABASE_TLS_ENABLED", False)
+if BK_ESB_DATABASE_TLS_ENABLED:
+    default_ssl_options = {
+        "ca": env.str("BK_ESB_DATABASE_TLS_CERT_CA_FILE", ""),
+    }
+    # mTLS
+    default_cert_file = env.str("BK_ESB_DATABASE_TLS_CERT_FILE", "")
+    default_key_file = env.str("BK_ESB_DATABASE_TLS_CERT_KEY_FILE", "")
+    if default_cert_file and default_key_file:
+        default_ssl_options["cert"] = default_cert_file
+        default_ssl_options["key"] = default_key_file
+
+    # 跳过主机名/IP 验证，会降低安全性，正式环境不能开启
+    check_hostname = env.bool("BK_ESB_DATABASE_TLS_CHECK_HOSTNAME", True)
+    default_ssl_options["check_hostname"] = check_hostname
+
+    if "OPTIONS" not in DATABASES["default"]:
+        DATABASES["default"]["OPTIONS"] = {}
+
+    DATABASES["default"]["OPTIONS"]["ssl"] = default_ssl_options
+
 
 # log 配置
 LOG_DIR = env.str("BK_ESB_LOG_PATH", "")

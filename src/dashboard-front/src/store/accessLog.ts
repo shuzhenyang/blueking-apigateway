@@ -3,8 +3,11 @@ import i18n from '@/language/i18n';
 
 const { t } = i18n.global;
 
+// 定义一个名为 useAccessLog 的 store
 export const useAccessLog = defineStore('accessLog', {
+  // 定义 store 的状态
   state: () => ({
+    // 日期选择快捷方式
     datepickerShortcuts: [
       {
         text: t('最近5分钟'),
@@ -61,6 +64,7 @@ export const useAccessLog = defineStore('accessLog', {
         },
       },
     ],
+    // 一天内的快捷方式
     shortcutsInDay: [
       {
         text: t('最近5分钟'),
@@ -108,6 +112,7 @@ export const useAccessLog = defineStore('accessLog', {
         },
       },
     ],
+    // 告警策略选项
     alarmStrategyOptions: {
       alarmType: [
         {
@@ -208,6 +213,7 @@ export const useAccessLog = defineStore('accessLog', {
         ],
       },
     },
+    // 告警状态
     alarmStatus: [
       {
         name: t('已接收'),
@@ -226,6 +232,7 @@ export const useAccessLog = defineStore('accessLog', {
         value: 'failure',
       },
     ],
+    // 请求方法列表
     methodList: [
       {
         id: 'GET',
@@ -261,6 +268,7 @@ export const useAccessLog = defineStore('accessLog', {
         name: 'ANY',
       },
     ],
+    // SDK 语言列表
     SDKLanguageList: [
       {
         name: 'python',
@@ -271,6 +279,7 @@ export const useAccessLog = defineStore('accessLog', {
         value: 'golang',
       },
     ],
+    // 审计选项
     auditOptions: {
       OPObjectType: [
         {
@@ -334,25 +343,61 @@ export const useAccessLog = defineStore('accessLog', {
       ],
     },
   }),
+  // 定义 store 的 getters
   getters: {
+    /**
+     * 获取日期选择快捷方式
+     * @param {Object} state - store 的状态对象
+     * @returns {Array} 日期选择快捷方式数组
+     */
     getDatepickerShortcuts(state) {
       return state.datepickerShortcuts;
     },
+    /**
+     * 获取一天内的快捷方式
+     * @param {Object} state - store 的状态对象
+     * @returns {Array} 一天内的快捷方式数组
+     */
     getShortcutsInDay(state) {
       return state.shortcutsInDay;
     },
+    /**
+     * 获取告警策略选项
+     * @param {Object} state - store 的状态对象
+     * @returns {Object} 告警策略选项对象
+     */
     getAlarmStrategyOptions(state) {
       return state.alarmStrategyOptions;
     },
+    /**
+     * 获取告警状态
+     * @param {Object} state - store 的状态对象
+     * @returns {Array} 告警状态数组
+     */
     getAlarmStatus(state) {
       return state.alarmStatus;
     },
+    /**
+     * 获取请求方法列表
+     * @param {Object} state - store 的状态对象
+     * @returns {Array} 请求方法列表数组
+     */
     getMethodList(state) {
       return state.methodList;
     },
+    /**
+     * 获取 SDK 语言列表
+     * @param {Object} state - store 的状态对象
+     * @returns {Array} SDK 语言列表数组
+     */
     getSDKLanguageList(state) {
       return state.SDKLanguageList;
     },
+    /**
+     * 获取审计选项
+     * @param {Object} state - store 的状态对象
+     * @returns {Object} 审计选项对象
+     */
     getAuditOptions(state) {
       return state.auditOptions;
     },

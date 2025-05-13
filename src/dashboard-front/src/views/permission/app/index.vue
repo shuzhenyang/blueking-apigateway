@@ -30,6 +30,7 @@
         <bk-table
           show-overflow-tooltip
           class="perm-app-table mt15"
+          :is-row-select-enable="isRowSelectEnable"
           :data="tableData"
           size="small"
           :pagination="pagination"
@@ -40,7 +41,11 @@
           @selection-change="handleSelectionChange"
           @select-all="handleSelecAllChange"
         >
-          <bk-table-column type="selection" width="60" align="center"></bk-table-column>
+          <bk-table-column
+            align="center"
+            type="selection"
+            width="60"
+          />
           <bk-table-column :label="t('蓝鲸应用ID')" prop="bk_app_code"></bk-table-column>
           <bk-table-column :label="t('授权维度')" prop="grant_dimension" :filter="grantDimensionFilterOptions">
             <template #default="{ row }: { row: IPermission }">
@@ -61,12 +66,14 @@
               </span>
             </template>
           </bk-table-column>
-          <bk-table-column :label="t('过期时间')">
+          <bk-table-column :label="t('有效期')">
             <template #default="{ row }: { row: IPermission }">
-              {{ row.expires || t('永久有效') }}
+              <span
+                :style="{ color: getDurationTextColor(row.expires) }"
+              >{{ getDurationText(row.expires) }}</span>
             </template>
           </bk-table-column>
-          <bk-table-column width="150" :label="t('授权类型')" prop="grant_type" :filter="grantTypeFilterOptions">
+          <bk-table-column width="150" :label="t('授权类型')" prop="grant_type">
             <template #default="{ row }: { row: IPermission }">
               {{ row.grant_type === 'initialize' ? t('主动授权') : t('申请审批') }}
             </template>
@@ -98,7 +105,7 @@
 
     <!-- 主动授权sideslider -->
     <bk-sideslider
-      v-model:isShow="authSliderConf.isShow"
+      v-model:is-show="authSliderConf.isShow"
       :title="authSliderConf.title"
       :width="800"
       quick-close
@@ -205,7 +212,7 @@
 
     <!--  批量续期 slider  -->
     <bk-sideslider
-      v-model:isShow="batchApplySliderConf.isShow"
+      v-model:is-show="batchApplySliderConf.isShow"
       width="960"
       :title="t('批量续期')"
       quick-close
@@ -213,7 +220,7 @@
     >
       <template #default>
         <div class="renew-slider-content-wrap">
-          <ExpDaySelector v-model="expireDays" form-type="vertical" />
+          <ExpDaySelector v-model="expireDays" form-type="vertical" label-position="left" />
           <div class="collapse-wrap">
             <bk-collapse
               v-model="activeIndex"
@@ -243,21 +250,20 @@
                       </template>
                     </bk-table-column>
                     <bk-table-column
-                      :label="t('续期前的过期时间')"
-                      :width="392"
+                      :label="t('有效期')"
+                      width="300"
                     >
                       <template #default="{ row }">
-                        <span v-if="row.expires">{{ row.expires }}</span>
-                        <span v-else class="ag-strong warning">{{ t('永久') }}</span>
-                        <span class="ag-strong default" v-if="!row.renewable && row.expires">
-                          {{ t('(有效期大于30天)') }}
-                        </span>
-                      </template>
-                    </bk-table-column>
-                    <bk-table-column width="180" :label="t('续期后的过期时间')">
-                      <template #default="{ row }">
-                        <span class="ag-strong danger" v-if="!row.renewable"> {{ t('不可续期') }} </span>
-                        <span v-else class="ag-strong warning">{{ getExpTimeAfterRenew(row) }}</span>
+                        <div>
+                          <span
+                            :style="{ color: getDurationTextColor(row.expires) }"
+                          >{{ getDurationText(row.expires) }}</span>
+                          <span><AgIcon name="arrows--right--line" style="color: #699df4;" /></span>
+                          <span>
+                            <span v-if="!row.renewable" class="ag-strong danger"> {{ t('不可续期') }} </span>
+                            <span v-else class="ag-normal primary">{{ getDurationAfterRenew(row.expires) }}</span>
+                          </span>
+                        </div>
                       </template>
                     </bk-table-column>
                   </bk-table>
@@ -286,21 +292,20 @@
                       </template>
                     </bk-table-column>
                     <bk-table-column
-                      :label="t('续期前的过期时间')"
-                      :width="392"
+                      :label="t('有效期')"
+                      width="300"
                     >
                       <template #default="{ row }">
-                        <span v-if="row.expires">{{ row.expires }}</span>
-                        <span v-else class="ag-strong warning">{{ t('永久') }}</span>
-                        <span class="ag-strong default" v-if="!row.renewable && row.expires">
-                          {{ t('(有效期大于30天)') }}
-                        </span>
-                      </template>
-                    </bk-table-column>
-                    <bk-table-column width="180" :label="t('续期后的过期时间')">
-                      <template #default="{ row }">
-                        <span class="ag-strong danger" v-if="!row.renewable"> {{ t('不可续期') }} </span>
-                        <span v-else class="ag-strong warning">{{ getExpTimeAfterRenew(row) }}</span>
+                        <div>
+                          <span
+                            :style="{ color: getDurationTextColor(row.expires) }"
+                          >{{ getDurationText(row.expires) }}</span>
+                          <span><AgIcon name="arrows--right--line" style="color: #699df4;" /></span>
+                          <span>
+                            <span v-if="!row.renewable" class="ag-strong danger"> {{ t('不可续期') }} </span>
+                            <span v-else class="ag-normal primary">{{ getDurationAfterRenew(row.expires) }}</span>
+                          </span>
+                        </div>
                       </template>
                     </bk-table-column>
                   </bk-table>
@@ -333,29 +338,26 @@
     >
       <div>
         <ExpDaySelector v-model="expireDays" />
-        <bk-table :data="curSelections" size="small" :max-height="250" class="mb30">
-          <bk-table-column width="100" :label="t('蓝鲸应用ID')" prop="bk_app_code"></bk-table-column>
-          <bk-table-column :label="t('资源名称')">
-            <template #default="{ row }">
-              {{ row.resource_name || '--' }}
-            </template>
-          </bk-table-column>
-          <bk-table-column :label="t('续期前的过期时间')">
-            <template #default="{ row }">
-              <span v-if="row.expires">{{ row.expires }}</span>
-              <span v-else class="ag-strong warning">{{ t('永久') }}</span>
-              <span class="ag-strong default" v-if="!row.renewable && row.expires">
-                {{ t('(有效期大于30天)') }}
+        <BkForm label-position="right" label-width="100">
+          <BkFormItem :label="t('蓝鲸应用ID')">
+            <div>{{ curSelections?.[0].bk_app_code || '--' }}</div>
+          </BkFormItem>
+          <BkFormItem :label="t('资源名称')">
+            <div>{{ curSelections?.[0].resource_name || '--' }}</div>
+          </BkFormItem>
+          <BkFormItem :label="t('有效期')">
+            <div>
+              <span
+                :style="{ color: getDurationTextColor(curSelections?.[0].expires) }"
+              >{{ getDurationText(curSelections?.[0].expires) }}</span>
+              <span><AgIcon name="arrows--right--line" style="color: #699df4;" /></span>
+              <span>
+                <span v-if="!curSelections?.[0].renewable" class="ag-strong danger">{{ t('不可续期') }}</span>
+                <span v-else class="ag-normal primary">{{ getDurationAfterRenew(curSelections?.[0].expires) }}</span>
               </span>
-            </template>
-          </bk-table-column>
-          <bk-table-column :label="t('续期后的过期时间')">
-            <template #default="{ row }">
-              <span class="ag-strong danger" v-if="!row.renewable"> {{ t('不可续期') }} </span>
-              <span v-else class="ag-strong warning ">{{ getExpTimeAfterRenew(row) }}</span>
-            </template>
-          </bk-table-column>
-        </bk-table>
+            </div>
+          </BkFormItem>
+        </BkForm>
       </div>
       <template #footer>
         <template v-if="applyCount">
@@ -387,10 +389,7 @@ import {
   watch,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
-import {
-  sortByKey,
-  timeFormatter,
-} from '@/common/util';
+import { sortByKey } from '@/common/util';
 import {
   authApiPermission,
   authResourcePermission,
@@ -423,38 +422,85 @@ import {
   IFilterParams,
 } from '@/http/permission';
 import dayjs from 'dayjs';
+import { ISearchItem } from 'bkui-vue/lib/search-select/utils';
+import AgIcon from '@/components/ag-icon.vue';
 
 const { t } = useI18n();
 const common = useCommon();
 const { apigwId } = common; // 网关id
 
+const checkedGrantDimensionFilterOptions = ref<string[]>([]);
+const checkedGrantTypeFilterOptions = ref<string[]>([]);
+
 // 授权维度表头过滤
 const grantDimensionFilterOptions = {
   list: [
     {
-      value: 'api',
+      // value: 'api',
+      value: t('按网关'),
       text: t('按网关'),
     },
     {
-      value: 'resource',
+      // value: 'resource',
+      value: t('按资源'),
       text: t('按资源'),
     },
   ],
+  checked: checkedGrantDimensionFilterOptions.value,
+  filterFn: (checked: string[], row: IPermission) => {
+    if (!checked.length) {
+      return true;
+    }
+
+    const checkedList = checked.map((value) => {
+      if (value === '按网关' || value === 'By Gateway') {
+        return 'api';
+      }
+      if (value === '按资源' || value === 'By Resource') {
+        return 'resource';
+      }
+
+      return value;
+    });
+
+    return checkedList.includes(row.grant_dimension);
+  },
 };
 
 // 授权类型表头过滤
-const grantTypeFilterOptions = {
-  list: [
-    {
-      value: 'initialize',
-      text: t('主动授权'),
-    },
-    {
-      value: 'renew',
-      text: t('申请审批'),
-    },
-  ],
-};
+// const grantTypeFilterOptions = {
+//   list: [
+//     {
+//       // value: 'initialize',
+//       value: t('主动授权'),
+//       text: t('主动授权'),
+//     },
+//     {
+//       // value: 'renew',
+//       value: t('申请审批'),
+//       text: t('申请审批'),
+//     },
+//   ],
+//   checked: checkedGrantTypeFilterOptions.value,
+//   filterFn: (checked: string[], row: IPermission) => {
+//     if (!checked.length) {
+//       return true;
+//     }
+//
+//     const checkedList = checked.map((value) => {
+//       if (value === '主动授权' || value === 'Add Permissions') {
+//         return 'initialize';
+//       }
+//       if (value === '申请审批' || value === 'apply') {
+//         return 'renew';
+//       }
+//
+//       return value;
+//     });
+//
+//     return checkedList.includes(row.grant_type);
+//   },
+// };
 
 const filterData = ref<IFilterParams>({});
 
@@ -474,14 +520,15 @@ const {
   handleSelectionChange,
   handleSelecAllChange,
   resetSelections,
-} = useSelection();
+} = useSelection({ isRowSelectEnable: row => row.renewable });
 
 const resourceList = ref<IResource[]>([]);
 const isBatchApplyLoading = ref(false);
 const curPermission = ref<Partial<IPermission>>({ bk_app_code: '', detail: [], id: -1 });
 const curSelections = ref([]);
-const renewableConfig = reactive({
-  content: t('权限有效期大于 30 天时，暂无法续期'), placement: 'left',
+const renewableConfig = ref({
+  content: t('权限有效期大于 360 天时，暂无法续期'),
+  placement: 'left',
 });
 
 // 导出下拉
@@ -530,7 +577,7 @@ const exportParams = ref<IExportParams>({
 
 const filterValues = ref<IFilterValues[]>([]);
 const componentKey = ref(0);
-const filterConditions = ref([
+const filterConditions = ref<ISearchItem[]>([
   {
     name: t('授权维度'),
     id: 'grant_dimension',
@@ -582,25 +629,42 @@ const selectedApiPermList = computed(() => curSelections.value.filter(perm => pe
 
 // 监听搜索是否变化
 watch(
-  () => filterValues.value,
-  (v) => {
+  filterValues,
+  () => {
     resetSelections();
+    // 当前有资源名称过滤，且过滤值不在资源列表中，则删除该过滤条件
+    const resourceIdFilterIndex = filterValues.value.findIndex(filter => filter.id === 'resource_id');
+
+    if (resourceIdFilterIndex > -1) {
+      const resourceId = filterValues.value[resourceIdFilterIndex].values[0].id as string;
+      const validResourceIds = filterConditions.value
+        .find(condition => condition.id === 'resource_id').children
+        .map(option => option.id);
+      if (!validResourceIds.includes(resourceId)) {
+        filterValues.value.splice(resourceIdFilterIndex, 1);
+        Message({
+          theme: 'warning',
+          message: t('请选择有效的资源名称'),
+        });
+      }
+    }
+
     filterData.value = {};
     let isEmpty = false;
-    if (v) {
+    if (filterValues.value) {
       // 把纯文本搜索项转换成查询参数
-      const textItem = v.find(val => val.type === 'text');
+      const textItem = filterValues.value.find(val => val.type === 'text');
 
       if (textItem) {
         filterData.value.keyword = textItem.name || '';
       }
 
-      v.forEach((item) => {
+      filterValues.value.forEach((item) => {
         if (item.values) {
           filterData.value[item.id] = item.values[0].id;
         }
       });
-      isEmpty = v.length === 0;
+      isEmpty = filterValues.value.length === 0;
     }
     exportDropData.value.forEach((e: IDropList) => {
       // 已选资源
@@ -634,17 +698,15 @@ watch(
   },
   {  deep: true },
 );
-watch(
-  () => filterData.value, () => {
-    // filterData 变化重新请求列表数据，数据还未返回时执行 updateTableEmptyConfig 偶现问题，因此加入延迟
-    setTimeout(() => {
-      updateTableEmptyConfig();
-    }, 100);
-  },
-  {
-    deep: true,
-  },
-);
+
+// 侦听返回的数据和表头 filter 变化，更新空数据展示状态
+watch([
+  tableData,
+  checkedGrantDimensionFilterOptions,
+  checkedGrantTypeFilterOptions,
+], () => {
+  updateTableEmptyConfig();
+}, { deep: true });
 
 const getBkAppCodes = async () => {
   const appCodeOption = filterConditions.value.find(condition => condition.id === 'bk_app_code');
@@ -674,7 +736,7 @@ const getApigwResources = async () => {
   }));
   resourceList.value = sortByKey(results, 'name');
   resourceIdOption.children = resourceList.value.map(item => ({
-    id: item.id,
+    id: String(item.id),
     name: item.name,
   }));
   componentKey.value += 1;
@@ -912,6 +974,8 @@ const handleSidesliderCancel = () => {
 const handleClearFilterKey = () => {
   filterData.value = {};
   filterValues.value = [];
+  checkedGrantDimensionFilterOptions.value = [];
+  checkedGrantTypeFilterOptions.value = [];
   getList();
   updateTableEmptyConfig();
 };
@@ -925,12 +989,8 @@ const updateTableEmptyConfig = () => {
   });
   const list = Object.values(searchParams).filter(item => item !== '');
   tableEmptyConf.value.isAbnormal = pagination.value.abnormal;
-  if (list.length && !tableData.value.length) {
+  if (list.length || checkedGrantDimensionFilterOptions.value.length || checkedGrantTypeFilterOptions.value.length) {
     tableEmptyConf.value.keyword = 'placeholder';
-    return;
-  }
-  if (list.length) {
-    tableEmptyConf.value.keyword = '$CONSTANT';
     return;
   }
   tableEmptyConf.value.keyword = '';
@@ -943,19 +1003,22 @@ const getSearchDimensionText = (raw: string | null) => {
 };
 
 // 计算续期后的过期时间
-const getExpTimeAfterRenew = (permission: IPermission, days?: number) => {
+const getDurationAfterRenew = (expireAt: string | null, days?: number) => {
   const _days = days || expireDays.value;
-  if (!permission.expires || _days === 0) return t('永久');
-
-  try {
-    return timeFormatter(`${dayjs().add(_days * 24 * 60 * 60 * 1000, 'millisecond')}`);
-  } catch {
-    Message({
-      theme: 'error',
-      message: t('日期格式错误'),
-    });
-    return '--';
+  if (!expireAt || _days === 0) {
+    return t('永久');
   }
+
+  const today = dayjs();
+  const expireDate = dayjs(expireAt);
+
+  // 已过期
+  if (today.isAfter(expireDate)) {
+    return `${_days}${t('天')}`;
+  }
+
+  const daysLeft = expireDate.diff(today, 'day');
+  return `${daysLeft + _days}${t('天')}`;
 };
 
 const handleApplyDialogClose = () => {
@@ -966,6 +1029,38 @@ const handleApplyDialogClose = () => {
 const handleBatchApplySliderClose = () => {
   expireDays.value = 0;
   batchApplySliderConf.isShow = false;
+};
+
+const getDurationText = (expireAt: string | null) => {
+  if (!expireAt) {
+    return t('永久');
+  }
+
+  const today = dayjs();
+  const expireDate = dayjs(expireAt);
+
+  if (today.isAfter(expireDate)) {
+    return t('已过期');
+  }
+  return `${expireDate.diff(today, 'day')}${t('天')}`;
+};
+
+const getDurationTextColor = (expireAt: string | null) => {
+  if (!expireAt) {
+    return '#2caf5e';
+  }
+
+  const today = dayjs();
+  const expireDate = dayjs(expireAt);
+
+  if (today.isAfter(expireDate)) {
+    return '#f59500';
+  }
+  return '#63656e';
+};
+
+const isRowSelectEnable = ({ row }: { row: IPermission }) => {
+  return row.renewable;
 };
 
 const init = () => {
@@ -993,31 +1088,7 @@ init();
 .w400 {
   width: 400px;
 }
-.ag-strong {
-    font-weight: bold;
-    color: #63656E;
-    font-style: normal;
 
-    &.default {
-        color: #979BA5;
-    }
-
-    &.primary {
-        color: #3a84ff;
-    }
-
-    &.success {
-        color: #34d97b;
-    }
-
-    &.danger {
-        color: #ff5656;
-    }
-
-    &.warning {
-        color: #ffb400;
-    }
-}
 .ag-span-title {
   font-size: 14px;
   font-weight: bold;

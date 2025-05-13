@@ -2,7 +2,7 @@
   <div>
     <bk-sideslider
       class="release-sideslider"
-      v-model:isShow="isShow"
+      v-model:is-show="isShow"
       :width="960"
       :title="t('发布资源至环境【{stage}】', { stage: chooseAssets.name })"
       quick-close
@@ -165,7 +165,14 @@
               </div>
             </template>
             <div :class="stepsConfig.curStep === 1 ? 'operate1' : 'operate2'">
-              <bk-button v-if="stepsConfig.curStep === 1" theme="primary" style="width: 100px" @click="handleNext">
+              <bk-button
+                v-if="stepsConfig.curStep === 1"
+                :disabled="isNextBtnDisabled"
+                theme="primary"
+                style="width: 100px"
+                v-bk-tooltips="{ content: t('请新建版本再发布'), disabled: !isNextBtnDisabled }"
+                @click="handleNext"
+              >
                 {{ $t('下一步') }}
               </bk-button>
               <template v-else-if="stepsConfig.curStep === 2">
@@ -224,15 +231,13 @@
             }}
           </div>
           <div class="dialog-subtitle">
-            {{
-              isRollback ? t('发布后，将会覆盖原来的资源版本，请谨慎操作！') : ('发布后，将会覆盖原来的资源版本，请谨慎操作！')
-            }}
+            {{ t('发布后，将会覆盖原来的资源版本，请谨慎操作！') }}
           </div>
         </main>
         <footer class="dialog-footer">
           <bk-button theme="primary" @click="handlePublish()">
             {{
-              isRollback ? t('确认回滚') : ('确认发布')
+              isRollback ? t('确认回滚') : t('确认发布')
             }}
           </bk-button>
           <bk-button class="ml10" @click="isConfirmDialogVisible = false">{{ t('取消') }}</bk-button>
@@ -244,13 +249,30 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
-import { ref, reactive, watch, computed } from 'vue';
-import { getResourceVersionsList, resourceVersionsDiff, createReleases, getStageList } from '@/http';
-import { useRoute, useRouter } from 'vue-router';
+import {
+  computed,
+  nextTick,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
+import {
+  createReleases,
+  getResourceVersionsList,
+  getStageList,
+  resourceVersionsDiff,
+} from '@/http';
+import {
+  useRoute,
+  useRouter,
+} from 'vue-router';
 import versionDiff from '@/components/version-diff/index.vue';
 import logDetails from '@/components/log-details/index.vue';
 import { Message } from 'bkui-vue';
-import { useSidebar, useGetStageList } from '@/hooks';
+import {
+  useGetStageList,
+  useSidebar,
+} from '@/hooks';
 import dayjs from 'dayjs';
 
 type VersionType = {
@@ -258,14 +280,6 @@ type VersionType = {
   version: string
   isLatestVersion: boolean
 };
-
-const route = useRoute();
-const router = useRouter();
-const { initSidebarFormData, isSidebarClosed/* , isBackDialogShow */ } = useSidebar();
-const { getStagesStatus } = useGetStageList();
-const apigwId = computed(() => +route.params.id);
-
-const { t } = useI18n();
 
 const props = defineProps({
   currentAssets: {
@@ -277,8 +291,14 @@ const props = defineProps({
     required: false,
   },
 });
+const emit = defineEmits<(e: 'release-success' | 'hidden' | 'closed-on-publishing') => void>();
+const route = useRoute();
+const router = useRouter();
+const { initSidebarFormData, isSidebarClosed/* , isBackDialogShow */ } = useSidebar();
+const { getStagesStatus } = useGetStageList();
+const apigwId = computed(() => +route.params.id);
 
-const emit = defineEmits<(e: 'release-success' | 'hidden') => void>();
+const { t } = useI18n();
 
 const resourceVersion = computed(() => {
   let version = '';
@@ -288,6 +308,15 @@ const resourceVersion = computed(() => {
     }
   });
   return version;
+});
+
+// 当版本过旧时“下一步”按钮不能点击
+const isNextBtnDisabled = computed(() => {
+  const currentResource = versionList.value.find(version => version.id === formData.resource_version_id);
+  if (currentResource) {
+    return currentResource.schema_version === '1.0';
+  }
+  return false;
 });
 
 const chooseVersionComment = ref<string>('');
@@ -407,6 +436,9 @@ const handleReleaseSuccess = () => {
 };
 
 const handleReleaseDoing = () => {
+  nextTick(() => {
+    emit('closed-on-publishing');
+  });
   setTimeout(() => {
     getStagesStatus();
   }, 3000);

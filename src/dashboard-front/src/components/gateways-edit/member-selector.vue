@@ -28,9 +28,23 @@
           @change="handleChange"
           @keydown="handleEnter" />
         <aside class="edit-member-actions">
-          <bk-button style="width: 32px" @click.stop="handleSubmit">
+          <bk-pop-confirm
+            width="288"
+            :content="t('您已将自己从维护人员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！')"
+            trigger="click"
+            ext-cls="confirm-custom-btn"
+            @confirm="handleSubmit"
+            @cancel="handleCancel"
+            v-if="!displayValue?.includes(user.user.username)"
+          >
+            <bk-button style="width: 32px">
+              <i class="apigateway-icon icon-ag-check-1 f24" style="color: #3A84FF;"></i>
+            </bk-button>
+          </bk-pop-confirm>
+          <bk-button v-else style="width: 32px" @click.stop="handleSubmit">
             <i class="apigateway-icon icon-ag-check-1 f24" style="color: #3A84FF;"></i>
           </bk-button>
+
           <bk-button style="width: 32px" @click="handleCancel">
             <i class="apigateway-icon icon-ag-icon-close f24"></i>
           </bk-button>
@@ -44,6 +58,8 @@
 <script lang="ts" setup>
 import { computed, ref, nextTick, watch, onBeforeMount, onMounted } from 'vue';
 import MemberSelector from '../member-select';
+import { useUser } from '@/store/user';
+import { useI18n } from 'vue-i18n';
 const props = defineProps({
   field: {
     type: String,
@@ -82,6 +98,8 @@ const props = defineProps({
   },
 });
 const emit = defineEmits(['on-change']);
+const user = useUser();
+const { t } = useI18n();
 
 const memberSelectorRef = ref();
 const memberSelectorEditRef = ref();
@@ -127,6 +145,11 @@ const handleChange = () => {
 
 const handleEnter = (event: any) => {
   if (!isEditable.value) return;
+  if (!displayValue.value?.includes(user.user.username)) {
+    isShowError.value = true;
+    errorTips.value = t('您已将自己从维护人员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！');
+    return;
+  }
   if (event.key === 'Enter' && event.keyCode === 13) {
     triggerChange();
   }
@@ -136,6 +159,11 @@ const hideEdit = (event: any) => {
   if (props.isRequired && !displayValue.value.length) {
     isShowError.value = true;
     errorTips.value = props.errorValue;
+    return;
+  }
+  if (!displayValue.value?.includes(user.user.username)) {
+    isShowError.value = true;
+    errorTips.value = t('您已将自己从维护人员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！');
     return;
   }
   if (memberSelectorEditRef.value?.contains(event.target)) {
@@ -293,3 +321,15 @@ onBeforeMount(() => {
 }
 </style>
 
+<style lang="scss">
+.confirm-custom-btn {
+  .bk-button.bk-button-primary {
+    background-color: #E71818;
+    border-color: #E71818;
+    &:hover {
+      background-color: #ff5656;
+      border-color: #ff5656;
+    }
+  }
+}
+</style>

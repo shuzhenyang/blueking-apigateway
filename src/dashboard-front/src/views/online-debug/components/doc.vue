@@ -97,23 +97,26 @@
 <script setup lang="ts">
 /* eslint-disable max-len */
 
-import { ref, computed, nextTick } from 'vue';
+import {
+  computed,
+  nextTick,
+  ref,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useUser, useCommon } from '@/store';
+import {
+  useCommon,
+  useUser,
+} from '@/store';
 import { copy } from '@/common/util';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import {
-  getApigwResourceSDKDocs,
   getApigwResourceDocDocs,
+  getApigwResourceSDKDocs,
   getApigwResourcesDocs,
   getApigwSDKDocs,
   getGatewaysDetailsDocs,
 } from '@/http';
-
-const { t } = useI18n();
-const userStore = useUser();
-const common = useCommon();
 
 const props = defineProps({
   stageName: {
@@ -123,6 +126,9 @@ const props = defineProps({
     type: String,
   },
 });
+const { t } = useI18n();
+const userStore = useUser();
+const common = useCommon();
 
 const curSdk = ref<any>({});
 const active = ref<string>('doc');

@@ -40,6 +40,8 @@ from apigateway.apps.plugin.constants import (
 )
 from apigateway.utils.yaml import yaml_loads
 
+from .normalizer import format_fault_injection_config
+
 VARS_ALLOWED_COMPARISON_SYMBOLS = {"==", "~=", ">", ">=", "<", "<=", "~~", "~*", "in", "has", "!", "ipmatch"}
 
 
@@ -90,7 +92,7 @@ class BkCorsChecker(BaseChecker):
         for re_rule in allow_origins_by_regex:
             try:
                 re.compile(re_rule)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 raise ValueError(
                     _("allow_origins_by_regex 中数据 '{re_rule}' 不是合法的正则表达式。").format(re_rule=re_rule)
                 )
@@ -131,7 +133,7 @@ class BkIPRestrictionChecker(BaseChecker):
 
             try:
                 ipaddress.ip_interface(ip_line)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 raise ValueError("line {}: {}".format(index + 1, e))
 
     def check(self, payload: str):
@@ -195,6 +197,7 @@ class FaultInjectionChecker(BaseChecker):
         if not loaded_data:
             raise ValueError("YAML cannot be empty")
 
+        loaded_data = format_fault_injection_config(loaded_data)
         abort_data = loaded_data.get("abort")
         delay_data = loaded_data.get("delay")
 
@@ -213,7 +216,8 @@ class FaultInjectionChecker(BaseChecker):
                 raise ValueError("The percentage of abort must be greater than 0 and less than or equal to 100.")
 
             abort_vars = abort_data.get("vars")
-            check_vars(abort_vars, "abort")
+            if abort_vars:
+                check_vars(abort_vars, "abort")
 
         if delay_data:
             duration = delay_data.get("duration")
@@ -225,7 +229,51 @@ class FaultInjectionChecker(BaseChecker):
                 raise ValueError("The percentage of delay must be greater than 0 and less than or equal to 100.")
 
             delay_vars = delay_data.get("vars")
-            check_vars(delay_vars, "delay")
+            if delay_vars:
+                check_vars(delay_vars, "delay")
+
+
+class ResponseRewriteChecker(BaseChecker):
+    def check(self, payload: str):
+        loaded_data = yaml_loads(payload)
+        if not loaded_data:
+            raise ValueError("YAML cannot be empty")
+
+        status_code = loaded_data.get("status_code")
+        if status_code is not None and not (200 <= status_code <= 598):
+            raise ValueError("status_code must be between 200 and 598.")
+
+        response_rewrite_vars = loaded_data.get("vars")
+        if response_rewrite_vars:
+            check_vars(response_rewrite_vars, "response_rewrite")
+
+        headers = loaded_data.get("headers")
+        if headers:
+            add_keys = [item["key"] for item in headers.get("add", [])]
+            add_duplicate_keys = [key for key, count in Counter(add_keys).items() if count >= 2]
+            if add_duplicate_keys:
+                raise ValueError(_("add has duplicate elements：{}").format(", ".join(add_duplicate_keys)))
+
+            set_keys = [item["key"].lower() for item in headers.get("set", [])]
+            set_duplicate_keys = [key for key, count in Counter(set_keys).items() if count >= 2]
+            if set_duplicate_keys:
+                raise ValueError(_("set has duplicate elements：{}").format(", ".join(set_duplicate_keys)))
+
+            remove_keys = [item["key"] for item in headers.get("remove", [])]
+            remove_duplicate_keys = [key for key, count in Counter(remove_keys).items() if count >= 2]
+            if remove_duplicate_keys:
+                raise ValueError(_("remove has duplicate elements：{}").format(", ".join(remove_duplicate_keys)))
+
+
+class RedirectChecker(BaseChecker):
+    def check(self, payload: str):
+        loaded_data = yaml_loads(payload)
+        if not loaded_data:
+            raise ValueError("YAML cannot be empty")
+
+        ret_code = loaded_data.get("ret_code")
+        if ret_code is not None and not (ret_code >= 200):
+            raise ValueError("ret_code must be greater than or equal to 200.")
 
 
 def check_vars(vars, location):
@@ -244,7 +292,7 @@ def check_vars(vars, location):
     parsed_vars = []
     try:
         parsed_vars = ast.literal_eval(vars)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         raise ValueError(f"The vars of {location} is not valid, error: {e}")
 
     # 第一层 parsed_vars = [ [a], [] ]
@@ -276,6 +324,8 @@ class PluginConfigYamlChecker:
         PluginTypeCodeEnum.BK_IP_RESTRICTION.value: BkIPRestrictionChecker(),
         PluginTypeCodeEnum.REQUEST_VALIDATION.value: RequestValidationChecker(),
         PluginTypeCodeEnum.FAULT_INJECTION.value: FaultInjectionChecker(),
+        PluginTypeCodeEnum.RESPONSE_REWRITE.value: ResponseRewriteChecker(),
+        PluginTypeCodeEnum.REDIRECT.value: RedirectChecker(),
     }
 
     def __init__(self, type_code: str):

@@ -25,6 +25,7 @@ from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, serializers, status
 
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
+from apigateway.apps.plugin.models import PluginType
 from apigateway.apps.support.models import ResourceDoc, ResourceDocVersion
 from apigateway.biz.backend import BackendHandler
 from apigateway.biz.plugin_binding import PluginBindingHandler
@@ -33,10 +34,11 @@ from apigateway.biz.resource_version_diff import ResourceDifferHandler
 from apigateway.biz.sdk.gateway_sdk import GatewaySDKHandler
 from apigateway.core.models import Release, Resource, ResourceVersion
 from apigateway.utils.responses import OKJsonResponse
-from apigateway.utils.version import get_next_version
+from apigateway.utils.version import get_nex_version_with_type, get_next_version
 
 from .serializers import (
     NeedNewVersionOutputSLZ,
+    NextProgrammableDeployVersionGetInputSLZ,
     ResourceVersionCreateInputSLZ,
     ResourceVersionDiffOutputSLZ,
     ResourceVersionDiffQueryInputSLZ,
@@ -78,9 +80,9 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
         queryset = ResourceVersion.objects.filter(gateway=request.gateway)
         if query:
             queryset = queryset.filter(version__icontains=query)
-        data = queryset.values(
-            "id", "version", "schema_version", "comment", "name", "title", "created_time", "created_by"
-        ).order_by("-id")
+        data = queryset.values("id", "version", "schema_version", "comment", "created_time", "created_by").order_by(
+            "-id"
+        )
 
         page = self.paginate_queryset(data)
         resource_version_ids = [rv["id"] for rv in page]
@@ -154,6 +156,7 @@ class ResourceVersionRetrieveApi(generics.RetrieveAPIView):
             "resource_doc_updated_time": resource_docs_updated_time,
             "resource_backends": resource_backends,
             "is_schema_v2": instance.is_schema_v2,
+            "plugin_priority": {obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")},
         }
 
         # 如果传入了stage,返回对应stage的backend_config以及合并资源插件
@@ -233,9 +236,11 @@ class ResourceVersionDiffRetrieveApi(generics.RetrieveAPIView):
         source_resource_version_id = data.get("source_resource_version_id")
         target_resource_version_id = data.get("target_resource_version_id")
 
+        version = ResourceVersionHandler.get_latest_version_by_gateway(request.gateway.id)
+
         source_resource_data = []
-        # 如果 source_resource_version_id 和  target_resource_version_id 都不为空，则 source_resource_data数据不为空
-        if source_resource_version_id or target_resource_version_id:
+        # 如果 source_resource_version_id不为空，并且不是第一次生成版本
+        if source_resource_version_id and version != "":
             source_resource_data = ResourceVersionHandler.get_data_by_id_or_new(
                 request.gateway, source_resource_version_id
             )
@@ -261,11 +266,48 @@ class ResourceVersionDiffRetrieveApi(generics.RetrieveAPIView):
 
 
 class NextResourceVersionRetrieveApi(generics.RetrieveAPIView):
+    @method_decorator(
+        name="get",
+        decorator=swagger_auto_schema(
+            responses={status.HTTP_200_OK: ""},
+            tags=["WebAPI.ResourceVersion"],
+            operation_description="获取下一个资源版本号",
+        ),
+    )
     def get(self, request, *args, **kwargs):
         query_set = ResourceVersion.objects.filter(gateway=request.gateway).order_by("-id")
         obj = query_set.first()
         if obj:
             new_version_str = get_next_version(obj.version)
+            return OKJsonResponse(
+                data={"version": new_version_str},
+            )
+        return OKJsonResponse(
+            data={"version": "1.0.0"},
+        )
+
+
+class NextProgramGatewayResourceVersionRetrieveApi(generics.RetrieveAPIView):
+    @method_decorator(
+        name="get",
+        decorator=swagger_auto_schema(
+            query_serializer=NextProgrammableDeployVersionGetInputSLZ(),
+            responses={status.HTTP_200_OK: ""},
+            tags=["WebAPI.ResourceVersion"],
+            operation_description="编程网关环境版本获取",
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        slz = NextProgrammableDeployVersionGetInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        stage_name = slz.validated_data["stage_name"]
+        version_type = slz.validated_data["version_type"]
+        query_set = ResourceVersion.objects.filter(gateway=request.gateway, version__icontains=stage_name).order_by(
+            "-id"
+        )
+        obj = query_set.first()
+        if obj:
+            new_version_str = get_nex_version_with_type(obj.version, version_type)
             return OKJsonResponse(
                 data={"version": new_version_str},
             )

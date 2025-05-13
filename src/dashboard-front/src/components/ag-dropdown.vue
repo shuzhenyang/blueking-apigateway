@@ -19,7 +19,7 @@
             @click="handleDropdownClick(item)"
             :class="{ disabled: item.disabled }"
             :key="item.value"
-            v-bk-tooltips="{ content: item?.tooltips, disabled: !item?.tooltips }"
+            v-bk-tooltips="{ content: item?.tooltips, disabled: !item?.tooltips || !item.disabled }"
           >
             {{ item.label }}
           </bk-dropdown-item>
@@ -29,15 +29,9 @@
   </bk-dropdown>
 </template>
 <script setup lang="ts">
-import { ref, PropType, useSlots } from 'vue';
+import { ref, PropType, useSlots, watch } from 'vue';
 import { IDropList } from '@/types';
 import { AngleRight } from 'bkui-vue/lib/icon';
-
-const slots = useSlots();
-
-interface ApigwIDropList extends IDropList {
-  tooltips?: string;
-}
 
 const props = defineProps({
   text: {
@@ -65,12 +59,26 @@ const props = defineProps({
     default: 'bottom',
   },
 });
-const dropdownList = ref(props.dropdownList);
-const isOpen = ref<boolean>(false);
 
 const emit = defineEmits([
   'on-change',
 ]);
+
+const slots = useSlots();
+
+interface ApigwIDropList extends IDropList {
+  tooltips?: string;
+}
+
+const dropdownList = ref(props.dropdownList);
+const isOpen = ref<boolean>(false);
+
+watch(
+  () => props.dropdownList,
+  () => {
+    dropdownList.value = props.dropdownList;
+  },
+);
 
 const handleDropdownClick = (data: IDropList) => {
   if (data.disabled) return;

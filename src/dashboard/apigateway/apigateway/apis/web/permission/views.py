@@ -145,6 +145,9 @@ class AppPermissionListApi(AppPermissionQuerySetMixin, generics.ListAPIView):
         """
         权限列表(gateway+resource)
         """
+        slz = AppPermissionQueryInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+
         queryset = self.get_queryset()
         page = self.paginate_queryset(queryset)
         resource_ids = [perm["resource_id"] for perm in page if perm.get("resource_id")]
@@ -603,7 +606,7 @@ class AppPermissionApplyApprovalApi(AppPermissionApplyQuerySetMixin, generics.Cr
 
             try:
                 apply_async_on_commit(send_mail_for_perm_handle, args=[record.id])
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 logger.exception("send mail to applicant fail. record_id=%s", record.id)
 
         # 删除申请单

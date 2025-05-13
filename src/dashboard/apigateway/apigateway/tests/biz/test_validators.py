@@ -344,11 +344,18 @@ class TestPublishValidator:
             description="test",
         )
 
-        backend_config = G(
+        stage2 = G(
+            Stage,
+            gateway=fake_gateway,
+            name="test_stage2",
+            description="test",
+        )
+
+        G(
             BackendConfig,
             gateway=fake_gateway,
-            backend_id=backend.id,
-            stage_id=227,
+            backend=backend,
+            stage=fake_stage,
             config={
                 "timeout": 30,
                 "loadbalance": "roundrobin",
@@ -356,12 +363,22 @@ class TestPublishValidator:
             },
         )
 
+        G(
+            BackendConfig,
+            gateway=fake_gateway,
+            backend=backend,
+            stage=stage2,
+            config={
+                "timeout": 30,
+                "loadbalance": "roundrobin",
+                "hosts": [{"scheme": "", "host": "", "weight": 100}],
+            },
+        )
+
         resource_version = G(
             ResourceVersion,
             gateway=fake_gateway,
             version="1",
-            name="11",
-            title="11",
             _data=json.dumps(
                 [
                     {
@@ -382,6 +399,15 @@ class TestPublishValidator:
 
         publish_validator = PublishValidator(fake_gateway, fake_stage, resource_version)
         publish_validator._validate_stage_backends()
+
+    def test_validate_stage_backends_without_default_backend(
+        self, fake_stage, fake_backend, fake_default_empty_backend, fake_resource, fake_gateway
+    ):
+        """
+        测试编辑区资源没有绑定default backend（host为空）的情况
+        """
+        publish_validator = PublishValidator(fake_gateway, fake_stage, None)
+        assert publish_validator._validate_stage_backends() is None
 
 
 class TestSchemeInputValidator:

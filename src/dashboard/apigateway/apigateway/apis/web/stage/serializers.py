@@ -258,3 +258,63 @@ class StagePartialInputSLZ(serializers.Serializer):
 
 class StageStatusInputSLZ(serializers.Serializer):
     status = serializers.ChoiceField(choices=[(StageStatusEnum.INACTIVE.value, "INACTIVE")], help_text="状态")
+
+
+class StageDeployInputSLZ(serializers.Serializer):
+    resource_version = serializers.SerializerMethodField(help_text="当前生效资源版本")
+
+
+class ProgrammableDeploymentInfoSLZ(serializers.Serializer):
+    branch = serializers.CharField(help_text="部署分支", default="", required=False)
+    deploy_id = serializers.CharField(help_text="部署ID", default="", required=False)
+    commit_id = serializers.CharField(help_text="commit_id", default="", required=False)
+    version = serializers.CharField(help_text="部署版本", default="", required=False)
+    history_id = serializers.SerializerMethodField(
+        help_text="网关部署历史id",
+        default=0,  # 确保默认值存在
+    )
+    status = serializers.SerializerMethodField(help_text="部署状态", default="", required=False)
+
+    def get_history_id(self, obj):
+        return self.context.get("latest_history_id", 0)
+
+    def get_status(self, obj):
+        return self.context.get("latest_publish_status", "")
+
+
+class ProgrammableStageDeployOutputSLZ(serializers.Serializer):
+    version = serializers.CharField(help_text="当前生效资源版本", default="", required=False, allow_blank=True)
+    repo_info = serializers.SerializerMethodField(
+        help_text="当前代码仓库信息",
+        default={
+            "repo_url": "",
+            "branch_list": [],
+            "branch_commit_info": {
+                "commit_id": "",
+                "last_update": "",
+                "message": "",
+                "type": "",
+                "extra": {},
+            },
+        },
+    )
+    branch = serializers.CharField(help_text="上一次部署分支", default="", required=False, allow_blank=True)
+    commit_id = serializers.CharField(help_text="上一次部署commit_id", default="", required=False, allow_blank=True)
+    deploy_id = serializers.CharField(help_text="上一次部署ID", default="", required=False, allow_blank=True)
+    created_by = serializers.CharField(help_text="发布人" "", default="", required=False, allow_blank=True)
+    created_time = serializers.CharField(help_text="发布时间" "", default="", required=False, allow_blank=True)
+    latest_deployment = serializers.SerializerMethodField(
+        help_text="当前部署信息",
+        default=dict,  # 设置默认空字典
+    )
+    status = serializers.SerializerMethodField(help_text="部署状态", default="", required=False)
+
+    def get_status(self, obj):
+        return self.context.get("last_publish_status", "")
+
+    def get_repo_info(self, obj):
+        return self.context.get("repo_info", {})
+
+    def get_latest_deployment(self, obj):
+        latest_deploy_history = self.context.get("latest_deploy_history")
+        return ProgrammableDeploymentInfoSLZ(latest_deploy_history, context=self.context).data

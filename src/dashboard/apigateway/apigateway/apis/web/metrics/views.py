@@ -16,22 +16,39 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import csv
+from io import StringIO
+from typing import Any, List
 
 from django.http import Http404
+from django.utils import timezone
+from django.utils.translation import gettext as _
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
-from apigateway.apps.metrics.constants import MetricsInstantEnum, MetricsRangeEnum
-from apigateway.apps.metrics.prometheus.dimension import MetricsInstantFactory, MetricsRangeFactory
+from apigateway.apps.metrics.constants import (
+    MetricsInstantEnum,
+    MetricsRangeEnum,
+)
+from apigateway.apps.metrics.models import StatisticsAppRequestByDay
+from apigateway.apps.metrics.prometheus.dimension import (
+    MetricsInstantFactory,
+    MetricsRangeFactory,
+    MetricsSummaryFactory,
+)
 from apigateway.core.models import Resource, Stage
-from apigateway.utils.responses import OKJsonResponse
+from apigateway.utils.responses import DownloadableResponse, OKJsonResponse
 from apigateway.utils.time import MetricsSmartTimeRange
 
-from .serializers import MetricsQueryInstantInputSLZ, MetricsQueryRangeInputSLZ
+from .serializers import (
+    MetricsQueryInstantInputSLZ,
+    MetricsQueryRangeInputSLZ,
+    MetricsQuerySummaryCallerListInputSLZ,
+    MetricsQuerySummaryInputSLZ,
+)
 
 
 class QueryRangeApi(generics.ListAPIView):
-
     @staticmethod
     def get_series_resource_id_index_map(series):
         ids_data = {}
@@ -40,7 +57,7 @@ class QueryRangeApi(generics.ListAPIView):
             try:
                 id_ = int(series[index]["target"].split('"')[1].split(".")[2])
                 ids_data[id_] = index
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
         return ids_data
@@ -90,14 +107,17 @@ class QueryRangeApi(generics.ListAPIView):
             step=step,
         )
 
-        if metrics_name in ["ingress", "egress"]:
-            series = data.get("data", {}).get("series", [])
-            ids_data = self.get_series_resource_id_index_map(series)
+        series = [s for s in data.get("series", []) if s["target"].strip()]
+        if series:
+            data["series"] = series
 
-            if ids_data:
-                resources = Resource.objects.filter(id__in=ids_data.keys()).values("id", "name")
-                for obj in resources:
-                    series[ids_data[obj["id"]]]["target"] = obj["name"]
+            if metrics_name in ["ingress", "egress"]:
+                ids_data = self.get_series_resource_id_index_map(series)
+
+                if ids_data:
+                    resources = Resource.objects.filter(id__in=ids_data.keys()).values("id", "name")
+                    for obj in resources:
+                        series[ids_data[obj["id"]]]["target"] = 'name="{}"'.format(obj["name"])
 
         return OKJsonResponse(data=data)
 
@@ -169,3 +189,120 @@ class QueryInstantApi(generics.ListAPIView):
             return OKJsonResponse(data=health_rate_result)
 
         return OKJsonResponse(data=requests_total_result)
+
+
+class QuerySummaryApi(generics.ListAPIView):
+    @swagger_auto_schema(
+        query_serializer=MetricsQuerySummaryInputSLZ(),
+        responses={status.HTTP_200_OK: ""},
+        operation_description="查询请求总量/失败请求总量",
+        tags=["WebAPI.Metrics"],
+    )
+    def get(self, request, *args, **kwargs):
+        slz = MetricsQuerySummaryInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        stage_name = Stage.objects.get_name(request.gateway.id, data["stage_id"])
+        if not stage_name:
+            raise Http404
+
+        queryset = MetricsSummaryFactory(
+            request.gateway.id,
+            stage_name,
+            data.get("resource_id", 0),
+            data.get("bk_app_code"),
+            data["metrics"],
+            data["time_dimension"],
+            data["time_start"],
+            data["time_end"],
+        ).queryset()
+        datapoints = [[obj["count_sum"], obj["time_period"]] for obj in queryset.iterator(chunk_size=1000)]
+
+        return OKJsonResponse(data={"series": [{"datapoints": datapoints}]})
+
+
+class QuerySummaryCallerListApi(generics.ListAPIView):
+    @swagger_auto_schema(
+        query_serializer=MetricsQuerySummaryCallerListInputSLZ(),
+        responses={status.HTTP_200_OK: ""},
+        operation_description="历史请求统计调用方列表",
+        tags=["WebAPI.Metrics"],
+    )
+    def get(self, request, *args, **kwargs):
+        slz = MetricsQuerySummaryCallerListInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        stage_name = Stage.objects.get_name(request.gateway.id, data["stage_id"])
+        if not stage_name:
+            raise Http404
+
+        app_codes = sorted(
+            StatisticsAppRequestByDay.objects.filter(
+                stage_name=stage_name,
+                start_time__gte=timezone.datetime.fromtimestamp(data["time_start"]),
+                end_time__lte=timezone.datetime.fromtimestamp(data["time_end"]),
+            )
+            .values_list("bk_app_code", flat=True)
+            .distinct()
+        )
+
+        return OKJsonResponse(data={"app_codes": app_codes})
+
+
+class QuerySummaryExportApi(generics.CreateAPIView):
+    @swagger_auto_schema(
+        decorator=swagger_auto_schema(
+            operation_description="请求总量/失败请求总量导出",
+            request_body=MetricsQuerySummaryInputSLZ,
+            responses={status.HTTP_200_OK: ""},
+            tags=["WebAPI.Metrics"],
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        slz = MetricsQuerySummaryInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        stage_name = Stage.objects.get_name(request.gateway.id, data["stage_id"])
+        if not stage_name:
+            raise Http404
+
+        queryset = MetricsSummaryFactory(
+            request.gateway.id,
+            stage_name,
+            data.get("resource_id", 0),
+            data.get("bk_app_code"),
+            data["metrics"],
+            data["time_dimension"],
+            data["time_start"],
+            data["time_end"],
+        ).queryset()
+
+        content = self._get_csv_content(queryset)
+        response = DownloadableResponse(content, filename=f"bk_apigw_metrics_{self.request.gateway.name}.csv")
+        # use utf-8-sig for windows
+        response.charset = "utf-8-sig" if "windows" in request.headers.get("User-Agent", "").lower() else "utf-8"
+
+        return response
+
+    def _get_csv_content(self, data: List[Any]) -> str:
+        """
+        将筛选出的权限数据，整理为 csv 格式内容
+        """
+        headers = [
+            "time_period",
+            "count_sum",
+        ]
+        header_row = {
+            "time_period": _("日期"),
+            "count_sum": _("请求总数"),
+        }
+
+        content = StringIO()
+        io_csv = csv.DictWriter(content, fieldnames=headers, extrasaction="ignore")
+        io_csv.writerow(header_row)
+        io_csv.writerows(data)
+
+        return content.getvalue()

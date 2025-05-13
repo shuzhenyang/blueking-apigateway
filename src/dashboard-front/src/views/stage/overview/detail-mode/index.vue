@@ -7,11 +7,17 @@
         v-if="!stageStore.realStageMainLoading && stageData.status === 0 && stageData.release.status !== 'unreleased'"
         theme="warning"
         :title="t('当前环境已下架，所有内容的更新均不会生效，如需重新启用，需要重新发布')" style="margin-bottom: 16px;" />
+      <bk-alert
+        v-if="common.isProgrammableGateway"
+        :title="t('可编程网关的环境由平台内置，不能修改和新增')"
+        class="mb24"
+        closable
+      />
       <bk-loading :loading="stageStore.realStageMainLoading">
         <section class="stage-info">
           <div :class="['stage-name', stageData.release.status === 'unreleased' ? 'no-release' : '']">
             <template v-if="stageData.release.status === 'unreleased'">
-              <span class="no-release-label">未发布</span>
+              <span class="no-release-label">{{ t('未发布') }}</span>
               <span class="no-release-dot"></span>
               <!-- <span class="no-release-icon apigateway-icon icon-ag-edit-line" @click="handleEditStage">
               </span> -->
@@ -48,6 +54,12 @@
                     --
                   </span>
                   <span v-else>{{ stageData.resource_version.version || '--' }}</span>
+                  <bk-tag
+                    v-if="getStatus(stageData) === 'doing'" class="ml8" style="height: 16px;font-size: 10px;"
+                    theme="info"
+                  >
+                    {{ stageData.publish_version }} {{ t('发布中') }}
+                  </bk-tag>
                 </div>
               </div>
               <div class="apigw-form-item">
@@ -81,29 +93,43 @@
           <div class="operate">
             <div class="line"></div>
             <bk-button
-              v-if="!basicInfoData.status" :disabled="true" theme="primary" class="mr10"
-              v-bk-tooltips="{ content: t('当前网关已停用，如需使用，请先启用'), delay: 300 }">
+              v-if="!basicInfoData.status"
+              v-bk-tooltips="{ content: t('当前网关已停用，如需使用，请先启用'), delay: 300 }"
+              class="mr10"
+              disabled
+              theme="primary"
+            >
               {{ t('发布资源') }}
             </bk-button>
             <bk-button
               v-else
               theme="primary"
               class="mr10"
-              :disabled="!!stageData?.publish_validate_msg"
-              v-bk-tooltips="{ content: t(stageData?.publish_validate_msg),
-                               disabled: !stageData?.publish_validate_msg }"
+              v-bk-tooltips="{
+                content: getStatus(stageData) === 'doing'
+                  ? t('当前有版本正在发布，请稍后再操作')
+                  : (stageData?.publish_validate_msg || '--'),
+                disabled: getStatus(stageData) !== 'doing' && !stageData?.publish_validate_msg
+              }"
+              :disabled="!!stageData?.publish_validate_msg || getStatus(stageData) === 'doing'"
               @click="handleRelease">
               {{ t('发布资源') }}
             </bk-button>
             <bk-button
+              v-if="common.curApigwData?.kind !== 1"
+              v-bk-tooltips="{
+                content: t('当前有版本正在发布，请稍后再操作'),
+                disabled: getStatus(stageData) !== 'doing'
+              }"
               class="mr10"
               @click="handleEditStage"
+              :disabled="getStatus(stageData) === 'doing'"
             >
               {{ t('编辑') }}
             </bk-button>
-            <bk-dropdown trigger="click" v-model:is-show="showDropdown">
+            <bk-dropdown v-model:is-show="showDropdown" trigger="click">
               <bk-button class="more-cls" @click="showDropdown = true">
-                <i class="apigateway-icon icon-ag-gengduo"></i>
+                <i class="apigateway-icon icon-ag-gengduo" />
               </bk-button>
               <template #content>
                 <bk-dropdown-menu ext-cls="stage-more-actions">
@@ -120,6 +146,7 @@
                     {{ t('下架') }}
                   </bk-dropdown-item>
                   <bk-dropdown-item
+                    v-if="common.curApigwData?.kind !== 1"
                     :ext-cls="stageData.status !== 0 ? 'disabled' : ''"
                     v-bk-tooltips="stageData.status === 1 ? t('环境下架后，才能删除') : t('删除环境')"
                     @click="stageData.status === 0 ? handleStageDelete() : void 0"
@@ -172,6 +199,15 @@
       <release-sideslider
         :current-assets="stageData"
         ref="releaseSidesliderRef"
+        @closed-on-publishing="handleClosedOnPublishing"
+        @release-success="handleReleaseSuccess"
+      />
+
+      <!-- 发布可编程网关的资源至环境 -->
+      <release-programmable-slider
+        ref="releaseProgrammableSliderRef"
+        :current-stage="stageData"
+        @hidden="handleReleaseSuccess"
         @release-success="handleReleaseSuccess"
       />
     </div>
@@ -179,18 +215,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, ref, watch } from 'vue';
+import {
+  computed,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
-import { Message, InfoBox } from 'bkui-vue';
-
-import { copy } from '@/common/util';
-import { useStage, useCommon } from '@/store';
+import {
+  useRoute,
+  useRouter,
+} from 'vue-router';
+import {
+  InfoBox,
+  Message,
+} from 'bkui-vue';
+import {
+  copy,
+  getStatus,
+} from '@/common/util';
+import {
+  useCommon,
+  useStage,
+} from '@/store';
 import releaseSideslider from '../comps/release-sideslider.vue';
+import releaseProgrammableSlider from '../comps/release-programmable-slider.vue';
 import editStageSideslider from '../comps/edit-stage-sideslider.vue';
 import stageTopBar from '@/components/stage-top-bar.vue';
 import { useGetGlobalProperties } from '@/hooks';
-import { deleteStage, removalStage, getGateWaysInfo } from '@/http';
+import {
+  deleteStage,
+  getGateWaysInfo,
+  removalStage,
+} from '@/http';
 import mitt from '@/common/event-bus';
 import { BasicInfoParams } from '@/views/basic-info/common/type';
 
@@ -198,18 +256,20 @@ import resourceInfo from './resource-info.vue';
 import pluginManage from './plugin-manage.vue';
 import variableManage from './variable-manage.vue';
 
+type TabComponents = typeof resourceInfo | typeof pluginManage | typeof variableManage;
+
 const { t } = useI18n();
 const stageStore = useStage();
 const route = useRoute();
 const router = useRouter();
 const common = useCommon();
-type TabComponents = typeof resourceInfo | typeof pluginManage | typeof variableManage;
 
 // 全局变量
 const globalProperties = useGetGlobalProperties();
 const { GLOBAL_CONFIG } = globalProperties;
 
 const releaseSidesliderRef = ref(null);
+const releaseProgrammableSliderRef = ref(null);
 const stageSidesliderRef = ref(null);
 const stageTopBarRef = ref(null);
 
@@ -267,6 +327,11 @@ const handleReleaseSuccess = async () => {
   await mitt.emit('rerun-init');
 };
 
+// 处理在版本还在发布时关闭抽屉的情况（刷新 stage 状态）
+const handleClosedOnPublishing = () => {
+  mitt.emit('rerun-init');
+};
+
 // 重新加载子组件
 const routeIndex = ref(0);
 watch(
@@ -291,7 +356,13 @@ const handleTabChange = (name: string) => {
 
 // 发布资源
 const handleRelease = () => {
-  releaseSidesliderRef.value.showReleaseSideslider();
+  // 普通网关
+  if (common.curApigwData?.kind !== 1) {
+    releaseSidesliderRef.value?.showReleaseSideslider();
+  } else {
+    // 可编程网关
+    releaseProgrammableSliderRef.value?.showReleaseSideslider();
+  }
 };
 
 // 下架环境
@@ -398,6 +469,7 @@ const basicInfoData = ref<BasicInfoParams>({
   developers: [],
   is_public: true,
   is_official: false,
+  related_app_codes: '',
 });
 
 // 获取网关基本信息
@@ -422,7 +494,7 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .detail-mode {
   min-width: calc(1280px - 260px);
-  padding: 24px;
+  padding: 20px 24px;
   font-size: 12px;
   .stage-info {
     display: flex;

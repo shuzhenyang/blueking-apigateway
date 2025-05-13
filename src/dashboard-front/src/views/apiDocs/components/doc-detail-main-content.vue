@@ -87,6 +87,15 @@ import {
 } from '@vueuse/core';
 import { minBy } from 'lodash';
 
+const props = withDefaults(defineProps<IProps>(), {
+  api: () => null,
+  navList: () => [],
+  markdownHtml: () => '',
+  updatedTime: () => null,
+});
+
+const emit = defineEmits(['show-sdk-instruction']);
+
 const { t } = useI18n();
 
 interface IProps {
@@ -96,17 +105,8 @@ interface IProps {
   updatedTime: string;
 }
 
-const props = withDefaults(defineProps<IProps>(), {
-  api: () => null,
-  navList: () => [],
-  markdownHtml: () => '',
-  updatedTime: () => null,
-});
-
 // 注入当前的总 tab 变量
 const curTab = inject<Ref<TabType>>('curTab');
-
-const emit = defineEmits(['show-sdk-instruction']);
 
 const {
   api,
@@ -133,19 +133,19 @@ const { y } = useScroll(detailWrapRef, {
 });
 
 const appVerifiedTooltips = computed(() => {
-  if (curTab.value === 'apigw') return t('应用访问该网关API时，是否需提供应用认证信息');
+  if (curTab.value === 'gateway') return t('应用访问该网关API时，是否需提供应用认证信息');
   if (curTab.value === 'component') return t('应用访问该组件API时，是否需提供应用认证信息');
   return '--';
 });
 
 const resourcePermTooltips = computed(() => {
-  if (curTab.value === 'apigw') return t('应用访问该网关API前，是否需要在开发者中心申请该网关API权限');
+  if (curTab.value === 'gateway') return t('应用访问该网关API前，是否需要在开发者中心申请该网关API权限');
   if (curTab.value === 'component') return t('应用访问该组件API前，是否需要在开发者中心申请该组件API权限');
   return '--';
 });
 
 const userVerifiedTooltips = computed(() => {
-  if (curTab.value === 'apigw') return t('应用访问该网关API时，是否需要提供用户认证信息');
+  if (curTab.value === 'gateway') return t('应用访问该网关API时，是否需要提供用户认证信息');
   if (curTab.value === 'component') return t('应用访问该组件API时，是否需要提供用户认证信息');
   return '--';
 });
@@ -211,7 +211,7 @@ const handleSdkInstructionClick = () => {
 
 <style scoped lang="scss">
 $primary-color: #3a84ff;
-$code-bc: #f5f7fa;
+$code-bc: #1e1e1e;
 $code-color: #63656e;
 
 .content-wrap {
@@ -331,16 +331,6 @@ $code-color: #63656e;
   color: $code-color;
   line-height: 19px;
   font-style: normal;
-
-  .pre-wrapper {
-    .ag-copy-btn {
-      right: 12px;
-      top: 12px;
-      background-color: $code-bc;
-      color: $primary-color;
-      z-index: 1;
-    }
-  }
 
   h1,
   h2,
@@ -486,7 +476,6 @@ $code-color: #63656e;
     padding: 10px;
     font-size: 14px;
     text-align: left;
-    color: $code-color;
     line-height: 24px;
     position: relative;
     overflow: auto;
@@ -494,27 +483,12 @@ $code-color: #63656e;
 
     code {
       font-family: "Lucida Console", "Courier New", "Monaco", monospace;
-      color: $code-color;
+      color: #dcdcdc;
     }
 
     .hljs {
       margin: -10px;
     }
-  }
-}
-
-:deep(.code-box) {
-  // 代码块高亮字体颜色
-  .hljs-string {
-    color: #ff9c01;
-  }
-
-  .hljs-keyword {
-    color: #ea3636;
-  }
-
-  .hljs-comment {
-    color: #c4c6cc;
   }
 }
 </style>

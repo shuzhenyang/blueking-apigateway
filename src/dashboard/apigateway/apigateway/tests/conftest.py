@@ -30,6 +30,7 @@ from django.contrib.auth import get_user_model
 from django.urls import resolve, reverse
 from rest_framework.test import APIRequestFactory as DRFAPIRequestFactory
 
+from apigateway.apps.api_debug.models import APIDebugHistory
 from apigateway.apps.openapi.models import OpenAPIResourceSchema
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum, PluginStyleEnum, PluginTypeCodeEnum
 from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm, PluginType
@@ -40,6 +41,8 @@ from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.contexts import GatewayAuthContext
 from apigateway.common.factories import SchemaFactory
 from apigateway.core.constants import (
+    ContextScopeTypeEnum,
+    ContextTypeEnum,
     ProxyTypeEnum,
     PublishEventNameTypeEnum,
     PublishEventStatusTypeEnum,
@@ -48,6 +51,7 @@ from apigateway.core.constants import (
 from apigateway.core.models import (
     Backend,
     BackendConfig,
+    Context,
     Gateway,
     MicroGateway,
     Proxy,
@@ -209,6 +213,30 @@ def fake_default_backend(fake_gateway, fake_stage, faker):
 
 
 @pytest.fixture
+def fake_default_empty_backend(fake_gateway, fake_stage, faker):
+    backend = G(
+        Backend,
+        gateway=fake_gateway,
+        name="default",
+    )
+
+    G(
+        BackendConfig,
+        gateway=fake_gateway,
+        stage=fake_stage,
+        backend=backend,
+        config={
+            "type": "node",
+            "timeout": 30,
+            "loadbalance": "roundrobin",
+            "hosts": [{"scheme": "http", "host": "", "weight": 100}],
+        },
+    )
+
+    return backend
+
+
+@pytest.fixture
 def fake_resource(faker, fake_gateway, fake_backend):
     resource = G(
         Resource,
@@ -326,6 +354,77 @@ def fake_resource2(faker, fake_resource):
 
 
 @pytest.fixture
+def fake_resource_ctx(fake_gateway):
+    resource1 = G(Resource, gateway=fake_gateway)
+    resource2 = G(Resource, gateway=fake_gateway)
+    resource3 = G(Resource, gateway=fake_gateway)
+    resource4 = G(Resource, gateway=fake_gateway)
+    resource5 = G(Resource, gateway=fake_gateway)
+
+    G(
+        Context,
+        scope_type=ContextScopeTypeEnum.RESOURCE.value,
+        type=ContextTypeEnum.RESOURCE_AUTH.value,
+        scope_id=resource1.id,
+        _config=json.dumps(
+            {
+                "resource_perm_required": True,
+                "app_verified_required": True,
+            }
+        ),
+    )
+    G(
+        Context,
+        scope_type=ContextScopeTypeEnum.RESOURCE.value,
+        type=ContextTypeEnum.RESOURCE_AUTH.value,
+        scope_id=resource2.id,
+        _config=json.dumps(
+            {
+                "resource_perm_required": True,
+                "app_verified_required": True,
+            }
+        ),
+    )
+    G(
+        Context,
+        scope_type=ContextScopeTypeEnum.RESOURCE.value,
+        type=ContextTypeEnum.RESOURCE_AUTH.value,
+        scope_id=resource3.id,
+        _config=json.dumps(
+            {
+                "resource_perm_required": True,
+                "app_verified_required": True,
+            }
+        ),
+    )
+    G(
+        Context,
+        scope_type=ContextScopeTypeEnum.RESOURCE.value,
+        type=ContextTypeEnum.RESOURCE_AUTH.value,
+        scope_id=resource4.id,
+        _config=json.dumps(
+            {
+                "resource_perm_required": False,
+                "app_verified_required": True,
+            }
+        ),
+    )
+    G(
+        Context,
+        scope_type=ContextScopeTypeEnum.RESOURCE.value,
+        type=ContextTypeEnum.RESOURCE_AUTH.value,
+        scope_id=resource5.id,
+        _config=json.dumps(
+            {
+                "resource_perm_required": True,
+                "app_verified_required": False,
+            }
+        ),
+    )
+    return [resource1, resource2, resource3, resource4, resource5]
+
+
+@pytest.fixture
 def fake_micro_gateway(fake_gateway_for_micro_gateway, faker):
     return G(
         MicroGateway,
@@ -379,7 +478,7 @@ def fake_shared_gateway(fake_micro_gateway, settings):
 
 @pytest.fixture
 def fake_resource_version(faker, fake_gateway, fake_resource1, fake_resource2):
-    resource_version = G(ResourceVersion, gateway=fake_gateway, name=faker.pystr(), version=faker.pystr())
+    resource_version = G(ResourceVersion, gateway=fake_gateway, version=faker.pystr())
     resource_version.data = ResourceVersionHandler.make_version(fake_gateway)
     resource_version.save()
     return resource_version
@@ -442,7 +541,6 @@ def fake_resource_version_v2(faker, fake_gateway, fake_resource):
     resource_version = G(
         ResourceVersion,
         gateway=fake_gateway,
-        name=faker.pystr(),
         version=faker.pystr(),
         schema_version=ResourceVersionSchemaEnum.V2.value,
     )
@@ -456,7 +554,6 @@ def fake_resource_version_v1(faker, fake_gateway, fake_resource):
     resource_version = G(
         ResourceVersion,
         gateway=fake_gateway,
-        name=faker.pystr(),
         version=faker.pystr(),
         schema_version=ResourceVersionSchemaEnum.V1.value,
     )
@@ -904,6 +1001,42 @@ def fake_plugin_resource_bk_cors_binding(fake_plugin_bk_cors, fake_resource):
 
 
 @pytest.fixture()
+def fake_plugin_check_changed(fake_plugin_type_bk_header_rewrite, fake_gateway):
+    return G(
+        PluginConfig,
+        gateway=fake_gateway,
+        name="bk-test",
+        type=fake_plugin_type_bk_header_rewrite,
+        yaml=yaml_dumps(
+            {
+                "set": [{"key": "foo", "value": "bar"}],
+                "remove": [{"key": "baz"}],
+            }
+        ),
+    )
+
+
+@pytest.fixture()
+def fake_plugin_check_changed_binding(fake_plugin_bk_header_rewrite, fake_plugin_check_changed, fake_stage):
+    bangding1 = G(
+        PluginBinding,
+        gateway=fake_plugin_bk_header_rewrite.gateway,
+        config=fake_plugin_bk_header_rewrite,
+        scope_type=PluginBindingScopeEnum.STAGE.value,
+        scope_id=fake_stage.pk,
+    )
+
+    bangding2 = G(
+        PluginBinding,
+        gateway=fake_plugin_check_changed.gateway,
+        config=fake_plugin_check_changed,
+        scope_type=PluginBindingScopeEnum.STAGE.value,
+        scope_id=fake_stage.pk,
+    )
+    return [bangding1, bangding2]
+
+
+@pytest.fixture()
 def fake_rsa_private_key():
     return """-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEArkgtL4OVsDVSlns1n5EAqs908uDoQMoPJ+2i3o/ddKXRObaN
@@ -975,6 +1108,14 @@ def fake_resource_doc(faker, fake_resource):
         language=faker.random_element(
             ["en", "zh"],
         ),
+    )
+
+
+@pytest.fixture
+def fake_debug_history(faker, fake_resource):
+    return G(
+        APIDebugHistory,
+        gateway=fake_resource.gateway,
     )
 
 

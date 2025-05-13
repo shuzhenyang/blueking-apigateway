@@ -190,6 +190,10 @@ class PublishValidator:
         """校验待发布环境的backend配置"""
         resource_version = self.resource_version
 
+        if not resource_version:
+            # 如果没有指定版本，则使用当前网关的最新版本
+            resource_version = ResourceVersion.objects.get_latest_version(self.gateway.id)
+
         if resource_version and resource_version.data:
             backend_ids = list(
                 {
@@ -198,18 +202,24 @@ class PublishValidator:
                     if resource["proxy"].get("backend_id", None)
                 }
             )
-            backend_configs = BackendConfig.objects.filter(backend_id__in=backend_ids)
+            backend_configs = BackendConfig.objects.filter(stage=self.stage, backend_id__in=backend_ids)
         else:
-            backend_configs = BackendConfig.objects.filter(stage=self.stage)
+            # 校验编辑区的资源所绑定的后端服务
+            resource_ids = Resource.objects.filter(gateway=self.gateway).values_list("id", flat=True)
+            backend_ids = (
+                Proxy.objects.filter(resource_id__in=resource_ids).values_list("backend_id", flat=True).distinct()
+            )
+            backend_configs = BackendConfig.objects.filter(stage=self.stage, backend_id__in=backend_ids)
 
         for backend_config in backend_configs:
             for host in backend_config.config["hosts"]:
                 if not core_constants.HOST_WITHOUT_SCHEME_PATTERN.match(host["host"]):
                     raise ReleaseValidationError(
                         _(
-                            "网关环境【{stage_name}】中的配置【后端服务地址】不合法。请在网关 `后端服务` 中进行配置。"
+                            "网关环境【{stage_name}】中的配置【后端服务 {backend_name} 地址】不合法。请在网关 `后端服务` 中进行配置。"
                         ).format(
                             stage_name=self.stage.name,
+                            backend_name=backend_config.backend.name,
                         )
                     )
 

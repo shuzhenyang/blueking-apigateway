@@ -1,5 +1,5 @@
 ARG IMAGE=python
-ARG TAG=3.10.12-slim-bullseye
+ARG TAG=3.10.15-slim-bullseye
 FROM ${IMAGE}:${TAG}
 
 RUN apt-get update && apt-get install -y libssl-dev libffi-dev \
@@ -14,10 +14,14 @@ RUN pip config set global.index-url "${PYPI}"
 
 WORKDIR /app
 ADD build/requirements.txt /app/requirements.txt
-# while the celery 4.4.7 can't be installed via pip >=24.x
-# RUN pip install --upgrade pip
-RUN pip install pip==23.0.1
+RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
+
+# install mvn dep
+RUN mvn dependency:get -Dartifact=com.squareup.okhttp3:okhttp:4.12.0 && \
+    mvn dependency:get -Dartifact=com.fasterxml.jackson.core:jackson-databind:2.13.4.1 && \
+    mvn dependency:get -Dartifact=org.apache.maven.plugins:maven-compiler-plugin:3.8.1 && \
+    mvn dependency:get -Dartifact=org.apache.maven.plugins:maven-jar-plugin:3.1.0
 
 ADD build /app
 

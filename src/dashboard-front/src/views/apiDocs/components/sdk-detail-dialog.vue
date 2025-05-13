@@ -13,6 +13,7 @@
           v-model="language"
           :sdk-languages="sdks.map(item => item.language)"
           :lang-list="languages"
+          :maintainers="maintainers"
         />
         <SdkDetail :sdk="curSdk" is-apigw />
       </div>
@@ -36,23 +37,25 @@ import {
 import SdkDetail from '@/views/apiDocs/components/sdk-detail.vue';
 import { useI18n } from 'vue-i18n';
 
-const { t } = useI18n();
-
 const isShow = defineModel<boolean>({
   required: true,
   default: false,
 });
 
+const props = withDefaults(defineProps<IProps>(), {
+  sdks: () => [],
+  targetName: '',
+  maintainers: () => [],
+});
+
+const { t } = useI18n();
+
 interface IProps {
   sdks: ISdk[];
   targetName: string;
   languages: LanguageType[];
+  maintainers: string[];
 }
-
-const props = withDefaults(defineProps<IProps>(), {
-  sdks: () => [],
-  targetName: '',
-});
 
 const { sdks, targetName, languages } = toRefs(props);
 

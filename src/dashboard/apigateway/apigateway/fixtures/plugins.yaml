@@ -100,6 +100,7 @@
     name_en: Cross-Origin Resource Sharing (CORS)
     is_public: true
     scope: stage_and_resource
+    priority: 17900
     schema:
     - bk-cors
     - plugin
@@ -128,7 +129,10 @@
               "type": "string",
               "pattern": "^(|\\*|\\*\\*|null|http(s)?://[-a-zA-Z0-9:\\[\\]\\.]+(,http(s)?://[-a-zA-Z0-9:\\[\\]\\.]+)*)$",
               "maxLength": 4096,
-              "default": ""
+              "default": "",
+              "ui:props": {
+                "labelWidth": 200
+              }
             },
             "allow_origins_by_regex": {
               "description": "使用正则表示的允许跨域访问的 Origin，示例如 '^https://.*\\.example\\.com:8081$'，此正则允许 https://a.example.com:8081, https://b.example.com:8081。allow_origins、allow_origins_by_regex 只能一个有效。",
@@ -142,6 +146,9 @@
               },
               "ui:component": {
                 "name": "bfArray"
+              },
+              "ui:props": {
+                "labelWidth": 200
               }
             },
             "allow_methods": {
@@ -152,7 +159,10 @@
               "maxLength": 100,
               "ui:rules": [
                 "required"
-              ]
+              ],
+              "ui:props": {
+                "labelWidth": 200
+              }
             },
             "allow_headers": {
               "description": "允许跨域访问时请求方携带哪些非 CORS 规范 以外的 Header。如果你有多个 Header，请使用 , 分割。当 allow_credential 为 false 时，可以使用 * 来表示允许所有 Header 通过。你也可以在启用了 allow_credential 后使用 ** 强制允许所有 Header 都通过，但请注意这样存在安全隐患。",
@@ -162,14 +172,20 @@
               "maxLength": 4096,
               "ui:rules": [
                 "required"
-              ]
+              ],
+              "ui:props": {
+                "labelWidth": 200
+              }
             },
             "expose_headers": {
               "description": "允许跨域访问时响应方携带哪些非 CORS 规范 以外的 Header。如果你有多个 Header，请使用 , 分割。当 allow_credential 为 false 时，可以使用 * 来表示允许任意 Header。你也可以在启用了 allow_credential 后使用 ** 强制允许任意 Header，但请注意这样存在安全隐患。",
               "type": "string",
               "pattern": "^(|\\*|\\*\\*|[-a-zA-Z0-9]+(,[-a-zA-Z0-9]+)*)$",
               "maxLength": 4096,
-              "default": ""
+              "default": "",
+              "ui:props": {
+                "labelWidth": 200
+              }
             },
             "max_age": {
               "description": "浏览器缓存 CORS 结果的最大时间，单位为秒。在这个时间范围内，浏览器会复用上一次的检查结果，-1 表示不缓存。请注意各个浏览器允许的最大时间不同。",
@@ -182,12 +198,18 @@
                 "name": "bfInput",
                 "min": -1,
                 "unit": "秒"
+              },
+              "ui:props": {
+                "labelWidth": 200
               }
             },
             "allow_credential": {
               "description": "是否允许跨域访问的请求方携带凭据（如 Cookie 等）。根据 CORS 规范，如果设置该选项为 true，那么将不能在其他属性中使用 *。",
               "type": "boolean",
-              "default": true
+              "default": true,
+              "ui:props": {
+                "labelWidth": 200
+              }
             }
           }
         },
@@ -333,6 +355,7 @@
     name_en: Header transformation
     is_public: true
     scope: stage_and_resource
+    priority: 17421
     schema:
     - bk-header-rewrite
     - plugin
@@ -636,6 +659,7 @@
     name_en: IP restriction
     is_public: true
     scope: stage_and_resource
+    priority: 17662
     schema:
     - bk-ip-restriction
     - plugin
@@ -826,6 +850,7 @@
     name_en: Rate Limit
     is_public: true
     scope: stage_and_resource
+    priority: 17652
     schema:
     - bk-rate-limit
     - plugin
@@ -1267,9 +1292,10 @@
 - model: plugin.plugintype
   fields:
     code: bk-status-rewrite
-    name: 网关错误使用HTTP状态码200(不推荐)
+    name: 网关错误使用 HTTP 状态码 200(不推荐)
     name_en: Gateway error using HTTP status code 200 (not recommended)
     is_public: false
+    priority: 18815
     schema: null
 - model: plugin.pluginform
   fields:
@@ -1354,10 +1380,11 @@
 - model: plugin.plugintype
   fields:
     code: bk-verified-user-exempted-apps
-    name: 免用户认证应用白名单(不推荐)
+    name: 免用户认证应用白名单 (不推荐)
     name_en: Exempted user auth apps white list (not recommended)
     is_public: false
     scope: stage
+    priority: 18810
     schema:
     - bk-verified-user-exempted-apps
     - plugin
@@ -1395,6 +1422,7 @@
     name_en: mocking
     is_public: true
     scope: resource
+    priority: 17150
     schema:
     - bk-mock
     - plugin
@@ -1629,6 +1657,7 @@
     name_en: Circuit Breaker
     is_public: true
     scope: resource
+    priority: 1005
     schema:
     - api-breaker
     - plugin
@@ -1978,6 +2007,7 @@
     name_en: request_validation
     is_public: true
     scope: resource
+    priority: 2800
     schema:
     - request-validation
     - plugin
@@ -1987,8 +2017,8 @@
     language: ''
     type:
     - request-validation
-    notes: 用于提前验证向上游服务转发的请求。该插件使用 JSON Schema 机制进行数据验证，可以验证请求的 Body 以及 Header 的数据。
-    example: '作用：当请求体中没有包含 boolean_payload 时，则返回 400 拒绝状态码和拒绝信息\n\n"header_schema": {}\n"body_schema": {"type": "object","required": ["bool_payload"],"properties": {"bool_payload": {"type": "boolean"}}}\n"rejected_code": 400\n"rejected_msg": "not valid request body"'
+    notes: 用于提前验证向上游服务转发的请求。该插件使用 JSON Schema 机制进行数据验证，可以验证请求的 Body 以及 Header 的数据。至少需要配置 body_schema 或 header_schema 中的一个，两者也可以同时使用。
+    example: '作用：当请求体中没有包含 boolean_payload 时，则返回 400 拒绝状态码和拒绝信息\n\n"body_schema": {"type": "object","required": ["bool_payload"],"properties": {"bool_payload": {"type": "boolean"}}}\n"header_schema": {}\n"rejected_code": 400\n"rejected_msg": "not valid request body"'
     style: dynamic
     default_value: ''
     config: |-
@@ -2041,8 +2071,8 @@
     language: 'en'
     type:
     - request-validation
-    notes: Used to validate requests forwarded to upstream services in advance. The plug-in uses the JSON Schema mechanism for data validation, which validates the requested Body and Header data.
-    example: 'Purpose: When the boolean_payload argument is not filled, 400 reject status code and reject information are returned \n\n"header_schema": {}\n"body_schema": {"type": "object","required": ["bool_payload"],"properties": {"bool_payload": {"type": "boolean"}}}\n"rejected_code": 400\n"rejected_msg": "not valid request body"'
+    notes: Used to validate requests forwarded to upstream services in advance. The plug-in uses the JSON Schema mechanism for data validation, which validates the requested Body and Header data. At least one of the body_schema or header_schema needs to be configured, and both can be used at the same time.
+    example: 'Purpose: When the boolean_payload argument is not filled, 400 reject status code and reject information are returned \n\n"body_schema": {"type": "object","required": ["bool_payload"],"properties": {"bool_payload": {"type": "boolean"}}}\n"header_schema": {}\n"rejected_code": 400\n"rejected_msg": "not valid request body"'
     style: dynamic
     default_value: ''
     config: |-
@@ -2161,6 +2191,7 @@
     name_en: fault-injection
     is_public: true
     scope: resource
+    priority: 11000
     schema:
     - fault-injection
     - plugin
@@ -2170,8 +2201,8 @@
     language: ''
     type:
     - fault-injection
-    notes: fault-injection 插件是故障注入插件，该插件可以和其他插件一起使用，并在其他插件执行前被执行。
-    example: '作用：当请求参数 name 等于 jack 的时候，则返回 400 拒绝状态码和响应内容\n\n"abort": {\n    "http_status": 400,\n    "body": "not valid request params",\n    "vars": [["arg_name", "==", "jack"]]\n}\n'
+    notes: 故障注入，该插件可以和其他插件一起使用，并在其他插件执行前被执行，至少要配置中断和延迟中的任意一个，两者也可以同时使用。
+    example: '作用：当请求参数 name 等于 jack，并且 age 等于 18 的时候，则返回 400 拒绝状态码和响应内容\n\n"abort": {\n    "http_status": 400,\n    "body": "not valid request params",\n    "vars": [[["arg_name", "==", "jack"], ["arg_age", "==", 18]]]\n}\n'
     style: dynamic
     default_value: ''
     config: |-
@@ -2207,7 +2238,7 @@
                 },
                 "vars": {
                   "type": "string",
-                  "title": "执行故障注入的规则",
+                  "title": "中断规则",
                   "description": "执行故障注入的规则，当规则匹配通过后才会执行故障注。vars 是一个表达式的列表，来自 lua-resty-expr。",
                   "ui:component": {
                     "type": "textarea",
@@ -2255,8 +2286,8 @@
     language: en
     type:
     - fault-injection
-    notes: The fault-injection plug-in is a fault injection plug-in that can be used with other plug-ins and executed before the other plug-ins are executed.
-    example: 'Purpose: When the request parameter name is equal to jack, return 400 reject status code and response body \n\n"abort": {\n "http_status": 400,\n "body": "not valid request params",\n "vars": [["arg_name", "==", "jack"]]\n}\n'
+    notes: The fault-injection plug-in is a fault injection plug-in that can be used with other plug-ins and executed before the other plug-ins are executed. abort and delay must be configured at least one, and both can be used at the same time.
+    example: 'Purpose: When the request parameter name is equal to jack and age is 18, return 400 reject status code and response body \n\n"abort": {\n "http_status": 400,\n "body": "not valid request params",\n "vars": [[["arg_name", "==", "jack"], ["arg_age", "==", 18]]]\n}\n'
     style: dynamic
     default_value: ''
     config: |-
@@ -2334,4 +2365,443 @@
         "layout": [],
         "formData": {},
         "rules": {}
+      }
+
+- model: schema.schema
+  fields:
+    created_time: 2025-05-06 11:48:21.010753+00:00
+    updated_time: 2025-05-06 11:48:21.010788+00:00
+    name: response-rewrite
+    type: plugin
+    version: '0'
+    _schema: |-
+      {
+        "$comment": "this is a mark for our injected plugin schema",
+        "type": "object",
+        "properties": {
+            "status_code": {
+                "type": "integer",
+                "description": "new status code for response",
+                "minimum": 200,
+                "maximum": 598
+            },
+            "body": {
+                "type": "string",
+                "description": "new body for response"
+            },
+            "body_base64": {
+                "type": "boolean",
+                "description": "whether new body for response need base64 decode before return",
+                "default": false
+            },
+            "headers": {
+                "type": "object",
+                "description": "new headers for response",
+                "properties": {
+                    "add": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "pattern": "^[^:]+:[^:]*[^/]$"
+                        }
+                    },
+                    "set": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[^:]+$": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "remove": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[^:]+$"
+                        }
+                    }
+                }
+            },
+            "vars": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                    "type": "array"
+                }
+            }
+        }
+      }
+    description: '-'
+    example: '-'
+- model: plugin.plugintype
+  fields:
+    code: response-rewrite
+    name: Response 转换
+    name_en: Response Rewrite
+    is_public: true
+    scope: resource
+    priority: 899
+    schema:
+    - response-rewrite
+    - plugin
+    - '0'
+- model: plugin.pluginform
+  fields:
+    language: ''
+    type:
+    - response-rewrite
+    notes: "插件支持修改上游服务返回的 Body 和 Header 信息。\n该插件可以应用在以下场景中：\n通过设置标头中的 status_code 和 Location 字段实现重定向。"
+    example: '"status_code": 200, \n"body": {\"code\":\"ok\",\"message\":\"new json body\"}, \n"headers": {\n  "add": ["X-Server-balancer-addr: test"],\n  "set": {"X-Server-id": 3},\n  "remove": ["X-TO-BE-REMOVED"]\n}, \n "vars": [[["arg_name", "==", "jack"], ["arg_age", "==", 18]]]\n'
+    style: dynamic
+    default_value: ''
+    config: |-
+      {
+        "schema": {
+          "type": "object",
+          "properties": {
+              "status_code": {
+                  "title": "状态码",
+                  "description": "修改上游返回状态码，默认保留原始响应代码。",
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 598
+              },
+              "body": {
+                  "title": "响应体",
+                  "description": "修改上游返回的 body 内容，如果设置了新内容，header 里面的 content-length 字段也会被去掉。",
+                  "type": "string"
+              },
+              "body_base64": {
+                  "description": "当设置时，在写给客户端之前，在body中传递的主体将被解码，这在一些图像和 Protobuffer 场景中使用。注意，这个字段只允许对插件配置中传递的主体进行解码，并不对上游响应进行解码。",
+                  "type": "boolean",
+                  "default": false
+              },
+              "headers": {
+                  "type": "object",
+                  "properties": {
+                      "add": {
+                        "description": "添加新的响应头",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "title": "键",
+                              "description": "您可以添加响应头的键，响应头的键中必须包含冒号（:）。",
+                              "type": "string",
+                              "maxLength": 1024,
+                              "pattern": "^[^:]+:[^:]*[^/]$",
+                              "ui:rules": [
+                                "required"
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "minItems": 0,
+                        "title": "添加",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "ui:component": {
+                          "name": "bfArray"
+                        }
+                      },
+                      "set": {
+                          "type": "array", 
+                          "title": "设置",
+                          "minItems": 0,
+                          "description": "改写响应头。",
+                          "ui:component": {
+                            "name": "bfArray"
+                          },
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "title": "键",
+                                "description": "您可以设置响应头的键，响应头的键中不能包含冒号（:）。",
+                                "type": "string",
+                                "maxLength": 1024,
+                                "pattern": "^[\\w-]+$",
+                                "ui:rules": ["required"]
+                              },
+                              "value": {
+                                "title": "值",
+                                "description": "您可以设置响应头的值，响应头的键中不能包含冒号（:）。",
+                                "type": "string",
+                                "maxLength": 1024,
+                                "pattern": "^[\\s\\S]*$",
+                                "ui:rules": ["required"]
+                              }
+                            }
+                          }
+                      },
+                      "remove": {
+                        "description": "删除的响应头",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "title": "键",
+                              "description": "您可以删除响应头的键，响应头的键中不能包含冒号（:）。",
+                              "type": "string",
+                              "maxLength": 1024,
+                              "pattern": "^[\\w-]+$",
+                              "ui:rules": [
+                                "required"
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "minItems": 0,
+                        "title": "删除",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "ui:component": {
+                          "name": "bfArray"
+                        }
+                      }
+                  }
+              },
+              "vars": {
+                  "type": "string",
+                  "title": "表达式列表",
+                  "ui:component": {
+                      "type": "textarea",
+                      "rows": 10
+                  },
+                  "description": "vars 是一个表达式列表，只有满足条件的请求和响应才会修改 body 和 header 信息，来自 lua-resty-expr。如果 vars 字段为空，那么所有的重写动作都会被无条件的执行。"
+              }
+          }
+        }
+      }
+- model: plugin.pluginform
+  fields:
+    language: en
+    type:
+    - response-rewrite
+    notes: The response-rewrite Plugin rewrites the content returned by the Upstream.\nThis Plugin can be useful in these scenarios:\nTo set custom status_code and Location fields in the header to redirect.
+    example: '"status_code": 200, \n"body": {\"code\":\"ok\",\"message\":\"new json body\"}, \n"headers": {\n  "add": ["X-Server-balancer-addr: test"],\n  "set": {"X-Server-id": 3},\n  "remove": ["X-TO-BE-REMOVED"]\n}, \n "vars": [[["arg_name", "==", "jack"], ["arg_age", "==", 18]]]\n'
+    style: dynamic
+    default_value: ''
+    config: |-
+      {
+        "schema": {
+          "type": "object",
+          "properties": {
+              "status_code": {
+                  "title": "status code",
+                  "description": "New HTTP status code in the response. If unset, falls back to the original status code.",
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 598
+              },
+              "body": {
+                  "title": "body",
+                  "description": "New body of the response. The content-length would also be reset.",
+                  "type": "string"
+              },
+              "body_base64": {
+                  "description": "When set, the body passed in body will be decoded before writing to the client which is used in some image and Protobuffer scenarios. Note that this field only allows decoding the body passed in plugin configuration and does not decode upstream response.",
+                  "type": "boolean",
+                  "default": false
+              },
+              "headers": {
+                  "type": "object",
+                  "properties": {
+                      "add": {
+                        "description": "add headers",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "title": "key",
+                              "description": "You can add the key of the response header, but colons (:) must appear in the key of the response header.",
+                              "type": "string",
+                              "maxLength": 1024,
+                              "pattern": "^[^:]+:[^:]*[^/]$",
+                              "ui:rules": [
+                                "required"
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "minItems": 0,
+                        "title": "add",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "ui:component": {
+                          "name": "bfArray"
+                        }
+                      },
+                      "set": {
+                          "title": "set",
+                          "type": "array",
+                          "minItems": 0,
+                          "description": "set headers",
+                          "ui:component": {
+                            "name": "bfArray"
+                          },
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "title": "key",
+                                "description": "You can set the key of the response header, but colons (:) cannot appear in the key of the response header.",
+                                "type": "string",
+                                "maxLength": 1024,
+                                "pattern": "^[\\w-]+$",
+                                "ui:rules": ["required"]
+                              },
+                              "value": {
+                                "title": "value",
+                                "description": "You can set the value of the response header.",
+                                "type": "string",
+                                "maxLength": 1024,
+                                "pattern": "^[\\s\\S]*$",
+                                "ui:rules": ["required"]
+                              }
+                            }
+                          }
+                      },
+                      "remove": {
+                        "description": "remove headers",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "title": "key",
+                              "description": "You can remove the key of the response header, but colons (:) cannot appear in the key of the response header.",
+                              "type": "string",
+                              "maxLength": 1024,
+                              "pattern": "^[\\w-]+$",
+                              "ui:rules": [
+                                "required"
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "minItems": 0,
+                        "title": "remove",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "ui:component": {
+                          "name": "bfArray"
+                        }
+                      }
+                  }
+              },
+              "vars": {
+                  "type": "string",
+                  "title": "vars",
+                  "ui:component": {
+                      "type": "textarea",
+                      "rows": 10
+                  },
+                  "description": "Nginx variable expressions to conditionally execute the rewrite. The Plugin will be executed unconditionally if this value is empty."
+              }
+          }
+        }
+      }
+
+
+- model: schema.schema
+  fields:
+    created_time: 2025-05-12 10:00:21.010753+00:00
+    updated_time: 2025-05-12 10:00:21.010788+00:00
+    name: redirect
+    type: plugin
+    version: '0'
+    _schema: |-
+      {
+        "$comment": "this is a mark for our injected plugin schema",
+        "type": "object",
+        "properties": {
+            "uri": {
+                "type": "string",
+                "pattern": "^(\\\\\\$[0-9a-zA-Z_]+|\\$\\{[0-9a-zA-Z_]+\\}|\\$[0-9a-zA-Z_]+|\\$|[^$\\\\]+)*$"
+            },
+            "ret_code": {
+                "type": "integer"
+            }
+        }
+      }
+    description: '-'
+    example: '-'
+- model: plugin.plugintype
+  fields:
+    code: redirect
+    name: 重定向
+    name_en: Redirect
+    is_public: true
+    scope: resource
+    priority: 900
+    schema:
+    - redirect
+    - plugin
+    - '0'
+- model: plugin.pluginform
+  fields:
+    language: ''
+    type:
+    - redirect
+    notes: "用于配置 URI 重定向。"
+    example: '重定向 URI: /test/default.html, \nHTTP 响应码: 301\n'
+    style: dynamic
+    default_value: ''
+    config: |-
+      {
+        "schema": {
+          "type": "object",
+          "properties": {
+              "uri": {
+                  "title": "重定向 URI",
+                  "description": "要重定向到的 URI，可以包含 NGINX 变量。例如：/test/index.htm，$uri/index.html，${uri}/index.html，https://example.com/foo/bar。如果你引入了一个不存在的变量，它不会报错，而是将其视为一个空变量。",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(\\\\\\$[0-9a-zA-Z_]+|\\$\\{[0-9a-zA-Z_]+\\}|\\$[0-9a-zA-Z_]+|\\$|[^$\\\\]+)*$"
+              },
+              "ret_code": {
+                  "title": "HTTP 响应码",
+                  "type": "integer",
+                  "minimum": 200,
+                  "default": 302
+              }
+          }
+        }
+      }
+- model: plugin.pluginform
+  fields:
+    language: en
+    type:
+    - redirect
+    notes: The redirect Plugin can be used to configure redirects.
+    example: 'uri: /test/default.html, \nret_code: 301\n'
+    style: dynamic
+    default_value: ''
+    config: |-
+      {
+        "schema": {
+          "type": "object",
+          "properties": {
+              "uri": {
+                  "title": "URI",
+                  "description": "URI to redirect to. Can contain Nginx variables. For example, /test/index.html, $uri/index.html, ${uri}/index.html, https://example.com/foo/bar. If you refer to a variable name that doesn't exist, instead of throwing an error, it will treat it as an empty variable.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(\\\\\\$[0-9a-zA-Z_]+|\\$\\{[0-9a-zA-Z_]+\\}|\\$[0-9a-zA-Z_]+|\\$|[^$\\\\]+)*$"
+              },
+              "ret_code": {
+                  "title": "HTTP response code",
+                  "type": "integer",
+                  "minimum": 200,
+                  "default": 302
+              }
+          }
+        }
       }

@@ -26,6 +26,8 @@ from typing import Any, ClassVar, Dict, List, Union
 from apigateway.apps.plugin.constants import PluginTypeCodeEnum
 from apigateway.utils.ip import parse_ip_content_to_list
 
+from .normalizer import format_fault_injection_config
+
 
 class PluginConvertor(ABC):
     plugin_type_code: ClassVar[PluginTypeCodeEnum]
@@ -145,6 +147,9 @@ class FaultInjectionConvertor(PluginConvertor):
     plugin_type_code: ClassVar[PluginTypeCodeEnum] = PluginTypeCodeEnum.FAULT_INJECTION
 
     def convert(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        # NOTE: while the dynamic form textarea would pass here, we should clean it up
+        config = format_fault_injection_config(config)
+
         if config.get("abort"):
             abort = config["abort"]
             if abort.get("vars"):
@@ -158,6 +163,31 @@ class FaultInjectionConvertor(PluginConvertor):
         return config
 
 
+class ResponseRewriteConvertor(PluginConvertor):
+    plugin_type_code: ClassVar[PluginTypeCodeEnum] = PluginTypeCodeEnum.RESPONSE_REWRITE
+
+    def convert(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        if config.get("vars") == "":
+            del config["vars"]
+        if config.get("vars"):
+            config["vars"] = ast.literal_eval(config["vars"])
+
+        headers = config["headers"]
+        headers["add"] = [item["key"] for item in headers["add"]]
+        headers["set"] = {item["key"]: item["value"] for item in headers["set"]}
+        headers["remove"] = [item["key"] for item in headers["remove"]]
+
+        return config
+
+
+class RedirectConvertor(PluginConvertor):
+    plugin_type_code: ClassVar[PluginTypeCodeEnum] = PluginTypeCodeEnum.REDIRECT
+
+    def convert(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        config["ret_code"] = config.get("ret_code", 302)
+        return config
+
+
 class PluginConvertorFactory:
     plugin_convertors: ClassVar[Dict[PluginTypeCodeEnum, PluginConvertor]] = {
         c.plugin_type_code: c
@@ -168,6 +198,8 @@ class PluginConvertorFactory:
             BkMockConvertor(),
             RequestValidationConvertor(),
             FaultInjectionConvertor(),
+            ResponseRewriteConvertor(),
+            RedirectConvertor(),
         ]
     }
 

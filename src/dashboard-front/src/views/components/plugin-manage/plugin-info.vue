@@ -153,19 +153,6 @@ import { useStage } from '@/store';
 import { onClickOutside } from '@vueuse/core';
 import pluginIconList from '@/common/plugin-icon-list';
 
-const stageStore = useStage();
-const BkSchemaForm = createForm();
-
-const { t } = useI18n();
-const emit = defineEmits(['on-change', 'choose-plugin', 'show-example']);
-
-const schemaFormData = ref({});
-const formConfig = ref({
-  schema: {},
-  layout: {},
-  rules: {},
-});
-
 const props = defineProps({
   curPlugin: {
     type: Object,
@@ -187,6 +174,17 @@ const props = defineProps({
     type: Array<any>,
     default: () => [],
   },
+});
+const emit = defineEmits(['on-change', 'choose-plugin', 'show-example']);
+const stageStore = useStage();
+const BkSchemaForm = createForm();
+
+const { t } = useI18n();
+const schemaFormData = ref({});
+const formConfig = ref({
+  schema: {},
+  layout: {},
+  rules: {},
 });
 
 const { curPlugin } = toRefs(props);
@@ -258,21 +256,24 @@ const handleAdd = async () => {
   };
 
   // 免用户认证应用白名单
-  if (formStyle.value === 'raw') {
-    const data: any = { ...schemaFormData.value };
-    const yamlData = whitelist.value?.sendPolicyData();
-    data.yaml = yamlData.data;
-    await doSubmit(data);
-  } else {
-    formRef.value?.validate().then(async () => {
-      const data: any = { ...schemaFormData.value };
-      data.yaml = json2yaml(JSON.stringify(schemaFormData.value)).data;
-      await doSubmit(data);
-    })
-      .catch((e: any) => {
-        console.error(e);
-      });
+  const data = {};
+  try {
+    if (formStyle.value === 'raw') {
+      Object.assign(data, { yaml: whitelist.value?.sendPolicyData().data });
+    } else {
+      await formRef.value!.validate();
+      Object.assign(data, { yaml: json2yaml(JSON.stringify(schemaFormData.value)).data });
+    }
+  } catch (err) {
+    const error = err as Error;
+    Message({ theme: 'error', message: error.message || t('表单校验失败') });
+    return;
   }
+
+  if (isAdd.value) {
+    Object.assign(data, schemaFormData.value);
+  }
+  await doSubmit(data);
 };
 
 // 取消

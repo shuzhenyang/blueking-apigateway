@@ -8,12 +8,22 @@
             'header-info-left',
             { 'header-info-left-disabled': !basicInfoData.status }
           ]">
+          <!-- <span
+            :class="['kind', basicInfoData.kind === 0 ? 'normal' : 'program']">
+            {{ basicInfoData.kind === 0 ? t('普') : t('编') }}
+          </span> -->
           <span class="name">{{ basicInfoData?.name?.[0]?.toUpperCase() }}</span>
         </div>
         <div class="header-info-right">
           <div class="header-info-name">
             <span class="name">{{ basicInfoData.name }}</span>
             <div class="header-info-tag">
+              <bk-tag theme="info" v-if="basicInfoData.kind === 0">
+                {{ t('普通网关') }}
+              </bk-tag>
+              <bk-tag theme="success" v-else>
+                {{ t('可编程网关') }}
+              </bk-tag>
               <bk-tag class="website" v-if="basicInfoData.is_official">{{ t('官网') }}</bk-tag>
               <div v-if="basicInfoData.status > 0">
                 <!-- <bk-tag class="vip">{{ t('专享') }}</bk-tag>? -->
@@ -38,9 +48,9 @@
             />
           </div>
           <div class="header-info-button">
-            <bk-button @click="handleOperate('edit')" class="operate-btn">
+            <!-- <bk-button @click="handleOperate('edit')" class="operate-btn">
               {{ t('编辑') }}
-            </bk-button>
+            </bk-button> -->
             <div>
               <bk-button
                 v-if="basicInfoData.status > 0" @click="handleOperate('enable')"
@@ -64,13 +74,44 @@
                 {{ t('删除') }}
               </bk-button>
             </template>
+            <template v-if="basicInfoData.kind === 1">
+              <span class="btn-line"></span>
+              <bk-button class="operate-btn" @click="showGuide">
+                <help-document-fill class="icon-help" />
+                {{ t('查看开发指引') }}
+              </bk-button>
+            </template>
           </div>
         </div>
       </section>
       <section class="basic-info-detail">
         <div class="basic-info-detail-item">
-          <div class="detail-item-title">{{ t('基础信息') }}</div>
+          <div class="detail-item-title">
+            {{ t('基础信息') }}
+
+            <div class="area-edit" @click.stop="handleOperate('edit')">
+              <i class="apigateway-icon icon-ag-edit-line" />
+              <bk-button theme="primary" text class="operate-btn">
+                {{ t('编辑') }}
+              </bk-button>
+            </div>
+          </div>
           <div class="detail-item-content">
+            <div class="detail-item-content-item" v-if="basicInfoData.kind === 1">
+              <div class="label">{{ `${t('开发语言')}：` }}</div>
+              <div class="value">
+                <span>{{ basicInfoData.extra_info?.language || '--' }}</span>
+              </div>
+            </div>
+            <div class="detail-item-content-item" v-if="basicInfoData.kind === 1">
+              <div class="label">{{ `${t('代码仓库')}：` }}</div>
+              <div class="value">
+                <span>{{ basicInfoData.extra_info?.repository || '--' }}</span>
+                <i
+                  class="apigateway-icon icon-ag-jump"
+                  @click.stop="handleOpenNav(basicInfoData.extra_info.repository)"></i>
+              </div>
+            </div>
             <div class="detail-item-content-item">
               <div class="label">{{ `${t('是否公开')}：` }}</div>
               <div class="value">
@@ -90,7 +131,7 @@
                 <i class="apigateway-icon icon-ag-copy-info" @click.self.stop="copy(basicInfoData.api_domain)"></i>
               </div>
             </div>
-            <div class="detail-item-content-item">
+            <!-- <div class="detail-item-content-item">
               <div class="label">{{ `${t('文档地址')}：` }}</div>
               <div class="value url">
                 <span
@@ -111,7 +152,7 @@
                   </span>
                 </template>
               </div>
-            </div>
+            </div> -->
             <div class="detail-item-content-item">
               <div class="label">{{ `${t('维护人员')}：` }}</div>
               <div class="value">
@@ -142,6 +183,75 @@
             </div>
           </div>
         </div>
+
+        <div class="basic-info-detail-item">
+          <div class="detail-item-title">
+            {{ t('API文档') }}
+
+            <div class="area-edit" @click.stop="showApiDocEdit()">
+              <i class="apigateway-icon icon-ag-edit-line" />
+              <bk-button theme="primary" text class="operate-btn">
+                {{ t('编辑') }}
+              </bk-button>
+            </div>
+          </div>
+          <div class="detail-item-content">
+            <div class="detail-item-content-item">
+              <div class="label">{{ `${t('联系人类型')}：` }}</div>
+              <div class="value">
+                <span class="link">{{ basicInfoData.doc_maintainers?.type === 'user' ? t('用户') : t('服务号') }}</span>
+              </div>
+            </div>
+
+            <div
+              class="detail-item-content-item align-items-start"
+              v-show="basicInfoData.doc_maintainers?.type === 'user'">
+              <div class="label">{{ `${t('联系人')}：` }}</div>
+              <div class="value contact">
+                <span class="link">{{ basicInfoData.doc_maintainers?.contacts?.join(',') || '--' }}</span>
+                <p class="sub-explain">{{ t('文档页面上展示出来的文档咨询接口人') }}</p>
+              </div>
+            </div>
+
+            <div class="detail-item-content-item" v-show="basicInfoData.doc_maintainers?.type === 'service_account'">
+              <div class="label">{{ `${t('服务号名称')}：` }}</div>
+              <div class="value">
+                <span class="link">{{ basicInfoData.doc_maintainers?.service_account?.name || '--' }}</span>
+              </div>
+            </div>
+
+            <div class="detail-item-content-item" v-show="basicInfoData.doc_maintainers?.type === 'service_account'">
+              <div class="label">{{ `${t('服务号链接')}：` }}</div>
+              <div class="value">
+                <span class="link">{{ basicInfoData.doc_maintainers?.service_account?.link || '--' }}</span>
+              </div>
+            </div>
+
+            <div class="detail-item-content-item">
+              <div class="label">{{ `${t('文档地址')}：` }}</div>
+              <div class="value url">
+                <span
+                  class="link"
+                  v-bk-tooltips="{
+                    content: t('网关未开启或公开，暂无文档地址'),
+                    placement: 'right',
+                    disabled: !!basicInfoData.docs_url }"
+                >
+                  {{ basicInfoData.docs_url || '--' }}
+                </span>
+                <template v-if="basicInfoData.docs_url">
+                  <span>
+                    <i class="apigateway-icon icon-ag-jump" @click.stop="handleOpenNav(basicInfoData.docs_url)" />
+                  </span>
+                  <span>
+                    <i class="apigateway-icon icon-ag-copy-info" @click.self.stop="copy(basicInfoData.docs_url)" />
+                  </span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="basic-info-detail-item">
           <div class="detail-item-title">{{ t('API公钥（指纹）') }}</div>
           <div class="detail-item-content">
@@ -176,6 +286,51 @@
             </div>
           </div>
         </div>
+        <div class="basic-info-detail-item" v-if="basicInfoData.kind === 1">
+          <div class="detail-item-title">{{ t('可编程网关工作流') }}</div>
+          <div class="detail-item-content">
+            <img :src="processImg" :alt="t('可编程网关的流程图')">
+          </div>
+        </div>
+        <div class="basic-info-detail-item" v-if="basicInfoData.kind === 1">
+          <div class="detail-item-title">{{ t('关联操作指引') }}</div>
+          <div class="detail-item-content">
+            <div class="explain">
+              {{ t('可编程网关发布后，系统将在蓝鲸开发者中心部署一个 SaaS 来提供 API 的后端服务，与蓝鲸 SaaS 开发相关的操作均可在蓝鲸开发者中心完成') }}
+            </div>
+            <div class="guide-wrapper">
+              <div class="guide-item">
+                <div class="item-name">{{ t('开发 API') }}</div>
+                <div class="item-values">
+                  <div class="item" v-for="(item, index) in basicInfoData.links?.develop" :key="item.name">
+                    <a class="value" :href="item.link" target="_blank">{{ item.name }}</a>
+                    <span class="line" v-if="index !== basicInfoData.links?.develop?.length - 1"></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-item">
+                <div class="item-name">{{ t('查询日志') }}</div>
+                <div class="item-values">
+                  <div class="item" v-for="(item, index) in basicInfoData.links?.logging" :key="item.name">
+                    <a class="value" :href="item.link" target="_blank">{{ item.name }}</a>
+                    <span class="line" v-if="index !== basicInfoData.links?.logging?.length - 1"></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-item">
+                <div class="item-name">{{ t('更多操作') }}</div>
+                <div class="item-values">
+                  <div class="item" v-for="(item, index) in basicInfoData.links?.more" :key="item.name">
+                    <a class="value" :href="item.link" target="_blank">{{ item.name }}</a>
+                    <span class="line" v-if="index !== basicInfoData.links?.more?.length - 1"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </bk-loading>
 
@@ -204,89 +359,19 @@
       </template>
     </bk-dialog>
 
-    <bk-dialog
-      width="600"
-      theme="primary"
-      :is-show="dialogEditData.isShow"
-      :title="dialogEditData.title"
-      quick-close
-      :is-loading="dialogEditData.loading"
-      @confirm="handleConfirmEdit"
-      @closed="handleCloseEdit">
-      <bk-form ref="formRef" form-type="vertical" :model="basicInfoDetailData" :rules="rules">
-        <bk-form-item
-          :label="t('名称')"
-          property="name"
-          required
-        >
-          <bk-input
-            v-model="basicInfoDetailData.name"
-            :maxlength="30"
-            :disabled="true"
-            :placeholder="t('请输入小写字母、数字、连字符(-)，以小写字母开头')"
-          />
-          <div class="gateways-name-tip">
-            <span>{{ t('网关唯一标识，创建后不可修改') }}</span>
-          </div>
-        </bk-form-item>
-        <bk-form-item
-          :label="t('维护人员')"
-          property="maintainers"
-          required
-        >
-          <MemberSelect v-model="basicInfoDetailData.maintainers" :placeholder="t('请选择维护人员')" :has-delete-icon="true" />
-        </bk-form-item>
-        <bk-form-item
-          :label="t('描述')"
-          property="description"
-        >
-          <bk-input
-            type="textarea"
-            v-model="basicInfoDetailData.description"
-            :placeholder="t('请输入网关描述')"
-            :maxlength="500"
-            :rows="5"
-            clearable
-          />
-        </bk-form-item>
-        <bk-form-item
-          :label="t('是否公开')"
-          property="is_public"
-          required
-        >
-          <bk-switcher v-model="basicInfoDetailData.is_public" theme="primary" />
-          <span class="common-form-tips">{{ t('公开，则用户可查看资源文档、申请资源权限；不公开，则网关对用户隐藏') }}</span>
-        </bk-form-item>
-        <bk-form-item
-          :label="t('关联蓝鲸应用')"
-          property="bk_app_codes"
-          v-if="user?.featureFlags?.GATEWAY_APP_BINDING_ENABLED"
-        >
-          <bk-tag-input
-            v-model="basicInfoDetailData.bk_app_codes"
-            :placeholder="t('请输入蓝鲸应用ID，并按enter确认')"
-            allow-create
-            has-delete-icon
-            collapse-tags
-            :list="[]"
-          />
-          <span class="common-form-tips">{{ t('仅影响 HomePage 中运维开发分数的计算') }}</span>
-        </bk-form-item>
-        <bk-form-item
-          :label="t('管理网关的应用列表 ')"
-          property="related_app_codes"
-        >
-          <bk-tag-input
-            v-model="basicInfoDetailData.related_app_codes"
-            :placeholder="t('请输入蓝鲸应用ID，并按enter确认')"
-            allow-create
-            has-delete-icon
-            collapse-tags
-          />
-          <span class="common-form-tips">{{ t('允许列表中的应用使用 sdk 或者开放 API 调用网关接口，同步环境/资源以及发布版本') }}</span>
-        </bk-form-item>
-      </bk-form>
-    </bk-dialog>
+    <bk-sideslider
+      v-model:is-show="isShowMarkdown"
+      :title="t('查看开发指引')"
+      width="960"
+    >
+      <section class="markdown-box">
+        <guide :markdown-html="markdownHtml" />
+      </section>
+    </bk-sideslider>
+
+    <create-gateway-com v-model="createGatewayShow" :init-data="basicInfoDetailData" @done="getBasicInfo()" />
+
+    <edit-api-doc v-model="isShowApiDoc" :data="basicInfoData" @done="getBasicInfo()" />
   </div>
 </template>
 
@@ -295,49 +380,25 @@ import {  ref, computed, watch } from 'vue';
 import _ from 'lodash';
 import { Message, InfoBox } from 'bkui-vue';
 import { useI18n } from 'vue-i18n';
+import { HelpDocumentFill } from 'bkui-vue/lib/icon';
 import { useRoute, useRouter } from 'vue-router';
-import { useUser } from '@/store';
 import {  copy } from '@/common/util';
 import { useGetGlobalProperties } from '@/hooks';
-// import { useStage } from '@/store';
 import { BasicInfoParams, DialogParams } from './common/type';
-import { getGateWaysInfo, toggleGateWaysStatus, deleteGateWays, editGateWays } from '@/http';
+import { getGateWaysInfo, toggleGateWaysStatus, deleteGateWays, editGateWays, getGuideDocs } from '@/http';
 import GateWaysEditTextarea from '@/components/gateways-edit/textarea.vue';
 import GateWaysEditMemberSelector from '@/components/gateways-edit/member-selector.vue';
-import MemberSelect from '@/components/member-select';
+import CreateGatewayCom from '@/components/create-gateway.vue';
+import guide from '@/components/guide.vue';
+import MarkdownIt from 'markdown-it';
+import hljs from 'highlight.js';
+// @ts-ignore
+import programProcess from '@/images/program-process.svg';
+import EditApiDoc from './common/editApiDoc.vue';
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const user = useUser();
-
-const rules = {
-  name: [
-    {
-      required: true,
-      message: t('请填写名称'),
-      trigger: 'blur',
-    },
-    {
-      validator: (value: string) => value.length >= 3,
-      message: t('不能小于3个字符'),
-      trigger: 'blur',
-    },
-    {
-      validator: (value: string) => value.length <= 30,
-      message: t('不能多于30个字符'),
-      trigger: 'blur',
-    },
-    {
-      validator: (value: string) => {
-        const reg = /^[a-z][a-z0-9-]*$/;
-        return reg.test(value);
-      },
-      message: '由小写字母、数字、连接符（-）组成，首字符必须是字母，长度大于3小于30个字符',
-      trigger: 'blur',
-    },
-  ],
-};
 
 // 全局变量
 const globalProperties = useGetGlobalProperties();
@@ -345,9 +406,13 @@ const { GLOBAL_CONFIG } = globalProperties;
 
 // 网关id
 const apigwId = ref(0);
-const formRef = ref(null);
 const formRemoveConfirmApigw = ref('');
 const basicInfoDetailLoading = ref(false);
+const createGatewayShow = ref<boolean>(false);
+const isShowMarkdown = ref<boolean>(false);
+const markdownHtml = ref<string>('');
+const isShowApiDoc = ref(false);
+
 // 当前基本信息
 const basicInfoData = ref<BasicInfoParams>({
   status: 1,
@@ -367,16 +432,25 @@ const basicInfoData = ref<BasicInfoParams>({
   developers: [],
   is_public: true,
   is_official: false,
+  kind: 0,
+  extra_info: {
+    language: 'python',
+    repository: '',
+  },
+  programmable_gateway_git_info: {
+    repository: '',
+    account: '',
+    password: '',
+  },
 });
 const basicInfoDetailData = ref(_.cloneDeep(basicInfoData.value));
 const delApigwDialog = ref<DialogParams>({
   isShow: false,
   loading: false,
 });
-const dialogEditData = ref<DialogParams>({
-  isShow: false,
-  loading: false,
-  title: t('编辑网关'),
+
+const processImg = computed(() => {
+  return programProcess;
 });
 
 const formRemoveApigw = computed(() => {
@@ -388,11 +462,41 @@ const delTips = computed(() => {
   return t(`请完整输入<code class="gateway-del-tips">${basicInfoData.value.name}</code> 来确认删除网关！`);
 });
 
+const showApiDocEdit = () => {
+  isShowApiDoc.value = true;
+};
+
 // 获取网关基本信息
 const getBasicInfo = async () => {
   try {
     const res = await getGateWaysInfo(apigwId.value);
     basicInfoData.value = Object.assign({}, res);
+  } catch (e) {
+    console.error(e);
+  }
+};
+
+const md = new MarkdownIt({
+  linkify: false,
+  html: true,
+  breaks: true,
+  highlight(str: string, lang: string) {
+    try {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
+      }
+    } catch {
+      return str;
+    }
+    return str;
+  },
+});
+
+const showGuide = async () => {
+  try {
+    const data = await getGuideDocs(apigwId.value);
+    markdownHtml.value = md.render(data.content);
+    isShowMarkdown.value = true;
   } catch (e) {
     console.error(e);
   }
@@ -411,33 +515,9 @@ const handleDeleteApigw = async () => {
       router.push({
         name: 'home',
       });
-    }, 300);
+    }, 200);
   } catch (e) {
     console.error(e);
-  }
-};
-
-const handleConfirmEdit = async () => {
-  try {
-    await formRef.value.validate();
-    dialogEditData.value.loading = true;
-    const params = _.cloneDeep(basicInfoDetailData.value);
-    if (!user?.featureFlags?.GATEWAY_APP_BINDING_ENABLED) {
-      params.bk_app_codes = undefined;
-    }
-    await editGateWays(apigwId.value, params);
-    Message({
-      message: t('编辑成功'),
-      theme: 'success',
-      width: 'auto',
-    });
-    dialogEditData.value.isShow = false;
-    await getBasicInfo();
-  } catch (error) {
-  } finally {
-    setTimeout(() => {
-      dialogEditData.value.loading = false;
-    }, 200);
   }
 };
 
@@ -497,10 +577,7 @@ const handleOperate = async (type: string) => {
 
   if (['edit'].includes(type)) {
     basicInfoDetailData.value = _.cloneDeep(basicInfoData.value);
-    console.log('basicInfoDetailData.value', basicInfoDetailData.value);
-    setTimeout(() => {
-      dialogEditData.value.isShow = true;
-    }, 500);
+    createGatewayShow.value = true;
     return;
   }
 
@@ -509,10 +586,6 @@ const handleOperate = async (type: string) => {
     formRemoveConfirmApigw.value = '';
     return;
   }
-};
-
-const handleCloseEdit =  () => {
-  dialogEditData.value.isShow = false;
 };
 
 const handleOpenNav = (url: string) => {
@@ -567,6 +640,9 @@ watch(
 </script>
 
 <style lang="scss" scoped>
+.markdown-box {
+  padding: 20px 24px;
+}
 .basic-info-wrapper {
   padding: 24px;
   font-size: 12px;
@@ -585,6 +661,29 @@ watch(
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
+      // .kind {
+      //   content: ' ';
+      //   position: absolute;
+      //   width: 20px;
+      //   height: 20px;
+      //   border-radius: 2px;
+      //   top: 0;
+      //   left: 0;
+      //   font-size: 12px;
+      //   line-height: 18px;
+      //   text-align: center;
+      //   &.normal {
+      //     color: #1768EF;
+      //     background: #E1ECFF;
+      //     border: 1px solid #699DF4;
+      //   }
+      //   &.program {
+      //     color: #299E56;
+      //     background: #EBFAF0;
+      //     border: 1px solid #A1E3BA;
+      //   }
+      // }
 
       .name {
         font-weight: 700;
@@ -657,9 +756,20 @@ watch(
       .header-info-button {
         display: flex;
 
+        .btn-line {
+          width: 1px;
+          height: 16px;
+          background-color: #DCDEE5;
+          margin-right: 8px;
+          margin-top: 8px;
+        }
         .operate-btn {
           min-width: 88px;
           margin-right: 8px;
+          .icon-help {
+            color: #c4c6cc;
+            margin-right: 2px;
+          }
         }
 
         .deactivate-btn {
@@ -688,6 +798,16 @@ watch(
         font-weight: 700;
         font-size: 14px;
         color: #313238;
+        display: flex;
+        align-items: center;
+        .area-edit {
+          color: #3A84FF;
+          margin-left: 14px;
+          cursor: pointer;
+          .operate-btn {
+            font-size: 12px;
+          }
+        }
       }
 
       .detail-item-content {
@@ -716,7 +836,18 @@ watch(
             flex: 1;
             color: #313238;
 
-            .icon-ag-copy-info {
+            &.contact {
+              display: block;
+              .sub-explain {
+                color: #979BA5;
+                font-size: 12px;
+                line-height: 12px;
+                margin-bottom: 6px;
+              }
+            }
+
+            .icon-ag-copy-info,
+            .icon-ag-jump {
               margin-left: 3px;
               padding: 3px;
               color: #3A84FF;
@@ -781,7 +912,45 @@ watch(
             }
           }
         }
-
+        .explain {
+          font-size: 12px;
+          color: #4D4F56;
+          margin-bottom: 14px;
+        }
+        .guide-wrapper {
+          width: 912px;
+          border-top: 1px solid #DCDEE5;
+          .guide-item {
+            border-bottom: 1px solid #DCDEE5;
+            display: flex;
+            height: 42px;
+            line-height: 42px;
+            padding-left: 16px;
+            .item-name {
+              font-weight: Bold;
+              font-size: 12px;
+              color: #4D4F56;
+            }
+            .item-values {
+              display: flex;
+              margin-left: 164px;
+              .item {
+                display: flex;
+              }
+              .line {
+                width: 1px;
+                height: 13px;
+                margin: 15px 8px 0;
+                background-color: #C4C6CC;
+              }
+              .value {
+                font-size: 12px;
+                color: #3A84FF;
+                cursor: pointer;
+              }
+            }
+          }
+        }
       }
     }
   }

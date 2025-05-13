@@ -23,6 +23,8 @@ from apigateway.core.constants import (
     EVENT_FAIL_INTERVAL_TIME,
     GatewayStatusEnum,
     PublishEventStatusEnum,
+    ReleaseHistoryStatusEnum,
+    ReleaseStatusEnum,
     StageStatusEnum,
 )
 from apigateway.core.models import PublishEvent, Release, ReleaseHistory
@@ -38,6 +40,17 @@ class ReleaseHandler:
                 stage__status=StageStatusEnum.ACTIVE.value,
             ).values_list("stage_id", flat=True)
         )
+
+    @staticmethod
+    def get_release_status(release_history_id: int) -> str:
+        """根据 release_history_id 查询发布状态"""
+        event = PublishEvent.objects.get_release_history_id_to_latest_publish_event_map([release_history_id]).get(
+            release_history_id, None
+        )
+        if event:
+            return event.get_release_history_status()
+
+        return ReleaseHistoryStatusEnum.FAILURE.value
 
     @staticmethod
     def list_publish_events_by_release_history_id(release_history_id: int) -> List[PublishEvent]:
@@ -124,8 +137,7 @@ class ReleaseHandler:
             }
             # 如果没有查到任何发布事件
             if publish_id not in publish_id_to_latest_event_map:
-                # 兼容以前，使用以前的状态
-                state["status"] = release_history.status
+                state["status"] = ReleaseStatusEnum.PENDING.value
             else:
                 latest_event = publish_id_to_latest_event_map[publish_id]
                 state["status"] = latest_event.get_release_history_status()

@@ -173,16 +173,15 @@ import editStageSideslider from '../comps/edit-stage-sideslider.vue';
 import { copy } from '@/common/util';
 import { useRoute } from 'vue-router';
 
-const { t } = useI18n();
-const route = useRoute();
-const common = useCommon();
-const stageStore = useStage();
-
 const props = defineProps({
   stageAddress: String,
   stageId: Number,
   versionId: Number,
 });
+const { t } = useI18n();
+const route = useRoute();
+const common = useCommon();
+const stageStore = useStage();
 
 const searchValue = ref<string>('');
 const info = ref<any>({});
@@ -520,8 +519,9 @@ const init = async () => {
 
   const curStageData = data.find((item: { name: string; }) => item.name === paramsStage)
   || stageStore.stageList[0];
-  await getResourceVersionsData(curStageData);
   await getLabels();
+  // 依赖 getLabels() 获取的标签列表，需在这之后请求
+  await getResourceVersionsData(curStageData);
 };
 
 // 切换环境重新获取资源信息

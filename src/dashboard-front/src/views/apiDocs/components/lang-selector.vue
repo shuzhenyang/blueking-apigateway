@@ -10,7 +10,7 @@
         width: `${width}px`,
         'margin-bottom': `${marginBottom}px`,
       }"
-      v-bk-tooltips="{ content: t(`{lang} SDK未生成，可联系负责人生成SDK`, { lang }), disabled: isSdkGenerated(lang) }"
+      v-bk-tooltips="{ content: getTooltipContent(lang), disabled: isSdkGenerated(lang) }"
       @click="handleSelect(lang)"
     >
       {{ useChangeCase(lang, 'capitalCase') }}
@@ -24,18 +24,9 @@ import { useChangeCase } from '@vueuse/integrations/useChangeCase';
 import { LanguageType } from '@/views/apiDocs/types';
 import { useI18n } from 'vue-i18n';
 
-const { t } = useI18n();
-
 const language = defineModel<LanguageType>({
   default: 'python',
 });
-
-interface IProps {
-  width: number;
-  marginBottom: number;
-  sdkLanguages: LanguageType[],
-  langList: LanguageType[],
-}
 
 const props = withDefaults(defineProps<IProps>(), {
   width: 150,  // 按钮宽度
@@ -49,8 +40,24 @@ const props = withDefaults(defineProps<IProps>(), {
   langList: () => [
     'python',
     'java',
+    'golang',
   ],
+  maintainers: () => [],
 });
+
+const emit = defineEmits<{
+  'select': [language: LanguageType]
+}>();
+
+const { t } = useI18n();
+
+interface IProps {
+  width: number;
+  marginBottom: number;
+  sdkLanguages: LanguageType[],
+  langList: LanguageType[],
+  maintainers: string[];
+}
 
 const {
   width,
@@ -59,9 +66,12 @@ const {
   langList,
 } = toRefs(props);
 
-const emit = defineEmits<{
-  'select': [language: LanguageType]
-}>();
+const getTooltipContent = (lang: string) => {
+  if (props.maintainers.length) {
+    return t('{lang} SDK未生成，可联系负责人生成SDK：{maintainers}', { lang, maintainers: props.maintainers.join(',') });
+  }
+  return t('{lang} SDK未生成，可联系负责人生成SDK', { lang });
+};
 
 // 检查是否已生成该语言的sdk
 const isSdkGenerated = (lang: LanguageType) => {

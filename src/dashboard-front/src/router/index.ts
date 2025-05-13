@@ -1,6 +1,10 @@
 /* eslint-disable max-len */
 
-import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
+import {
+  createRouter,
+  createWebHistory,
+  RouteRecordRaw,
+} from 'vue-router';
 import i18n from '@/language/i18n';
 
 import globalConfig from '@/constant/config';
@@ -32,7 +36,8 @@ const ApigwPermissionApps = () => import(/* webpackChunkName: 'apigw-env'*/'@/vi
 const ApigwPermissionRecords = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/permission/record/index.vue');
 const apigwAccessLog = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/operate-data/access-log/index.vue');
 const apigwAccessLogDetail = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/operate-data/access-log/detail.vue');
-const apigwReport = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/operate-data/statistics-report/index.vue');
+const apigwDashboard = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/operate-data/dashboard/index.vue');
+const apigwReport = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/operate-data/report/index.vue');
 const ApigwBackendService = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/backend-service/index.vue');
 const ApiBasicInfo = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/basic-info/index.vue');
 const ApigwOperateRecords  = () => import(/* webpackChunkName: 'apigw-env'*/'@/views/operate-records/index.vue');
@@ -57,7 +62,10 @@ const ComponentsPower = () => import(/* webpackChunkName: 'components-main'*/'@/
 const ComponentsHistory = () => import(/* webpackChunkName: 'components-main'*/'@/views/components-access/permission/history/index.vue');
 const ComponentsRuntimeData = () => import(/* webpackChunkName: 'components-main'*/'@/views/components-access/runtime-data/index.vue');
 const ComponentsRuntimeDetail = () => import(/* webpackChunkName: 'components-main'*/'@/views/components-access/runtime-data/detail.vue');
-
+const PlatformTools = () => import(/* webpackChunkName: 'platform-tools'*/'@/views/platform-tools/index.vue');
+const PlatformToolsToolbox = () => import(/* webpackChunkName: 'platform-tools'*/'@/views/platform-tools/toolbox/index.vue');
+const PlatformToolsAutomatedGateway = () => import(/* webpackChunkName: 'platform-tools'*/'@/views/platform-tools/automatedGateway/index.vue');
+const PlatformToolsProgrammableGateway = () => import(/* webpackChunkName: 'platform-tools'*/'@/views/platform-tools/programmableGateway/index.vue');
 
 // 文档一级路由出口
 const docsComponent = {
@@ -229,6 +237,7 @@ const routes: RouteRecordRaw[] = [
           title: t('审批历史'),
           matchRoute: 'apigwPermissionRecords',
           topMenu: 'home',
+          showBackIcon: true,
         },
       },
       {
@@ -250,6 +259,16 @@ const routes: RouteRecordRaw[] = [
           matchRoute: 'apigwAccessLogDetail',
           topMenu: 'home',
           isMenu: false,
+        },
+      },
+      {
+        path: '/:id/dashboard',
+        name: 'apigwDashboard',
+        component: apigwDashboard,
+        meta: {
+          title: t('仪表盘'),
+          matchRoute: 'apigwDashboard',
+          topMenu: 'home',
         },
       },
       {
@@ -334,7 +353,7 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
-        path: 'api-docs/:curTab/:targetName/:componentName?',
+        path: 'api-docs/:curTab/:board?/:targetName/:componentName?',
         name: 'apiDocDetail',
         component: APIDocDetail,
         meta: {
@@ -608,6 +627,56 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+
+  // 平台工具
+  {
+    path: '/platform-tools',
+    name: 'platformTools',
+    redirect: '/platform-tools/toolbox',
+    component: PlatformTools,
+    meta: {
+      title: t('平台工具'),
+      matchRoute: 'platformTools',
+      topMenu: 'platformTools',
+    },
+    children: [
+      {
+        path: 'toolbox',
+        name: 'platformToolsToolbox',
+        component: PlatformToolsToolbox,
+        meta: {
+          title: t('工具箱'),
+          matchRoute: 'platformToolsToolbox',
+          topMenu: 'platformTools',
+        },
+      },
+      {
+        path: 'automated-gateway',
+        name: 'platformToolsAutomatedGateway',
+        component: PlatformToolsAutomatedGateway,
+        meta: {
+          title: t('自动化接入网关'),
+          matchRoute: 'platformToolsAutomatedGateway',
+          topMenu: 'platformTools',
+        },
+      },
+      {
+        path: 'programmable-gateway',
+        name: 'platformToolsProgrammableGateway',
+        component: PlatformToolsProgrammableGateway,
+        meta: {
+          title: t('可编程网关'),
+          matchRoute: 'platformToolsProgrammableGateway',
+          topMenu: 'platformTools',
+        },
+      },
+    ],
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: '404',
+    component: () => import('@/views/404.vue'),
+  },
 ];
 
 const router = createRouter({
@@ -618,8 +687,17 @@ const router = createRouter({
 router.beforeEach((to: any, from: any) => {
   const { name: toName } = to;
   const { name: fromName } = from;
-  if (toName === 'apigwResource' && fromName === 'apigwResourceEdit') {
-    to.meta.pageStatus = true;
+  if (toName === 'apigwResource') {
+    if (fromName === 'apigwResourceEdit') {
+      to.meta.pageStatus = true;
+    }
+    // const commonStore = useCommon();
+    // 可编程网关不可访问
+    // if (commonStore?.curApigwData?.kind === 1) {
+    //   return {
+    //     name: '404',
+    //   };
+    // }
   }
   return true;
 });

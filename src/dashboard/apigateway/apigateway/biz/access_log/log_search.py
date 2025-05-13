@@ -23,7 +23,7 @@ from elasticsearch_dsl import Search
 from elasticsearch_dsl.aggs import A
 
 from apigateway.biz.access_log.constants import ES_OUTPUT_FIELDS
-from apigateway.common.es.clients import ESClientFactory
+from apigateway.common.es.clients import BKLogESClient
 from apigateway.utils import time as time_utils
 from apigateway.utils.time import SmartTimeRange
 
@@ -41,8 +41,8 @@ class LogSearchClient:
         resource_id: Optional[int] = None,
         request_id: Optional[str] = None,
         query: Optional[str] = None,
-        include_conditions: Optional[Dict[str, str]] = None,
-        exclude_conditions: Optional[Dict[str, str]] = None,
+        include_conditions: Optional[List[Tuple[str, str]]] = None,
+        exclude_conditions: Optional[List[Tuple[str, str]]] = None,
         time_start: Optional[int] = None,
         time_end: Optional[int] = None,
         time_range: Optional[int] = None,
@@ -64,7 +64,7 @@ class LogSearchClient:
                 time_range=time_range,
             )
 
-        self._es_client = ESClientFactory.get_es_client(self._es_index)
+        self._es_client = BKLogESClient(self._es_index)
 
     def search_logs(self, offset: int = 0, limit: Optional[int] = None) -> Tuple[int, List[Dict]]:
         """
@@ -108,11 +108,11 @@ class LogSearchClient:
             s = s.filter("term", request_id=self._request_id)
 
         if self._include_conditions:
-            for key, val in self._include_conditions.items():
+            for key, val in self._include_conditions:
                 s = s.filter("term", **{key: val})
 
         if self._exclude_conditions:
-            for key, val in self._exclude_conditions.items():
+            for key, val in self._exclude_conditions:
                 s = s.exclude("term", **{key: val})
 
         # time range

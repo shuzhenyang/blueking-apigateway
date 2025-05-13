@@ -1,35 +1,26 @@
 <template>
   <div>
     <!-- 自定义头部 -->
-    <stage-top-bar />
+    <StageTopBar />
     <div class="page-wrapper-padding stage-overview-wrapper">
-      <!-- <bk-loading
-        :loading="stageStore.realStageMainLoading"
-      > -->
-      <stage-card-list :stage-list="stageStore.stageList" />
-      <!-- </bk-loading> -->
+      <BkAlert
+        v-if="commonStore.isProgrammableGateway"
+        :title="t('可编程网关的环境由平台内置，不能修改和新增')"
+        class="mb24"
+        closable
+      />
+      <StageCardList />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import stageCardList from './comps/stage-card-list.vue';
-import stageTopBar from '@/components/stage-top-bar.vue';
-import { useStage } from '@/store';
+import StageCardList from './comps/stage-card-list.vue';
+import StageTopBar from '@/components/stage-top-bar.vue';
+import { useCommon } from '@/store';
+import { useI18n } from 'vue-i18n';
 
-// 环境列表
-const stageStore = useStage();
+const { t } = useI18n();
+const commonStore = useCommon();
 
 </script>
-
-<style lang="scss" scoped>
-.test {
-    display: flex;
-    .test-item {
-        flex: 1;
-        height: 100px;
-        background: red;
-        margin: 0 10px;
-    }
-}
-</style>

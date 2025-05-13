@@ -18,7 +18,7 @@
 from apigateway.apps.gateway.models import GatewayAppBinding
 from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.gateway_jwt import GatewayJWTHandler
-from apigateway.core.constants import GatewayStatusEnum
+from apigateway.core.constants import GatewayKindEnum, GatewayStatusEnum
 from apigateway.core.models import JWT, Gateway, GatewayRelatedApp, Stage
 
 
@@ -40,6 +40,7 @@ class TestGatewayListCreateApi:
             "maintainers": ["admin"],
             "is_public": False,
             "bk_app_codes": ["app1"],
+            "kind": GatewayKindEnum.NORMAL.value,
         }
 
         resp = request_view(
@@ -56,6 +57,7 @@ class TestGatewayListCreateApi:
         assert Stage.objects.filter(gateway=gateway).exists()
         assert JWT.objects.filter(gateway=gateway).count() == 1
         assert GatewayAppBinding.objects.filter(gateway=gateway).count() == 1
+        assert gateway.kind == GatewayKindEnum.NORMAL.value
 
         auth_config = GatewayHandler.get_gateway_auth_config(gateway.id)
         assert auth_config["allow_auth_from_params"] is False
@@ -81,6 +83,14 @@ class TestGatewayRetrieveUpdateDestroyApi:
         data = {
             "description": faker.pystr(),
             "maintainers": ["admin"],
+            "doc_maintainers": {
+                "type": "user",
+                "contacts": ["admin1", "admin2", "admin3"],
+                "service_account": {
+                    "name": "",
+                    "link": "",
+                },
+            },
             "is_public": faker.random_element([True, False]),
             "bk_app_codes": ["app1"],
             "related_app_codes": ["app2"],

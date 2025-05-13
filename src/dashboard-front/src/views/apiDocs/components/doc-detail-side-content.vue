@@ -2,9 +2,9 @@
   <!--  页面右侧的网关详情/组件详情  -->
   <div v-if="basics" class="intro-side-content-wrap">
     <header class="intro-header">
-      <article v-if="curTab === 'apigw'" class="title">{{ t('网关详情') }}</article>
+      <article v-if="curTab === 'gateway'" class="title">{{ t('网关详情') }}</article>
       <article v-else-if="curTab === 'component'" class="title">{{ t('组件详情') }}</article>
-      <aside>
+      <aside v-if="basics.doc_maintainers?.type === 'user'">
         <chat
           v-if="userStore.featureFlags?.ALLOW_CREATE_APPCHAT"
           :default-user-list="userList"
@@ -15,8 +15,14 @@
         >
         </chat>
       </aside>
+      <aside v-else>
+        <a target="_blank" class="link-item" :href="basics.doc_maintainers?.service_account?.link">
+          <i class="ag-doc-icon doc-qw f16 apigateway-icon icon-ag-qw"></i>
+          {{ t('联系 BK 助手') }}
+        </a>
+      </aside>
     </header>
-    <main v-if="curTab === 'apigw'" class="component-content">
+    <main v-if="curTab === 'gateway'" class="component-content">
       <div class="ag-markdown-view" id="markdown">
         <article>
           <header class="content-title">{{ t('网关描述') }}</header>
@@ -25,6 +31,14 @@
         <article>
           <header class="content-title">{{ t('网关负责人') }}</header>
           <main class="content-main">{{ basics.maintainers.join(', ') }}</main>
+        </article>
+        <article>
+          <header class="content-title">{{ t('文档联系人') }}</header>
+          <main class="content-main">
+            {{ basics.doc_maintainers?.type === 'user' ?
+              basics.doc_maintainers?.contacts.join(', ') :
+              basics.doc_maintainers?.service_account?.name }}
+          </main>
         </article>
         <article>
           <header class="content-title">{{ t('网关访问地址') }}</header>
@@ -98,6 +112,11 @@ import {
 } from '@/views/apiDocs/types';
 import LangSelector from '@/views/apiDocs/components/lang-selector.vue';
 
+const props = withDefaults(defineProps<IProps>(), {
+  basics: () => null,
+  sdks: () => [],
+});
+
 const { t } = useI18n();
 
 // 注入当前的总 tab 变量
@@ -107,11 +126,6 @@ interface IProps {
   basics: IApiGatewayBasics & ISystemBasics | null;
   sdks: IApiGatewaySdkDoc[] & IComponentSdk[];
 }
-
-const props = withDefaults(defineProps<IProps>(), {
-  basics: () => null,
-  sdks: () => [],
-});
 
 const {
   basics,
@@ -177,6 +191,13 @@ watchEffect(() => {
         margin-bottom: 32px;
       }
     }
+  }
+}
+.link-item {
+  font-size: 12px;
+  color: #3A84FF;
+  i {
+    margin-right: 3px;
   }
 }
 </style>

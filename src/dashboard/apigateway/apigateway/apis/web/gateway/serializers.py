@@ -1,6 +1,6 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
-# 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
+# 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
 # Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
@@ -15,27 +15,42 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
+from apigateway.apis.web.constants import GatewayAPIDocMaintainerTypeEnum
 from apigateway.biz.constants import APP_CODE_PATTERN
 from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.gateway_type import GatewayTypeHandler
 from apigateway.common.django.validators import NameValidator
 from apigateway.common.i18n.field import SerializerTranslatedField
+from apigateway.common.paas import gen_programmable_gateway_links
 from apigateway.core.constants import (
+    GatewayKindEnum,
     GatewayStatusEnum,
+    ProgrammableGatewayLanguageEnum,
 )
 from apigateway.core.models import Gateway
 from apigateway.utils.crypto import calculate_fingerprint
 
 from .constants import GATEWAY_NAME_PATTERN
-from .validators import ReservedGatewayNameValidator
+from .validators import (
+    ProgrammableGatewayNameValidator,
+    ReservedGatewayNameValidator,
+)
 
 
 class GatewayListInputSLZ(serializers.Serializer):
     keyword = serializers.CharField(allow_blank=True, required=False, help_text="网关筛选条件，支持模糊匹配网关名称")
+    kind = serializers.ChoiceField(
+        choices=GatewayKindEnum.get_choices(),
+        required=False,
+        allow_null=True,
+        help_text="网关类型，不传或传空表示全部",
+    )
+
     order_by = serializers.ChoiceField(
         choices=["-updated_time", "updated_time", "-created_time", "created_time", "name", "-name"],
         default="-updated_time",
@@ -52,13 +67,21 @@ class GatewayListOutputSLZ(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=GatewayStatusEnum.get_choices(), read_only=True, help_text="网关状态，0: 已停用，1：启用中"
     )
+    kind = serializers.ChoiceField(
+        choices=GatewayKindEnum.get_choices(),
+        read_only=True,
+        help_text="网关类型，0: 普通网关，1：可编程网关",
+    )
     is_public = serializers.BooleanField(read_only=True, help_text="是否公开，true：公开，false：不公开")
-    created_by = serializers.CharField(allow_blank=True, allow_null=True, read_only=True, help_text="创建人")
-    created_time = serializers.DateTimeField(allow_null=True, read_only=True, help_text="创建时间")
-    updated_time = serializers.DateTimeField(allow_null=True, read_only=True, help_text="更新时间")
     is_official = serializers.SerializerMethodField(help_text="是否为官方网关，true：官方网关，false：非官方网关")
     resource_count = serializers.SerializerMethodField(help_text="网关下资源的数量")
     stages = serializers.SerializerMethodField(help_text="网关环境列表，其中的 released 表示环境是否已发布")
+
+    extra_info = serializers.SerializerMethodField(help_text="网关额外信息")
+
+    created_by = serializers.CharField(allow_blank=True, allow_null=True, read_only=True, help_text="创建人")
+    created_time = serializers.DateTimeField(allow_null=True, read_only=True, help_text="创建时间")
+    updated_time = serializers.DateTimeField(allow_null=True, read_only=True, help_text="更新时间")
 
     def get_is_official(self, obj):
         if obj.id not in self.context["gateway_auth_configs"]:
@@ -71,6 +94,28 @@ class GatewayListOutputSLZ(serializers.Serializer):
 
     def get_stages(self, obj):
         return self.context["stages"].get(obj.id, [])
+
+    def get_extra_info(self, obj):
+        return obj.extra_info
+
+
+class GatewayExtraInfoSLZ(serializers.Serializer):
+    # 公共额外信息字段
+    # 可编程网关额外信息字段
+    language = serializers.ChoiceField(
+        choices=ProgrammableGatewayLanguageEnum.get_choices(),
+        allow_blank=True,
+        required=False,
+        help_text="语言",
+    )
+    repository = serializers.CharField(allow_blank=True, required=False, help_text="仓库")
+    # 普通网关额外信息字段
+
+
+class ProgrammableGatewayGitInfoSLZ(serializers.Serializer):
+    repository = serializers.CharField(allow_blank=True, required=True, help_text="仓库地址")
+    account = serializers.CharField(allow_blank=True, required=True, help_text="账号")
+    password = serializers.CharField(allow_blank=True, required=True, help_text="密码")
 
 
 class GatewayCreateInputSLZ(serializers.ModelSerializer):
@@ -88,6 +133,8 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
     bk_app_codes = serializers.ListField(
         child=serializers.RegexField(APP_CODE_PATTERN), allow_empty=True, required=False, help_text="网关关联的应用"
     )
+    extra_info = GatewayExtraInfoSLZ(required=False, help_text="网关额外信息")
+    programmable_gateway_git_info = ProgrammableGatewayGitInfoSLZ(required=False, help_text="可编程网关 Git 信息")
 
     class Meta:
         model = Gateway
@@ -97,7 +144,10 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
             "maintainers",
             "developers",
             "is_public",
+            "kind",
+            "extra_info",
             "bk_app_codes",
+            "programmable_gateway_git_info",
         )
         lookup_field = "id"
 
@@ -111,13 +161,14 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
         }
 
         # 使用 UniqueTogetherValidator，方便错误提示信息统一处理
-        # 使用 UniqueValidator，错误提示中包含了字段名："参数校验失败: Name: 网关名称已经存在"
+        # 使用 UniqueValidator，错误提示中包含了字段名："参数校验失败：Name: 网关名称已经存在"
         validators = [
             UniqueTogetherValidator(
                 queryset=Gateway.objects.all(),
                 fields=["name"],
                 message=gettext_lazy("网关名称已经存在。"),
-            )
+            ),
+            ProgrammableGatewayNameValidator(),
         ]
 
     def _add_creator_to_maintainers(self, data):
@@ -131,9 +182,14 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
         data = super().to_internal_value(data)
         return self._add_creator_to_maintainers(data)
 
+    def create(self, validated_data):
+        validated_data.pop("programmable_gateway_git_info", None)
+        return super().create(validated_data)
+
 
 class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
     maintainers = serializers.ListField(child=serializers.CharField(), allow_empty=True, help_text="网关维护人员")
+    doc_maintainers = serializers.JSONField(help_text="网关文档维护人员")
     developers = serializers.ListField(
         child=serializers.CharField(), allow_empty=True, default=list, help_text="网关开发者"
     )
@@ -144,10 +200,12 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
     is_official = serializers.SerializerMethodField(help_text="是否为官方网关，true：官方网关，false：非官方网关")
     api_domain = serializers.SerializerMethodField(help_text="网关访问域名")
     docs_url = serializers.SerializerMethodField(help_text="文档地址")
-    public_key_fingerprint = serializers.SerializerMethodField(help_text="公钥(指纹)")
+    public_key_fingerprint = serializers.SerializerMethodField(help_text="公钥 (指纹)")
     allow_update_gateway_auth = serializers.SerializerMethodField(help_text="是否允许更新网关认证配置")
     bk_app_codes = serializers.SerializerMethodField(help_text="网关关联的应用")
-    related_app_codes = serializers.SerializerMethodField(help_text="关联的APP")
+    related_app_codes = serializers.SerializerMethodField(help_text="关联的 APP")
+
+    links = serializers.SerializerMethodField(help_text="相关链接")
 
     class Meta:
         model = Gateway
@@ -156,8 +214,10 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
             "name",
             "description",
             "maintainers",
+            "doc_maintainers",
             "developers",
             "status",
+            "kind",
             "is_public",
             "created_by",
             "created_time",
@@ -170,13 +230,15 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
             "public_key_fingerprint",
             "bk_app_codes",
             "related_app_codes",
+            "extra_info",
+            "links",
         )
         read_only_fields = fields
         lookup_field = "id"
 
         extra_kwargs = {
             "id": {
-                "help_text": "网关ID",
+                "help_text": "网关 ID",
             },
             "name": {
                 "help_text": "网关名称",
@@ -184,14 +246,20 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
             "status": {
                 "help_text": "网关状态，0：已停用，1：启用中",
             },
+            "kind": {
+                "help_text": "网关类型，0: 普通网关，1：可编程网关",
+            },
             "is_public": {
-                "help_text": "是否公开, true: 公开,false: 不公开",
+                "help_text": "是否公开，true: 公开，false: 不公开",
             },
             "created_by": {
                 "help_text": "创建人",
             },
             "created_time": {
                 "help_text": "创建时间",
+            },
+            "extra_info": {
+                "help_text": "网关额外信息",
             },
         }
 
@@ -216,9 +284,47 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
     def get_related_app_codes(self, obj):
         return self.context["related_app_codes"]
 
+    def get_links(self, obj):
+        if obj.kind == GatewayKindEnum.PROGRAMMABLE.value:
+            return gen_programmable_gateway_links(obj.name)
+        return {}
+
+
+class ServiceAccountSLZ(serializers.Serializer):
+    name = serializers.CharField(allow_blank=True, required=False, help_text="服务号名称")
+    link = serializers.CharField(allow_blank=True, required=False, help_text="服务号链接")
+
+
+class GatewayAPIDocMaintainerSLZ(serializers.Serializer):
+    type = serializers.ChoiceField(
+        choices=GatewayAPIDocMaintainerTypeEnum.get_choices(), allow_blank=True, required=False, help_text="联系人类型"
+    )
+    contacts = serializers.ListField(
+        child=serializers.CharField(), allow_empty=True, required=False, help_text="联系人"
+    )
+    service_account = ServiceAccountSLZ(required=False, help_text="服务号")
+
+    def validate(self, data):
+        if data.get("type") == GatewayAPIDocMaintainerTypeEnum.USER.value and not data.get("contacts"):
+            raise serializers.ValidationError(_("联系人不可为空。"))
+
+        if data.get("type") == GatewayAPIDocMaintainerTypeEnum.SERVICE_ACCOUNT.value:
+            service_account = data.get("service_account", {})
+            if not service_account.get("name"):
+                raise serializers.ValidationError(_("服务号名称不可为空。"))
+            link = service_account.get("link")
+            if not link:
+                raise serializers.ValidationError(_("服务号链接不可为空。"))
+            if not link.startswith("wxwork://"):
+                raise serializers.ValidationError(_("服务号链接格式不正确，必须以 wxwork:// 开头。"))
+        return data
+
 
 class GatewayUpdateInputSLZ(serializers.ModelSerializer):
     maintainers = serializers.ListField(child=serializers.CharField(), allow_empty=True, help_text="网关维护人员")
+    doc_maintainers = GatewayAPIDocMaintainerSLZ(required=False, help_text="网关文档维护人员")
+    extra_info = GatewayExtraInfoSLZ(required=False, help_text="网关额外信息")
+
     developers = serializers.ListField(
         child=serializers.CharField(), allow_empty=True, default=list, help_text="网关开发者"
     )
@@ -240,6 +346,8 @@ class GatewayUpdateInputSLZ(serializers.ModelSerializer):
         fields = (
             "description",
             "maintainers",
+            "doc_maintainers",
+            "extra_info",
             "developers",
             "is_public",
             "bk_app_codes",
@@ -273,3 +381,7 @@ class GatewayUpdateStatusInputSLZ(serializers.ModelSerializer):
 
 class GatewayFeatureFlagsOutputSLZ(serializers.Serializer):
     feature_flags = serializers.DictField(help_text="网关特性集")
+
+
+class GatewayDevGuidelineOutputSLZ(serializers.Serializer):
+    content = serializers.CharField(help_text="文档内容")

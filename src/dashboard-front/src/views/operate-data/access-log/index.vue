@@ -39,22 +39,13 @@
                   </bk-select>
                 </bk-form-item>
                 <bk-form-item :label="t('资源')">
-                  <bk-select
-                    style="width: 250px; margin-right: 8px;"
-                    class="top-resource-select"
-                    :popover-width="180"
-                    ext-popover-cls="resource-dropdown-content"
+                  <ResourceSearcher
                     v-model="searchParams.resource_id"
-                    filterable
-                    :input-search="false"
-                    @change="handleResourceChange">
-                    <bk-option
-                      v-for="option in resourceList"
-                      :key="option.id"
-                      :id="option.id"
-                      :name="`${option.method} ${option.path}`">
-                    </bk-option>
-                  </bk-select>
+                    :list="resourceList"
+                    :need-prefix="false"
+                    style="width: 250px; margin-right: 8px;"
+                    @change="handleResourceChange"
+                  />
                 </bk-form-item>
                 <bk-form-item :label="t('查询语句')" class="ag-form-item-inline">
                   <SearchInput
@@ -147,6 +138,7 @@
                 :row-style="{ cursor: 'pointer' }"
                 :row-class="getRowClass"
                 :show-overflow-tooltip="true"
+                :settings="table.settings"
                 @row-click="handleRowClick"
                 @page-value-change="handlePageChange"
                 @page-limit-change="handlePageLimitChange"
@@ -156,7 +148,8 @@
                     <div
                       class="item"
                       v-for="({ label, field/*, is_filter: showCopy*/ }, index) in table.fields"
-                      :key="index">
+                      :key="index"
+                    >
                       <dt class="label">
                         {{ label }}
                         <span class="fields">
@@ -255,6 +248,7 @@ import {
 import { Message } from 'bkui-vue';
 import { useStorage } from '@vueuse/core';
 import AgIcon from '@/components/ag-icon.vue';
+import ResourceSearcher from '@/views/operate-data/dashboard/components/resource-searcher.vue';
 
 const { t } = i18n.global;
 const { getChartIntervalOption } = userChartIntervalOption();
@@ -299,6 +293,36 @@ const table = ref({
   list: [],
   fields: [],
   headers: [],
+  settings: {
+    fields: [
+      { label: t('请求ID'), field: 'request_id' },
+      { label: t('请求时间'), field: 'timestamp' },
+      { label: t('蓝鲸应用'), field: 'app_code' },
+      { label: t('蓝鲸用户'), field: 'bk_username' },
+      { label: t('客户端IP'), field: 'client_ip' },
+      { label: t('环境'), field: 'stage' },
+      { label: t('资源ID'), field: 'resource_id' },
+      { label: t('资源名称'), field: 'resource_name' },
+      { label: t('请求方法'), field: 'method', disabled: true },
+      { label: t('请求域名'), field: 'http_host' },
+      { label: t('请求路径'), field: 'http_path', disabled: true },
+      { label: 'QueryString', field: 'params' },
+      { label: 'Body', field: 'body' },
+      { label: t('后端请求方法'), field: 'backend_method' },
+      { label: t('后端Scheme'), field: 'backend_scheme' },
+      { label: t('后端域名'), field: 'backend_host' },
+      { label: t('后端路径'), field: 'backend_path' },
+      { label: t('响应体大小'), field: 'response_size' },
+      { label: t('状态码'), field: 'status' },
+      { label: t('请求总耗时'), field: 'request_duration' },
+      { label: t('耗时(毫秒)'), field: 'backend_duration' },
+      { label: t('错误编码名称'), field: 'code_name' },
+      { label: t('错误'), field: 'error' },
+      { label: t('响应说明'), field: 'response_desc' },
+    ],
+    extCls: 'hide-table-setting-line-height',
+    checked: ['timestamp', 'method', 'http_path', 'status', 'backend_duration', 'error'],
+  },
 });
 const includeObj = ref<string[]>([]);
 const excludeObj = ref<string[]>([]);
@@ -488,27 +512,45 @@ const setTableHeader = () => {
       minWidth: 30,
       showOverflowTooltip: false,
     },
+    { field: 'request_id', width: 180, label: t('请求ID') },
     {
       field: 'timestamp',
-      width: 220,
+      width: 180,
       label: t('请求时间'),
       render: ({ data }: Record<string, any>) => {
         return formatValue(data.timestamp, 'timestamp');
       },
     },
-    { field: 'method', width: 160, label: t('请求方法') },
-    { field: 'http_path', label: t('请求路径') },
-    { field: 'status', width: 160, label: t('状态码') },
-    { field: 'backend_duration', width: 100, label: t('耗时(毫秒)') },
+    { field: 'app_code', width: 100, label: t('蓝鲸应用') },
+    { field: 'bk_username', width: 100, label: t('蓝鲸用户') },
+    { field: 'client_ip', width: 100, label: t('客户端IP') },
+    { field: 'stage', width: 80, label: t('环境') },
+    { field: 'resource_id', width: 80, label: t('资源ID') },
+    { field: 'resource_name', width: 160, label: t('资源名称') },
+    { field: 'method', width: 100, label: t('请求方法') },
+    { field: 'http_host', width: 160, label: t('请求域名') },
+    { field: 'http_path', label: t('请求路径'), width: 260 },
+    { field: 'params', width: 120, label: 'QueryString' },
+    { field: 'body', width: 120, label: 'Body' },
+    { field: 'backend_method', width: 120, label: t('后端请求方法') },
+    { field: 'backend_scheme', width: 120, label: t('后端Scheme') },
+    { field: 'backend_host', width: 160, label: t('后端域名') },
+    { field: 'backend_path', width: 160, label: t('后端路径')  },
+    { field: 'response_size', width: 100, label: t('响应体大小') },
+    { field: 'status', width: 100, label: t('状态码') },
+    { field: 'request_duration', width: 120, label: t('请求总耗时') },
+    { field: 'backend_duration', width: 120, label: t('耗时(毫秒)') },
+    { field: 'code_name', width: 120, label: t('错误编码名称') },
     {
       field: 'error',
-      width: 200,
+      width: 120,
       label: t('错误'),
       showOverflowTooltip: true,
       render: ({ data }: Record<string, any>) => {
         return data.error || '--';
       },
     },
+    { field: 'response_desc', width: 120, label: t('响应说明') },
   ];
   table.value.headers = columns;
 };
@@ -580,6 +622,9 @@ const getSearchData = async () => {
     ]);
     chartData.value = chartRes || {};
     renderChart(chartData.value);
+    chartInstance.value?.dispatchAction({
+      type: 'restore',
+    });
     table.value = Object.assign(table.value, {
       list: listRes?.results || [],
       fields: listRes?.fields || [],
@@ -839,10 +884,6 @@ const initChart = async () => {
       dateTimeRange.value = [];
       shortcutSelectedIndex.value = 1;
       [datePickerRef.value.shortcut] = [AccessLogStore.datepickerShortcuts[1]];
-
-      chartInstance.value.dispatchAction({
-        type: 'restore',
-      });
     } else {
       shortcutSelectedIndex.value = -1;
       dateTimeRange.value = [new Date(startTime), new Date(endTime)];
@@ -1199,6 +1240,9 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
+.hide-table-setting-line-height .setting-body-line-height {
+  display: none !important;
+}
 .access-log-popover {
   top: 10px !important;
 }

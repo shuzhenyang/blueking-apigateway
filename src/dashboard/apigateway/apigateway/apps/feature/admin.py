@@ -16,12 +16,15 @@
 # to the current version of the project delivered to anyone in the future.
 #
 from django.contrib import admin
+from djangoql.admin import DjangoQLSearchMixin
 
 from apigateway.apps.feature.models import UserFeatureFlag
 
 
-class UserFeatureFlagAdmin(admin.ModelAdmin):
+class UserFeatureFlagAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
+    djangoql_completion_enabled_by_default = False
     list_display = ["username", "name", "effect"]
+    search_fields = ["username", "name"]
 
 
 admin.site.register(UserFeatureFlag, UserFeatureFlagAdmin)

@@ -16,6 +16,7 @@
  * to the current version of the project delivered to anyone in the future.
  */
 
+// Package config is the config for the whole project
 package config
 
 import (
@@ -50,6 +51,17 @@ type Logger struct {
 	API     LogConfig
 }
 
+// TLS is the config for tls
+type TLS struct {
+	Enabled     bool
+	CertCaFile  string
+	CertFile    string
+	CertKeyFile string
+	// for testing only, default false is secure;
+	// if set true will skip hostname verification, don't enable it in production
+	InsecureSkipVerify bool
+}
+
 // Database is the config for database connection
 type Database struct {
 	ID       string
@@ -64,6 +76,8 @@ type Database struct {
 	ConnMaxLifetimeSecond int
 	// connect: s
 	Timeout int
+	// tls
+	TLS TLS
 }
 
 // Sentry is the config for sentry

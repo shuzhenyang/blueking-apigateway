@@ -1,5 +1,5 @@
 <template>
-  <bk-sideslider v-model:isShow="isShow" :width="960" quick-close>
+  <bk-sideslider v-model:is-show="isShow" :width="960" quick-close>
     <template #header>
       <div class="log-details-title">
         <div class="log-details-name">【{{ logDetails?.stage?.name }}】{{ t('发布日志详情') }}</div>
@@ -16,7 +16,7 @@
         <div class="title-publish-info">
           {{ t('耗时') }}:
           <span>
-            {{ state.totalDuration }} s
+            {{ state.totalDuration.toFixed(2) }} s
           </span>
         </div>
       </div>
@@ -53,6 +53,8 @@ const props = defineProps({
     type: Number,
   },
 });
+
+const emit = defineEmits(['release-success', 'release-doing']);
 
 const { t } = useI18n();
 
@@ -134,11 +136,14 @@ const getLogsList = async () => {
         step.status = 'success';
       } else {
         step.status = 'doing';
-        // 给已结束步骤的下一个在 doing 状态的步骤显示加载图标
-        const prevEvents = events.filter(event => event.step === eventTemplate.step - 1);
-        if (prevEvents.find(event => event.status === 'success' || event.status === 'failure')) {
-          step.color = 'blue';
-          step.icon = Spinner;
+        // 整个发布任务在进行中时才处理图标样式
+        if (logDetails.value?.status === 'doing') {
+          // 给已结束步骤的下一个在 doing 状态的步骤显示加载图标
+          const prevEvents = events.filter(event => event.step === eventTemplate.step - 1);
+          if (prevEvents.find(event => event.status === 'success' || event.status === 'failure')) {
+            step.color = 'blue';
+            step.icon = Spinner;
+          }
         }
       }
 
@@ -163,10 +168,11 @@ const getLogsList = async () => {
       }
 
       // 步骤展示文本
-      step.content = `<span style="font-size: 12px;">${duration} s</span>`;
-      step.duration = duration;
+      const fixedDuration = +duration.toFixed(2);
+      step.content = `<span style="font-size: 12px;">${fixedDuration} s</span>`;
+      step.duration = fixedDuration;
       // 计算总耗时
-      state.totalDuration += duration;
+      state.totalDuration += fixedDuration;
 
       // 步骤日志
       const stepLogs = currentEvents.map(event => (event.status === 'failure'
@@ -184,8 +190,6 @@ const getLogsList = async () => {
 const showSideslider = () => {
   isShow.value = true;
 };
-
-const emit = defineEmits(['release-success', 'release-doing']);
 
 watch(
   () => isShow.value,

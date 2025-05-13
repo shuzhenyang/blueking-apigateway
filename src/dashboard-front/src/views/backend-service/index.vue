@@ -3,7 +3,17 @@
     <div class="header flex-row justify-content-between mb15">
       <div class="header-btn flex-row ">
         <span class="mr10">
-          <bk-button theme="primary" class="mr5 w80" @click="handleAdd">
+          <bk-button
+            v-if="common.curApigwData.kind !== 1"
+            v-bk-tooltips="{
+              content: t('当前有版本正在发布，请稍后再进行后端服务修改'),
+              disabled: !hasPublishingStage,
+            }"
+            :disabled="hasPublishingStage"
+            class="mr5 w80"
+            theme="primary"
+            @click="handleAdd"
+          >
             {{ t('新建') }}
           </bk-button>
         </span>
@@ -16,12 +26,24 @@
       <bk-loading :loading="isLoading">
         <bk-table
           :row-class="isNewCreate"
-          class="table-layout" :data="tableData" remote-pagination :pagination="pagination" show-overflow-tooltip
-          @page-limit-change="handlePageSizeChange" @page-value-change="handlePageChange" row-hover="auto"
-          border="outer">
+          :key="tableKey"
+          :data="tableData"
+          :pagination="pagination"
+          border="outer"
+          class="table-layout"
+          remote-pagination
+          row-hover="auto"
+          show-overflow-tooltip
+          @page-limit-change="handlePageSizeChange"
+          @page-value-change="handlePageChange"
+        >
           <bk-table-column :label="t('后端服务名称')" prop="name">
             <template #default="{ data }">
-              <bk-button text theme="primary" @click="handleEdit(data)">
+              <bk-button
+                text
+                theme="primary"
+                @click="handleEdit(data)"
+              >
                 {{ data?.name }}
               </bk-button>
             </template>
@@ -40,9 +62,19 @@
             </template>
           </bk-table-column>
           <bk-table-column :label="t('更新时间')" prop="updated_time"></bk-table-column>
-          <bk-table-column :label="t('操作')" width="150">
+          <bk-table-column v-if="!common.isProgrammableGateway" :label="t('操作')" prop="actions" width="150">
             <template #default="{ data }">
-              <bk-button class="mr25" theme="primary" text @click="handleEdit(data)">
+              <bk-button
+                v-bk-tooltips="{
+                  content: t('当前有版本正在发布，请稍后再进行后端服务修改'),
+                  disabled: !hasPublishingStage
+                }"
+                :disabled="hasPublishingStage"
+                class="mr25"
+                text
+                theme="primary"
+                @click="handleEdit(data)"
+              >
                 {{ t('编辑') }}
               </bk-button>
               <span
@@ -53,10 +85,13 @@
                     ? t('默认后端服务，且被{resourceCount}个资源引用了，不能删除', { resourceCount: data?.resource_count })
                     : t('服务被{resourceCount}个资源引用了，不能删除', { resourceCount: data?.resource_count }),
                   disabled: data?.resource_count === 0
-                }">
+                }"
+              >
                 <bk-button
-                  theme="primary" text
-                  :disabled="data?.resource_count !== 0 || data?.name === 'default'" @click="handleDelete(data)">
+                  :disabled="data?.resource_count !== 0 || data?.name === 'default'"
+                  text
+                  theme="primary" @click="handleDelete(data)"
+                >
                   {{ t('删除') }}
                 </bk-button>
               </span>
@@ -87,6 +122,7 @@
     </div>
 
     <addBackendService
+      :disabled="common.isProgrammableGateway || hasPublishingStage"
       :base="baseInfo"
       :edit-id="backendServiceId"
       ref="addBackendServiceRef"
@@ -103,19 +139,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import {
+  computed,
+  onBeforeMount,
+  ref,
+  watch,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
-import { InfoBox, Message } from 'bkui-vue';
+import {
+  InfoBox,
+  Message,
+} from 'bkui-vue';
 import { useRouter } from 'vue-router';
 import { useCommon } from '@/store';
 import { timeFormatter } from '@/common/util';
 import { useQueryList } from '@/hooks';
 import {
-  getBackendServiceList,
   deleteBackendService,
+  getBackendServiceList,
+  getStageList,
 } from '@/http';
 import TableEmpty from '@/components/table-empty.vue';
 import addBackendService from '@/views/backend-service/add.vue';
+import _ from 'lodash';
+import useMaxTableLimit from '@/hooks/use-max-table-limit';
 
 const { t } = useI18n();
 const common = useCommon();
@@ -135,6 +182,16 @@ const tableEmptyConf = ref({
   isAbnormal: false,
 });
 
+const stageList = ref<{ release: { status: string } }[]>([]);
+const tableKey = ref(_.uniqueId());
+
+const hasPublishingStage = computed(() => {
+  return stageList.value.some(item => item?.release?.status === 'doing');
+});
+
+// 当前视口高度能展示最多多少条表格数据
+const maxTableLimit = useMaxTableLimit(300);
+
 // 列表hooks
 const {
   tableData,
@@ -143,7 +200,22 @@ const {
   handlePageChange,
   handlePageSizeChange,
   getList,
-} = useQueryList(getBackendServiceList, filterData);
+} = useQueryList(
+  getBackendServiceList,
+  filterData,
+  0,
+  false,
+  {
+    limitList: [
+      maxTableLimit,
+      10,
+      20,
+      50,
+      100,
+    ],
+    limit: maxTableLimit,
+  },
+);
 
 
 const isNewCreate = (row: any) => {
@@ -164,6 +236,10 @@ const isWithinTime = (date: string) => {
 
 // 新建btn
 const handleAdd = () => {
+  if (hasPublishingStage.value) {
+    return;
+  }
+
   baseInfo.value = {
     name: '',
     description: '',
@@ -238,12 +314,25 @@ const updateTableEmptyConfig = () => {
   tableEmptyConf.value.keyword = '';
 };
 
+const getStageListData = async () => {
+  stageList.value = await getStageList(apigwId);
+};
+
 watch(
   () => tableData.value, () => {
     updateTableEmptyConfig();
   },
   { deep: true },
 );
+
+watch(() => common.curApigwData.kind, () => {
+  tableKey.value = _.uniqueId();
+});
+
+onBeforeMount(async () => {
+  await getStageListData();
+});
+
 </script>
 
 <style lang="scss" scoped>

@@ -1,4 +1,3 @@
-const mockServer = require('./mock-server');
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin')
 // const { DefinePlugin } = require('webpack');
 
@@ -9,17 +8,16 @@ module.exports = {
   cache: true,
   open: true,
   replaceStatic: true,
+  server: 'https',
 
   // webpack config 配置
   configureWebpack() {
     return {
       devServer: {
-        setupMiddlewares: mockServer,
-        host: 'dev-t.paas3-dev.bktencent.com',
+        host: process.env.BK_LOCAL_HOST,
         client: {
           overlay: false,
         },
-        https: !process.env.BK_HTTPS,
       },
     };
   },

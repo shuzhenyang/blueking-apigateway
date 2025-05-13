@@ -8,16 +8,20 @@
       </div>
       <template #content>
         <bk-dropdown-menu class="dropdown-trigger-content bk-dropdown-list">
-          <bk-dropdown-item v-for="item in curVersionList" :key="item.board_label" :title="item.board_label">
-            <a href="javascript:;" @click="triggerHandler(item)" class="f14">{{ item.board_label }}</a>
+          <bk-dropdown-item
+            v-for="item in curVersionList" :key="item.board_label" :title="item.board_label"
+            @click="triggerHandler(item)"
+          >
+            <a href="javascript:;" class="f14">{{ item.board_label }}</a>
           </bk-dropdown-item>
         </bk-dropdown-menu>
       </template>
     </bk-dropdown>
     <div class="input-wrapper bk-dropdown-menu search-result-box">
-      <input
-        type="text" v-model="keyword" class="input" :placeholder="t('请输入 API 名称')" @input="handleSearch"
-        @keydown="handleKeyup">
+      <bk-input
+        v-model="keyword" class="input" :placeholder="t('请输入 API 名称')" @input="handleSearch"
+        @keydown="handleKeyup"
+      />
       <div class="bk-dropdown-content is-show left-align" v-if="keyword">
         <bk-loading :loading="isLoading" :opacity="1">
           <ul
@@ -26,12 +30,11 @@
             <template v-if="resultList.length">
               <li
                 v-for="(item, index) of resultList" :key="index" :class="selectIndex === index ? 'cur' : ''"
-                @click="handleShowDoc(item)">
+                @click="handleShowDoc(item, curVersion.board)"
+              >
                 <a href="javascript:;">
                   <p class="name">
-                    <!-- eslint-disable-next-line vue/no-v-html -->
                     <strong class="mr5" v-dompurify-html="hightlightSystemName(item)"></strong>
-                    <!-- eslint-disable-next-line vue/no-v-html -->
                     <span v-dompurify-html="hightlight(item)"></span>
                   </p>
                   <p class="desc">{{ item.description || t('暂无描述') }}</p>
@@ -61,9 +64,6 @@ import { useRouter } from 'vue-router';
 import {
   searchAPI,
 } from '@/http';
-const { t } = useI18n();
-const router = useRouter();
-
 const props = defineProps({
   versionList: {
     type: Array,
@@ -76,6 +76,8 @@ const props = defineProps({
     },
   },
 });
+const { t } = useI18n();
+const router = useRouter();
 
 const curVersionList = ref([]);
 const resultList = ref([]);
@@ -127,10 +129,11 @@ const triggerHandler = (version: any) => {
   dropdown.value?.hide?.();
 };
 // 跳转指定组件
-const handleShowDoc = (version: any) => {
+const handleShowDoc = (version: any, board: string) => {
   router.push({
     name: 'apiDocDetail',
     params: {
+      board,
       curTab: 'component',
       targetName: version.system_name,
       componentName: version.name,
@@ -154,7 +157,7 @@ const handleSearch = async () => {
 const handleKeyup = (e: any) => {
   const curKeyCode = e.keyCode;
   const curLength = resultList.value.length;
-  e.preventDefault();
+  e.preventDefault?.();
   switch (curKeyCode) {
     // 上
     case 38:
@@ -192,7 +195,7 @@ const handleKeyup = (e: any) => {
       break;
     case 13:
       if (resultList.value[selectIndex.value]) {
-        handleShowDoc(resultList.value[selectIndex.value]);
+        handleShowDoc(resultList.value[selectIndex.value], curVersion.value.board);
       }
       break;
     default:
@@ -229,6 +232,7 @@ const handleKeyup = (e: any) => {
   width: 320px;
   height: 30px;
   display: flex;
+  align-items: center;
   background: #FFF;
   border: 1px solid #C4C6CC;
   border-radius: 2px;
@@ -246,6 +250,13 @@ const handleKeyup = (e: any) => {
     flex: 1;
     width: 220px;
     line-height: 28px;
+    position: relative;
+
+    .bk-dropdown-content {
+      position: absolute;
+      top: 28px;
+      left: 0;
+    }
   }
 
   .input {
@@ -255,9 +266,11 @@ const handleKeyup = (e: any) => {
     line-height: 12px;
     font-size: 12px;
     background: transparent;
-    padding-left: 20px;
     border-left: 1px solid #c4c6cc;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
     position: relative;
+    height: 28px;
 
     &::placeholder {
       color: #c4c6cc;

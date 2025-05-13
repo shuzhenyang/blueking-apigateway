@@ -61,7 +61,7 @@
             :box-shadow="false"
             :subfield="false"
             :ishljs="true"
-            :code-style="'monokai'"
+            code-style="vs2015"
             :toolbars="toolbars"
             :tab-size="4"
             @full-screen="handleFullscreen"
@@ -86,7 +86,7 @@
           </bk-button>
           <bk-pop-confirm
             :title="t('确认要删除该文档？')"
-            content="将删除相关配置，不可恢复，请确认是否删除"
+            :content="t('将删除相关配置，不可恢复，请确认是否删除')"
             width="288"
             trigger="click"
             @confirm="handleDeleteMarkdown"
@@ -113,7 +113,7 @@
           </bk-button>
           <bk-pop-confirm
             :title="t('确认要删除该文档？')"
-            content="将删除相关配置，不可恢复，请确认是否删除"
+            :content="t('将删除相关配置，不可恢复，请确认是否删除')"
             width="288"
             trigger="click"
             @confirm="handleDeleteMarkdown"
@@ -128,23 +128,34 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, toRefs, onMounted, onUnmounted, onBeforeUnmount, nextTick, onUpdated, computed } from 'vue';
 import {
-  getResourceDocs,
-  getResourceDocPreview,
-  updateResourceDocs,
-  saveResourceDocs,
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  onUnmounted,
+  onUpdated,
+  ref,
+  toRefs,
+} from 'vue';
+import {
   deleteResourceDocs,
+  getResourceDocPreview,
+  getResourceDocs,
+  saveResourceDocs,
+  updateResourceDocs,
 } from '@/http';
-import { useCommon } from '@/store';
+import {
+  useCommon,
+  useStage,
+} from '@/store';
 import { cloneDeep } from 'lodash';
 import { useI18n } from 'vue-i18n';
 import { Message } from 'bkui-vue';
 import mitt from '@/common/event-bus';
 
-const { t } = useI18n();
-const common = useCommon();
-const { apigwId } = common; // 网关id
+// 网关id
+
 const props = defineProps({
   curResource: { type: Object, default: {} },   // 当前点击的资源
   height: { type: String, default: 'calc(100vh - 104px)' },
@@ -154,8 +165,12 @@ const props = defineProps({
   showCreateBtn: { type: Boolean, default: true }, // 是否显示"立即创建"按钮
   isPreview: { type: Boolean, default: false }, // 是否获取预览文档，决定调用的接口
 });
+const emit = defineEmits(['fetch', 'on-update']);
+const { t } = useI18n();
+const common = useCommon();
+const stage = useStage();
 
-const {
+const { apigwId } = common;const {
   curResource,
   showFooter,
   showCreateBtn,
@@ -209,11 +224,12 @@ const toolbars = ref<any>({
   preview: true,
 });
 
-const emit = defineEmits(['fetch', 'on-update']);
-
 const resourcesHeight = computed(() => {
   if (props.source === 'side') {
     return 'height: calc(100vh - 57px)';
+  }
+  if (stage.getNotUpdatedStages?.length) {
+    return 'height: calc(100vh - 218px)';
   }
   return 'height: calc(100vh - 176px)';
 });

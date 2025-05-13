@@ -33,21 +33,22 @@ pytestmark = pytest.mark.django_db
 
 
 class TestAppPermissionViewSet:
-    def test_list(self, fake_resource, request_view):
-        fake_gateway = fake_resource.gateway
+    def test_list(self, fake_gateway, request_view):
+        fake_resource1 = G(Resource, name="name1", gateway=fake_gateway)
+        fake_resource2 = G(Resource, name="name2", gateway=fake_gateway)
 
         G(
             models.AppResourcePermission,
             gateway=fake_gateway,
             bk_app_code="test",
-            resource_id=fake_resource.id,
+            resource_id=fake_resource1.id,
             grant_type="apply",
         )
         G(
             models.AppResourcePermission,
             gateway=fake_gateway,
             bk_app_code="test-2",
-            resource_id=fake_resource.id,
+            resource_id=fake_resource2.id,
             grant_type="apply",
         )
 
@@ -66,6 +67,25 @@ class TestAppPermissionViewSet:
                 },
                 "expected": {
                     "count": 2,
+                    "status_code": 200,
+                },
+            },
+            {
+                "params": {
+                    "resource_id": fake_resource1.id,
+                },
+                "expected": {
+                    "count": 1,
+                    "status_code": 200,
+                },
+            },
+            {
+                "params": {
+                    "grant_dimension": "测试",
+                },
+                "expected": {
+                    "count": 0,
+                    "status_code": 400,
                 },
             },
         ]
@@ -80,8 +100,51 @@ class TestAppPermissionViewSet:
             )
 
             result = response.json()
-            assert response.status_code == 200, result
-            assert result["data"]["count"] == test["expected"]["count"]
+            assert response.status_code == test["expected"]["status_code"], result
+            if response.status_code == 200:
+                assert result["data"]["count"] == test["expected"]["count"]
+
+
+class TestAppPermissionRenewViewSet(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.factory = APIRequestFactory()
+        cls.gateway = create_gateway()
+
+    def test_renew(self):
+        resource = G(Resource, gateway=self.gateway)
+
+        resource_p1 = G(
+            models.AppResourcePermission,
+            gateway=self.gateway,
+            bk_app_code="test",
+            resource_id=resource.id,
+            grant_type="initialize",
+        )
+
+        data = [
+            {
+                "params": {
+                    "resource_dimension_ids": [resource_p1.id],
+                    "gateway_dimension_ids": [],
+                    "expire_days": 180,
+                },
+            },
+        ]
+
+        for test in data:
+            request = self.factory.post(
+                f"/gateways/{self.gateway.id}/permissions/app-permissions/renew/", data=test["params"]
+            )
+
+            view = views.AppPermissionRenewApi.as_view()
+            response = view(request, gateway_id=self.gateway.id)
+
+            result = get_response_json(response)
+            self.assertEqual(response.status_code, 201, result)
+
+            resource_p1_obj = models.AppResourcePermission.objects.get(id=resource_p1.id)
+            assert resource_p1_obj.grant_type == "initialize"
 
 
 class TestAppResourcePermissionViewSet:
@@ -214,7 +277,9 @@ class TestAppResourcePermissionBatchViewSet(TestCase):
                 id=test["params"]["ids"][0],
             ).first()
             self.assertTrue(
-                180 * 24 * 3600 - 10 < (perm_record.expires - now_datetime()).total_seconds() < 180 * 24 * 3600
+                (180 + 180) * 24 * 3600 - 10
+                < (perm_record.expires - now_datetime()).total_seconds()
+                < (180 + 180) * 24 * 3600
             )
 
     def test_destroy(self):
@@ -295,7 +360,9 @@ class TestAppGatewayPermissionBatchViewSet(TestCase):
                 id=test["params"]["ids"][0],
             ).first()
             self.assertTrue(
-                180 * 24 * 3600 - 10 < (perm_record.expires - now_datetime()).total_seconds() < 180 * 24 * 3600
+                (180 + 180) * 24 * 3600 - 10
+                < (perm_record.expires - now_datetime()).total_seconds()
+                < (180 + 180) * 24 * 3600
             )
 
     def test_destroy(self):

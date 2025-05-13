@@ -35,12 +35,14 @@ from apigateway.apps.plugin.constants import (
 from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm, PluginType
 from apigateway.biz.audit import Auditor
 from apigateway.common.error_codes import error_codes
+from apigateway.common.pagination import StandardLimitOffsetPagination
 from apigateway.common.renderers import BkStandardApiJSONRenderer
 from apigateway.controller.publisher.publish import trigger_gateway_publish
 from apigateway.core.constants import PublishSourceEnum
 from apigateway.core.models import Resource, Stage
 from apigateway.utils.django import get_model_dict
 from apigateway.utils.responses import OKJsonResponse
+from apigateway.utils.yaml import yaml_loads
 
 from .serializers import (
     PluginBindingListOutputSLZ,
@@ -51,6 +53,10 @@ from .serializers import (
     PluginTypeQueryInputSLZ,
     ScopePluginConfigListOutputSLZ,
 )
+
+
+class PluginPagination(StandardLimitOffsetPagination):
+    default_limit = 100
 
 
 @method_decorator(
@@ -64,6 +70,7 @@ from .serializers import (
 )
 class PluginTypeListApi(generics.ListAPIView):
     serializer_class = PluginTypeOutputSLZ
+    pagination_class = PluginPagination
 
     def get_serializer_context(self):
         # 需要返回描述，描述在 plugin_form 中
@@ -131,7 +138,7 @@ class PluginTypeListApi(generics.ListAPIView):
         if keyword:
             queryset = queryset.filter(Q(name__icontains=keyword) | Q(code__icontains=keyword))
 
-        return queryset.order_by("code")
+        return queryset.order_by("-priority")
 
 
 @method_decorator(
@@ -327,6 +334,15 @@ class PluginConfigRetrieveUpdateDestroyApi(
 
     lookup_field = "id"
 
+    def _check_if_changed(self, input_data: Dict[str, Any], instance: PluginConfig) -> bool:
+        try:
+            input_yaml = yaml_loads(input_data["yaml"])
+            current_yaml = yaml_loads(instance.yaml)
+        except Exception:  # pylint: disable=broad-except
+            return True
+
+        return input_yaml != current_yaml or input_data["type_id"].id != instance.type.id
+
     def get_queryset(self):
         return PluginConfig.objects.prefetch_related("type").filter(gateway=self.request.gateway)
 
@@ -339,23 +355,24 @@ class PluginConfigRetrieveUpdateDestroyApi(
         self.validate_scope()
         self.validate_code(type_id=serializer.validated_data["type_id"])
 
-        data_before = get_model_dict(serializer.instance)
+        if self._check_if_changed(dict(serializer.validated_data), serializer.instance):
+            data_before = get_model_dict(serializer.instance)
 
-        super().perform_update(serializer)
+            super().perform_update(serializer)
 
-        # if scope_type is stage, should publish
-        scope_type = self.kwargs["scope_type"]
-        scope_id = self.kwargs["scope_id"]
-        self.post_modification(
-            source=PublishSourceEnum.PLUGIN_UPDATE,
-            op_type=OpTypeEnum.MODIFY,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            instance_id=serializer.instance.id,
-            instance_name=serializer.instance.name,
-            data_before=data_before,
-            data_after=get_model_dict(serializer.instance),
-        )
+            # if scope_type is stage, should publish
+            scope_type = self.kwargs["scope_type"]
+            scope_id = self.kwargs["scope_id"]
+            self.post_modification(
+                source=PublishSourceEnum.PLUGIN_UPDATE,
+                op_type=OpTypeEnum.MODIFY,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                instance_id=serializer.instance.id,
+                instance_name=serializer.instance.name,
+                data_before=data_before,
+                data_after=get_model_dict(serializer.instance),
+            )
 
     @transaction.atomic
     def perform_destroy(self, instance):
@@ -462,7 +479,7 @@ class ScopePluginConfigListApi(generics.ListAPIView, ScopeValidationMixin):
             gateway=request.gateway,
             scope_type=scope_type,
             scope_id=scope_id,
-        )
+        ).order_by("-config__type__priority")
 
         data = [
             {

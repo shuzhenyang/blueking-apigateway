@@ -1,6 +1,6 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
-# 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
+# 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
 # Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
@@ -21,19 +21,29 @@ from typing import List
 from urllib.parse import quote
 
 import pymysql
+import urllib3
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
+from django.db.backends.mysql.features import DatabaseFeatures
 from django.utils.encoding import force_bytes
 
 from apigateway.common.env import Env
 from apigateway.conf.celery_conf import *  # noqa
 from apigateway.conf.celery_conf import CELERY_BEAT_SCHEDULE
 from apigateway.conf.log_utils import build_logging_config
-from apigateway.conf.utils import get_default_keepalive_options
+from apigateway.conf.utils import PatchFeatures, get_default_keepalive_options
 
 pymysql.install_as_MySQLdb()
-# Patch version info to forcedly pass Django client check
-pymysql.version_info = 1, 4, 2, "final", 0
+# Patch version info to force pass Django client check
+pymysql.version_info = 1, 4, 6, "final", 0
+
+# 目前 Django 仅是对 5.7 做了软性的不兼容改动，在没有使用 8.0 特异的功能时，对 5.7 版本的使用无影响
+DatabaseFeatures.minimum_database_version = PatchFeatures.minimum_database_version
+
+
+# Patch the SSL module for compatibility with legacy CA credentials.
+# https://stackoverflow.com/questions/72479812/how-to-change-tweak-python-3-10-default-ssl-settings-for-requests-sslv3-alert
+urllib3.util.ssl_.DEFAULT_CIPHERS = "ALL:@SECLEVEL=1"
 
 env = Env()
 
@@ -58,6 +68,9 @@ DEBUG = env.bool("DEBUG", False)
 # 是否为本地开发环境
 IS_LOCAL = env.bool("DASHBOARD_IS_LOCAL", default=False)
 
+# te 还是 ee
+EDITION = env.str("EDITION", "ee")
+
 ALLOWED_HOSTS = ["*"]
 
 # Application definition
@@ -70,6 +83,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "raven.contrib.django.raven_compat",
+    "djangoql",
     "django_celery_beat",
     "rest_framework",
     "drf_yasg",
@@ -86,6 +100,7 @@ INSTALLED_APPS = [
     "apigateway.apps.metrics",
     "apigateway.apps.support",
     "apigateway.apps.openapi",
+    "apigateway.apps.programmable_gateway",
     "django_prometheus",
     "bkpaas_auth",
     "apigateway.account",
@@ -156,7 +171,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 
 # CSRF Config
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+CSRF_TRUSTED_ORIGINS = env.list("DASHBOARD_CSRF_TRUSTED_ORIGINS", default=[])
 CSRF_COOKIE_DOMAIN = env.str("DASHBOARD_CSRF_COOKIE_DOMAIN")
 CSRF_COOKIE_NAME = env.str("DASHBOARD_CSRF_COOKIE_NAME", f"{BK_APP_CODE}_csrftoken")
 
@@ -262,6 +277,50 @@ DATABASES = {
     },
 }
 
+# database ssl
+BK_APIGW_DATABASE_TLS_ENABLED = env.bool("BK_APIGW_DATABASE_TLS_ENABLED", False)
+if BK_APIGW_DATABASE_TLS_ENABLED:
+    default_ssl_options = {
+        "ca": env.str("BK_APIGW_DATABASE_TLS_CERT_CA_FILE", ""),
+    }
+    # mTLS
+    default_cert_file = env.str("BK_APIGW_DATABASE_TLS_CERT_FILE", "")
+    default_key_file = env.str("BK_APIGW_DATABASE_TLS_CERT_KEY_FILE", "")
+    if default_cert_file and default_key_file:
+        default_ssl_options["cert"] = default_cert_file
+        default_ssl_options["key"] = default_key_file
+
+    # 跳过主机名/IP 验证，会降低安全性，正式环境需要设置为 True
+    check_hostname = env.bool("BK_APIGW_DATABASE_TLS_CHECK_HOSTNAME", True)
+    default_ssl_options["check_hostname"] = check_hostname
+
+    if "OPTIONS" not in DATABASES["default"]:
+        DATABASES["default"]["OPTIONS"] = {}
+
+    DATABASES["default"]["OPTIONS"]["ssl"] = default_ssl_options
+
+BK_ESB_DATABASE_TLS_ENABLED = env.bool("BK_ESB_DATABASE_TLS_ENABLED", False)
+if BK_ESB_DATABASE_TLS_ENABLED:
+    bkcore_ssl_options = {
+        "ca": env.str("BK_ESB_DATABASE_TLS_CERT_CA_FILE", ""),
+    }
+    # mTLS
+    bkcore_cert_file = env.str("BK_ESB_DATABASE_TLS_CERT_FILE", "")
+    bkcore_key_file = env.str("BK_ESB_DATABASE_TLS_CERT_KEY_FILE", "")
+    if bkcore_cert_file and bkcore_key_file:
+        bkcore_ssl_options["cert"] = bkcore_cert_file
+        bkcore_ssl_options["key"] = bkcore_key_file
+
+    # 跳过主机名/IP 验证，会降低安全性，正式环境需要设置为 True
+    check_hostname = env.bool("BK_ESB_DATABASE_TLS_CHECK_HOSTNAME", True)
+    bkcore_ssl_options["check_hostname"] = check_hostname
+
+    if "OPTIONS" not in DATABASES["bkcore"]:
+        DATABASES["bkcore"]["OPTIONS"] = {}
+
+    DATABASES["bkcore"]["OPTIONS"]["ssl"] = bkcore_ssl_options
+
+
 # ==============================================================================
 # redis 配置
 # ==============================================================================
@@ -271,14 +330,14 @@ REDIS_PASSWORD = env.str("BK_APIGW_REDIS_PASSWORD", "")
 REDIS_PREFIX = env.str("BK_APIGW_REDIS_PREFIX", "apigw::")
 REDIS_MAX_CONNECTIONS = env.int("BK_APIGW_REDIS_MAX_CONNECTIONS", 100)
 REDIS_DB = env.int("BK_APIGW_REDIS_DB", 0)
-# sentinel check
-REDIS_USE_SENTINEL = env.bool("BK_APIGW_REDIS_USE_SENTINEL", False)
-REDIS_SENTINEL_MASTER_NAME = env.str("BK_APIGW_REDIS_SENTINEL_MASTER_NAME", "mymaster")
-# sentinel password is not the same as redis password, so you should both set the passwords
-REDIS_SENTINEL_PASSWORD = env.str("BK_APIGW_REDIS_SENTINEL_PASSWORD", "")
-REDIS_SENTINEL_ADDR_STR = env.str("BK_APIGW_REDIS_SENTINEL_ADDR", "")
-# parse sentinel address from "host1:port1,host2:port2" to [("host1", port1), ("host2", port2)]
-REDIS_SENTINEL_ADDR_LIST = [tuple(addr.split(":")) for addr in REDIS_SENTINEL_ADDR_STR.split(",") if addr]
+# redis tls
+REDIS_TLS_ENABLED = env.bool("BK_APIGW_REDIS_TLS_ENABLED", False)
+REDIS_TLS_CERT_CA_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_CA_FILE", "")
+REDIS_TLS_CERT_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_FILE", "")
+REDIS_TLS_CERT_KEY_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_KEY_FILE", "")
+REDIS_TLS_CHECK_HOSTNAME = env.bool("BK_APIGW_REDIS_TLS_CHECK_HOSTNAME", True)
+
+
 # redis lock 配置
 REDIS_PUBLISH_LOCK_TIMEOUT = env.int("BK_APIGW_PUBLISH_LOCK_TIMEOUT", 5)
 REDIS_PUBLISH_LOCK_RETRY_GET_TIMES = env.int("BK_APIGW_PUBLISH_LOCK_RETRY_GET_TIMES", 3)
@@ -289,11 +348,11 @@ DEFAULT_REDIS_CONFIG = CHANNEL_REDIS_CONFIG = {
     "password": REDIS_PASSWORD,
     "max_connections": REDIS_MAX_CONNECTIONS,
     "db": REDIS_DB,
-    # sentinel
-    "use_sentinel": REDIS_USE_SENTINEL,
-    "master_name": REDIS_SENTINEL_MASTER_NAME,
-    "sentinel_password": REDIS_SENTINEL_PASSWORD,
-    "sentinels": REDIS_SENTINEL_ADDR_LIST,
+    "tls_enabled": REDIS_TLS_ENABLED,
+    "tls_cert_ca_file": REDIS_TLS_CERT_CA_FILE,
+    "tls_cert_file": REDIS_TLS_CERT_FILE,
+    "tls_cert_key_file": REDIS_TLS_CERT_KEY_FILE,
+    "tls_check_hostname": REDIS_TLS_CHECK_HOSTNAME,
 }
 
 # ==============================================================================
@@ -329,9 +388,10 @@ RABBITMQ_HOST = env.str("BK_APIGW_RABBITMQ_HOST", "")
 RABBITMQ_USER = env.str("BK_APIGW_RABBITMQ_USER", "")
 RABBITMQ_PASSWORD = env.str("BK_APIGW_RABBITMQ_PASSWORD", "")
 if all([RABBITMQ_VHOST, RABBITMQ_PORT, RABBITMQ_HOST, RABBITMQ_USER, RABBITMQ_PASSWORD]):
+    # this section not support tls, both rabbitmq and redis
     CELERY_BROKER_URL = f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/{RABBITMQ_VHOST}"
     CELERY_RESULT_BACKEND = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0"
-elif not REDIS_USE_SENTINEL:
+else:
     # 如果没有使用 Redis 作为 Broker，请不要启用该配置，详见：
     # http://docs.celeryproject.org/en/latest/userguide/configuration.html#broker-transport-options
     CELERY_BROKER_TRANSPORT_OPTIONS = REDIS_CONNECTION_OPTIONS
@@ -340,26 +400,22 @@ elif not REDIS_USE_SENTINEL:
     CELERY_TASK_DEFAULT_QUEUE = env.str(
         "BK_APIGW_CELERY_TASK_DEFAULT_QUEUE", f"{REDIS_PREFIX}bk_apigateway_dashboard_celery"
     )
-else:
-    # https://docs.celeryq.dev/en/v4.3.0/history/whatsnew-4.0.html?highlight=sentinel#redis-support-for-sentinel
-    # sentinel://0.0.0.0:26379;sentinel://0.0.0.0:26380/...
-    # REDIS_SENTINEL_ADDR_LIST = [(host1, port1), (host2, port2)]
-    CELERY_SENTINEL_URL = ";".join(
-        [f"sentinel://:{REDIS_PASSWORD}@" + ":".join(addr) + f"/{REDIS_DB}" for addr in REDIS_SENTINEL_ADDR_LIST]
-    )
-    CELERY_SENTINEL_TRANSPORT_OPTIONS = {
-        "master_name": REDIS_SENTINEL_MASTER_NAME,
-        "sentinel_kwargs": {"password": REDIS_SENTINEL_PASSWORD},
-        **REDIS_CONNECTION_OPTIONS,
-    }
+    # support tls
+    if REDIS_TLS_ENABLED:
+        query_string_params = {
+            "ssl_cert_reqs": "CERT_REQUIRED",
+            "ssl_ca_certs": REDIS_TLS_CERT_CA_FILE,
+        }
+        if REDIS_TLS_CERT_KEY_FILE and REDIS_TLS_CERT_FILE:
+            query_string_params["ssl_keyfile"] = REDIS_TLS_CERT_KEY_FILE
+            query_string_params["ssl_certfile"] = REDIS_TLS_CERT_FILE
 
-    CELERY_BROKER_URL = CELERY_SENTINEL_URL
-    CELERY_BROKER_TRANSPORT_OPTIONS = CELERY_SENTINEL_TRANSPORT_OPTIONS
-    CELERY_RESULT_BACKEND = CELERY_SENTINEL_URL
-    CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = CELERY_SENTINEL_TRANSPORT_OPTIONS
-    CELERY_TASK_DEFAULT_QUEUE = env.str(
-        "BK_APIGW_CELERY_TASK_DEFAULT_QUEUE", f"{REDIS_PREFIX}bk_apigateway_dashboard_celery"
-    )
+        import urllib.parse
+
+        broker_url = f"rediss://:{quote(REDIS_PASSWORD)}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}?{urllib.parse.urlencode(query_string_params)}"
+        CELERY_BROKER_URL = broker_url
+        CELERY_RESULT_BACKEND = broker_url
+
 
 if env.bool("FEATURE_FLAG_ENABLE_RUN_DATA_METRICS", True):
     CELERY_BEAT_SCHEDULE.update(
@@ -516,6 +572,15 @@ USE_GATEWAY_BK_ESB_MANAGE_COMPONENT_PERMISSIONS = env.bool("USE_GATEWAY_BK_ESB_M
 BK_PAAS3_URL = env.str("BK_PAAS3_URL", "")
 PAAS_RENEW_API_PERMISSION_URL = f"{BK_PAAS3_URL}/developer-center/apps/{{bk_app_code}}/cloudapi"
 
+
+# Requests pool config
+REQUESTS_POOL_CONNECTIONS = env.int("REQUESTS_POOL_CONNECTIONS", default=20)
+REQUESTS_POOL_MAXSIZE = env.int("REQUESTS_POOL_MAXSIZE", default=20)
+
+# 可编程网关开发文档链接地址
+PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL = env.str("PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL", "")
+PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL = env.str("PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL", "")
+
 # ==============================================================================
 # bkpaas-auth 配置
 # ==============================================================================
@@ -588,37 +653,16 @@ BK_NOTICE = {
 # ==============================================================================
 VERSION_LOG_DIR = os.path.join(BASE_DIR, "data/version_log")
 
-# ==============================================================================
-# Elasticsearch 配置
-# ==============================================================================
-BK_APIGW_ES_USER = env.str("BK_APIGW_ES_USER", BK_APP_CODE)
-# 密码中可能包含特殊字符
-BK_APIGW_ES_PASSWORD = quote(env.str("BK_APIGW_ES_PASSWORD", ""))
-BK_APIGW_ES_HOST = env.list("BK_APIGW_ES_HOST", default=[])
-BK_APIGW_ES_PORT = env.str("BK_APIGW_ES_PORT", "9200")
-ELASTICSEARCH_HOSTS = []
-if BK_APIGW_ES_HOST and BK_APIGW_ES_PORT:
-    ELASTICSEARCH_HOSTS = [f"{host}:{BK_APIGW_ES_PORT}" for host in BK_APIGW_ES_HOST]
-    ELASTICSEARCH_HOSTS_WITHOUT_AUTH = ELASTICSEARCH_HOSTS.copy()
-    if BK_APIGW_ES_USER and BK_APIGW_ES_PASSWORD:
-        ELASTICSEARCH_HOSTS = [
-            f"{BK_APIGW_ES_USER}:{BK_APIGW_ES_PASSWORD}@{host}:{BK_APIGW_ES_PORT}" for host in BK_APIGW_ES_HOST
-        ]
-
-DEFAULT_ES_SEARCH_TIMEOUT = env.int("DEFAULT_ES_SEARCH_TIMEOUT", 30)
-DEFAULT_ES_AGGS_TERM_SIZE = env.int("DEFAULT_ES_AGGS_TERM_SIZE", 1000)
 
 # ==============================================================================
 # 访问日志
 # ==============================================================================
 ACCESS_LOG_CONFIG = {
-    "es_client_type": env.str("BK_APIGW_ES_CLIENT_TYPE", "bk_log"),
     "es_time_field_name": env.str("BK_APIGW_ES_TIME_FIELD_NAME", "dtEventTimeStamp"),
     "es_index": env.str("BK_APIGW_API_LOG_ES_INDEX", "2_bklog_bkapigateway_apigateway_container*"),
 }
 
 BK_ESB_ACCESS_LOG_CONFIG = {
-    "es_client_type": env.str("BK_ESB_ES_CLIENT_TYPE", "bk_log"),
     "es_time_field_name": env.str("BK_ESB_ES_TIME_FIELD_NAME", "dtEventTimeStamp"),
     "es_index": env.str("BK_ESB_API_LOG_ES_INDEX", "2_bklog_bkapigateway_esb_container*"),
 }
@@ -745,21 +789,10 @@ PLUGIN_METADATA_CONFIG = {
     },
 }
 
-APISIX_CONFIG = {
-    "pluginAttrs": {
-        "log-rotate": {
-            # 每间隔多长时间切分一次日志，秒为单位
-            "interval": 60 * 60,
-            # 最多保留多少份历史日志，超过指定数量后，自动删除老文件
-            "max_kept": 24 * 7,
-        },
-        "prometheus": {
-            "export_addr": {
-                "ip": "0.0.0.0",
-            },
-        },
-    },
-}
+# 是否启用网关并发限制，默认启用；
+# 目前这个插件有缺陷，暂时支持关闭; https://github.com/apache/apisix/issues/11868
+GATEWAY_CONCURRENCY_LIMIT_ENABLED = env.bool("GATEWAY_CONCURRENCY_LIMIT_ENABLED", True)
+
 
 BK_GATEWAY_ETCD_NAMESPACE_PREFIX = env.str("BK_GATEWAY_ETCD_NAMESPACE_PREFIX", default="/bk-gateway-apigw")
 
@@ -806,6 +839,25 @@ GLOBAL_GATEWAY_FEATURE_FLAG = {
     # 2024-02-20 in 1.13 has no support for FEATURE_FLAG_MICRO_GATEWAY_ENABLED, comment it until it's supported
     # "MICRO_GATEWAY_ENABLED": env.bool("FEATURE_FLAG_MICRO_GATEWAY_ENABLED", False),
 }
+
+# ==============================================================================
+# 提供给前端的环境变量值
+# ==============================================================================
+# 后续前端环境变量尽量走这个接口，而不是通过 src/dashboard-front/index.html + src/constant/config.ts 传入
+ENV_VARS_FOR_FRONTEND = {
+    "EDITION": EDITION,
+    "BK_APP_CODE": BK_APP_CODE,
+    "BK_DEFAULT_TEST_APP_CODE": DEFAULT_TEST_APP["bk_app_code"],
+    "BK_API_RESOURCE_URL_TMPL": RESOURCE_DOC_URL_TMPL,
+    "BK_COMPONENT_API_URL": BK_COMPONENT_API_URL,
+    "BK_PAAS_APP_REPO_URL_TMPL": env.str(
+        "BK_PAAS_APP_REPO_URL_TMPL", "https://example.com/groups/blueking-plugins/apigw/{{gateway_name}}.git"
+    ),
+    "BK_DASHBOARD_FE_URL": DASHBOARD_FE_URL,
+    "BK_DASHBOARD_URL": DASHBOARD_URL,
+    "BK_DASHBOARD_CSRF_COOKIE_NAME": CSRF_COOKIE_NAME,
+}
+
 
 # ==============================================================================
 # 网关资源数量限制
