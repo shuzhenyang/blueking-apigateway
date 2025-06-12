@@ -43,8 +43,6 @@
           </div>
         </template>
       </bk-navigation>
-
-      <!-- <AppAuth ref="authRef" /> -->
     </div>
   </BkConfigProvider>
 </template>
@@ -234,6 +232,13 @@ const headerList = computed(() => ([
     name: t('平台工具'),
     id: 4,
     url: 'platformTools',
+    enabled: true,
+    link: '',
+  },
+  {
+    name: t('MCP 市场'),
+    id: 5,
+    url: 'mcpMarket',
     enabled: true,
     link: '',
   },

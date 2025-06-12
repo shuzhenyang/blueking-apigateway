@@ -75,6 +75,7 @@ class TestResourceVersionListOutputSLZ:
                     ]
                 },
                 "resource_version_ids_sdk_count": {},
+                "resource_id_with_schema_dict": {},
             },
         )
         assert slz.data == [
@@ -117,6 +118,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                 "plugin_priority": {
                     obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")
                 },
+                "resource_id_with_schema_dict": {},
             },
         )
         expected_data = {
@@ -126,6 +128,7 @@ class TestResourceVersionRetrieveOutputSLZ:
             "schema_version": fake_resource_version_v1.schema_version,
             "resources": [
                 {
+                    "id": fake_resource_version_v1.data[0]["id"],
                     "name": fake_resource_version_v1.data[0]["name"],
                     "method": fake_resource_version_v1.data[0]["method"],
                     "path": fake_resource_version_v1.data[0]["path"],
@@ -152,6 +155,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                     },
                     "contexts": fake_resource_version_v1.data[0]["contexts"],
                     "plugins": [],
+                    "has_openapi_schema": False,
                 }
             ],
             "created_time": fake_resource_version_v1.created_time,
@@ -181,6 +185,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                 "plugin_priority": {
                     obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")
                 },
+                "resource_id_with_schema_dict": {},
             },
         )
         expected_data = {
@@ -190,6 +195,7 @@ class TestResourceVersionRetrieveOutputSLZ:
             "schema_version": fake_resource_version_v2.schema_version,
             "resources": [
                 {
+                    "id": fake_resource_version_v2.data[0]["id"],
                     "name": fake_resource_version_v2.data[0]["name"],
                     "method": fake_resource_version_v2.data[0]["method"],
                     "path": fake_resource_version_v2.data[0]["path"],
@@ -225,6 +231,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                             "priority": -1,
                         },
                     ],
+                    "has_openapi_schema": False,
                 }
             ],
             "created_time": fake_resource_version_v2.created_time,
@@ -261,6 +268,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                 "plugin_priority": {
                     obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")
                 },
+                "resource_id_with_schema_dict": {},
             },
         )
         for resource in slz.data["resources"]:
@@ -315,6 +323,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                 "plugin_priority": {
                     obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")
                 },
+                "resource_id_with_schema_dict": {},
             },
         )
 
@@ -352,6 +361,7 @@ class TestResourceVersionRetrieveOutputSLZ:
                 "plugin_priority": {
                     obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")
                 },
+                "resource_id_with_schema_dict": {},
             },
         )
 

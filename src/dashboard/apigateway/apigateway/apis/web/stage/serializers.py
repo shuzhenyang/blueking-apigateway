@@ -25,7 +25,12 @@ from rest_framework.validators import UniqueTogetherValidator
 from apigateway.apis.web.constants import BACKEND_CONFIG_SCHEME_MAP
 from apigateway.apis.web.serializers import BaseBackendConfigSLZ
 from apigateway.biz.releaser import ReleaseValidationError
-from apigateway.biz.validators import MaxCountPerGatewayValidator, PublishValidator, SchemeInputValidator
+from apigateway.biz.validators import (
+    MaxCountPerGatewayValidator,
+    PublishValidator,
+    SchemeInputValidator,
+    StageVarsValidator,
+)
 from apigateway.common.django.validators import NameValidator
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.common.i18n.field import SerializerTranslatedField
@@ -37,8 +42,6 @@ from apigateway.core.constants import (
 )
 from apigateway.core.models import Backend, Stage
 from apigateway.utils.version import is_version1_greater_than_version2
-
-from .validators import StageVarsValidator
 
 
 class StageOutputSLZ(serializers.ModelSerializer):
@@ -105,6 +108,14 @@ class StageOutputSLZ(serializers.ModelSerializer):
         """
         获取正在发布版本
         """
+
+        # 如果是编程网关，返回部署的版本
+        if obj.gateway.is_programmable:
+            latest_deploy_info = self.context["stage_deploy_status"].get(obj.id, {}).get("latest_deploy_history")
+            if latest_deploy_info:
+                return latest_deploy_info.version
+            return ""
+
         latest_publish_info = self.context["stage_publish_status"].get(obj.id)
         if not latest_publish_info:
             return ""
@@ -121,6 +132,9 @@ class StageOutputSLZ(serializers.ModelSerializer):
         """
         获取发布校验结果
         """
+        # 如果是编程网关，直接返回空字符串，编程网关部署的时候才会进行各种资源的注册
+        if obj.gateway.is_programmable:
+            return ""
 
         validate_err_message: str = ""
 
@@ -301,8 +315,8 @@ class ProgrammableStageDeployOutputSLZ(serializers.Serializer):
     branch = serializers.CharField(help_text="上一次部署分支", default="", required=False, allow_blank=True)
     commit_id = serializers.CharField(help_text="上一次部署commit_id", default="", required=False, allow_blank=True)
     deploy_id = serializers.CharField(help_text="上一次部署ID", default="", required=False, allow_blank=True)
-    created_by = serializers.CharField(help_text="发布人" "", default="", required=False, allow_blank=True)
-    created_time = serializers.CharField(help_text="发布时间" "", default="", required=False, allow_blank=True)
+    created_by = serializers.CharField(help_text="发布人", default="", required=False, allow_blank=True)
+    created_time = serializers.CharField(help_text="发布时间", default="", required=False, allow_blank=True)
     latest_deployment = serializers.SerializerMethodField(
         help_text="当前部署信息",
         default=dict,  # 设置默认空字典

@@ -25,16 +25,17 @@ from django.utils.translation import gettext as _
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
-from apigateway.apis.web.constants import UserAuthTypeEnum
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.biz.audit import Auditor
 from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.gateway_app_binding import GatewayAppBindingHandler
 from apigateway.biz.gateway_related_app import GatewayRelatedAppHandler
+from apigateway.biz.mcp_server import MCPServerHandler
+from apigateway.common.constants import UserAuthTypeEnum
 from apigateway.common.contexts import GatewayAuthContext
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
-from apigateway.components.paas import create_paas_app, paas_app_module_offline
+from apigateway.components.paas import create_paas_app
 from apigateway.controller.publisher.publish import trigger_gateway_publish
 from apigateway.core.constants import (
     GatewayKindEnum,
@@ -42,7 +43,7 @@ from apigateway.core.constants import (
     ProgrammableGatewayLanguageEnum,
     PublishSourceEnum,
 )
-from apigateway.core.models import Gateway, Stage
+from apigateway.core.models import Gateway
 from apigateway.utils.django import get_model_dict
 from apigateway.utils.responses import OKJsonResponse
 from apigateway.utils.user_credentials import get_user_credentials_from_request
@@ -125,6 +126,7 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
         slz.is_valid(raise_exception=True)
 
         bk_app_codes = slz.validated_data.pop("bk_app_codes", None)
+        language = slz.validated_data.get("extra_info", {}).get("language")
 
         # if kind is programmable, create paas app
         if slz.validated_data.get("kind") == GatewayKindEnum.PROGRAMMABLE.value:
@@ -136,6 +138,7 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
 
             ok = create_paas_app(
                 slz.validated_data["name"],
+                language,
                 git_info,
                 user_credentials=get_user_credentials_from_request(request),
             )
@@ -308,22 +311,17 @@ class GatewayUpdateStatusApi(generics.UpdateAPIView):
 
         slz.save(updated_by=request.user.username)
 
+        # 网关停用时，将网关下所有 MCPServer 设置为停用
+        if slz.validated_data["status"] == GatewayStatusEnum.INACTIVE.value:
+            MCPServerHandler.disable_servers(gateway_id=instance.id)
+
         # 触发网关发布
         if is_need_publish:
-            # 由于没有办法知道停用状态(网关停用会变更环境的发布状态)之前的各环境发布状态，则启用会发布所有环境
+            # 由于没有办法知道停用状态 (网关停用会变更环境的发布状态) 之前的各环境发布状态，则启用会发布所有环境
             source = PublishSourceEnum.GATEWAY_ENABLE if instance.is_active else PublishSourceEnum.GATEWAY_DISABLE
-            trigger_gateway_publish(source, request.user.username, instance.id)
-            # todo: 编程网关启用需要特殊处理
-            if instance.is_programmable and source == PublishSourceEnum.GATEWAY_DISABLE:
-                # 编程网关停用时，需要调用paas的module_offline接口下架所有环境
-                active_stages = Stage.objects.get_gateway_name_to_active_stage_names([instance]).get(instance.name)
-                for stage_name in active_stages:
-                    paas_app_module_offline(
-                        app_code=request.gateway.name,
-                        module="default",
-                        env=stage_name,
-                        user_credentials=get_user_credentials_from_request(request),
-                    )
+            trigger_gateway_publish(
+                source, request.user.username, instance.id, user_credentials=get_user_credentials_from_request(request)
+            )
 
         Auditor.record_gateway_op_success(
             op_type=OpTypeEnum.MODIFY,
@@ -379,7 +377,7 @@ class GatewayDevGuidelineRetrieveApi(generics.RetrieveAPIView):
         if not instance.is_programmable:
             raise error_codes.FAILED_PRECONDITION.format(_("当前网关类型不支持开发指引。"), replace=True)
 
-        language = instance.extra_info.get("language", ProgrammableGatewayLanguageEnum.PYTHON.value)
+        language = instance.extra_info.get("language")
         dev_guideline_url = ""
         if language == ProgrammableGatewayLanguageEnum.PYTHON.value:
             dev_guideline_url = settings.PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL
@@ -388,7 +386,6 @@ class GatewayDevGuidelineRetrieveApi(generics.RetrieveAPIView):
 
         template_name = f"dev_guideline/{get_current_language_code()}/programmable_gateway.md"
 
-        language = instance.extra_info.get("language")
         repo_url = instance.extra_info.get("repository")
 
         slz = GatewayDevGuidelineOutputSLZ(
@@ -397,6 +394,7 @@ class GatewayDevGuidelineRetrieveApi(generics.RetrieveAPIView):
                     template_name,
                     context={
                         "edition": settings.EDITION,
+                        "bk_api_url_tmple": settings.BK_API_URL_TMPL,
                         "language": language,
                         "repo_url": repo_url,
                         "dev_guideline_url": dev_guideline_url,

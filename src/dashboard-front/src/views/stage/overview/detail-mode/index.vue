@@ -159,16 +159,32 @@
           </div>
         </section>
       </bk-loading>
-      <bk-alert
-        theme="warning"
-        class="mt15 mb15"
-      >
-        <template #title>
-          <div>
-            {{ t('修改环境的配置信息（含后端服务配置、插件配置、变量配置）后，会') }}<span class="stress">{{ t('立即在线上环境生效，请谨慎操作') }}</span>
-          </div>
-        </template>
-      </bk-alert>
+      <div class="mt15">
+        <bk-alert
+          v-if="common.isProgrammableGateway"
+          class="mb15"
+        >
+          <template #title>
+            <div>
+              <span>{{ t('可编程网关的配置信息（如后端服务、插件配置、变量配置等）均在代码仓库中声明。') }}</span>
+              <bk-button text theme="primary" @click="handleDevGuideClick">{{ t('查看开发指南') }}</bk-button>
+            </div>
+          </template>
+        </bk-alert>
+        <bk-alert
+          v-else
+          class="mb15"
+          theme="warning"
+        >
+          <template #title>
+            <div>
+              {{ t('修改环境的配置信息（含后端服务配置、插件配置、变量配置）后，会') }}<span
+                class="stress"
+              >{{ t('立即在线上环境生效，请谨慎操作') }}</span>
+            </div>
+          </template>
+        </bk-alert>
+      </div>
       <div class="tab-wrapper">
         <bk-tab
           v-model:active="active"
@@ -479,6 +495,15 @@ const getBasicInfo = async (apigwId: number) => {
     basicInfoData.value = Object.assign({}, res);
   } catch (e) {
     console.error(e);
+  }
+};
+
+const handleDevGuideClick = () => {
+  const lang = common.curApigwData?.extra_info?.language || 'python';
+  if (lang === 'python') {
+    window.open('https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/python.md');
+  } else {
+    window.open('https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/golang.md');
   }
 };
 

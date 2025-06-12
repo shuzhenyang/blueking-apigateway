@@ -69,6 +69,16 @@ class PermissionDimensionManager(metaclass=ABCMeta):
 
         raise error_codes.INVALID_ARGUMENT.format(f"unsupported grant_dimension: {grant_dimension}")
 
+    @classmethod
+    def get_permission_model(cls, grant_dimension: str):
+        if grant_dimension == GrantDimensionEnum.API.value:
+            return AppGatewayPermission
+
+        if grant_dimension == GrantDimensionEnum.RESOURCE.value:
+            return AppResourcePermission
+
+        raise ValueError(f"unsupported dimension: {grant_dimension}")
+
     @abstractmethod
     def handle_permission_apply(
         self,
@@ -340,10 +350,10 @@ class ResourcePermissionDimensionManager(PermissionDimensionManager):
 
     def _split_resource_ids(self, status, resource_ids, part_resource_ids=None):
         """
-        拆分资源ID 为通过、驳回两组
+        拆分资源 ID 为通过、驳回两组
         :param status: 审批状态
-        :param resource_ids: 申请单据中的资源ID
-        :param part_resource_ids: 部分审批时，部分审批的资源ID
+        :param resource_ids: 申请单据中的资源 ID
+        :param part_resource_ids: 部分审批时，部分审批的资源 ID
         """
         if status == ApplyStatusEnum.APPROVED.value:
             return resource_ids, []

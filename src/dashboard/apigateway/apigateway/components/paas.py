@@ -109,7 +109,10 @@ def get_app_maintainers(bk_app_code: str) -> List[str]:
 
 
 def create_paas_app(
-    app_code: str, git_info: Optional[Dict[str, Any]] = None, user_credentials: Optional[UserCredentials] = None
+    app_code: str,
+    language: str,
+    git_info: Optional[Dict[str, Any]] = None,
+    user_credentials: Optional[UserCredentials] = None,
 ) -> bool:
     """
     创建应用
@@ -117,23 +120,28 @@ def create_paas_app(
     host = get_paas_host()
     url = url_join(host, "/prod/bkapps/cloud-native/")
     headers = gen_gateway_headers(user_credentials)
+    source_init_template = "bk-apigw-plugin-python"
+    build_method = "buildpack"
+    if language == "go":
+        source_init_template = "bk-apigw-plugin-go"
+        build_method = "dockerfile"
     data = {
-        "is_plugin_app": True,
+        "is_plugin_app": False,
         "region": "default",
         "code": app_code,
         "name": app_code,
         "source_config": {
-            "source_init_template": "bk-apigw-plugin-python",
+            "source_init_template": source_init_template,
             "source_control_type": "bare_git",
             "source_repo_url": git_info.get("repository", "") if git_info else "",
             "source_origin": 1,
-            "source_dir": "plugin",
+            "source_dir": "",
             "source_repo_auth_info": {
                 "username": git_info.get("account", "") if git_info else "",
                 "password": git_info.get("password", "") if git_info else "",
             },
         },
-        "bkapp_spec": {"build_config": {"build_method": "buildpack"}},
+        "bkapp_spec": {"build_config": {"build_method": build_method}},
     }
     ok, resp_data = http_post(url, data, headers=headers, timeout=REQ_PAAS_API_TIMEOUT)
     if not ok:
@@ -218,6 +226,7 @@ def paas_app_module_offline(app_code: str, module: str, env: str, user_credentia
             local.request_id,
             resp_data["error"],
         )
+    return resp_data.get("offline_operation_id", "")
 
 
 def set_paas_stage_env(
@@ -326,6 +335,29 @@ def get_paas_deployment_result(
     """
     host = get_paas_host()
     url = url_join(host, f"/prod/bkapps/applications/{app_code}/modules/{module}/deployments/{deploy_id}/result/")
+    headers = gen_gateway_headers(user_credentials)
+    ok, resp_data = http_get(url, data={}, headers=headers, timeout=REQ_PAAS_API_TIMEOUT)
+    if not ok:
+        logger.error(
+            "%s api failed! %s %s, data: %s, request_id: %s, error: %s",
+            "paasv3",
+            "http_get",
+            url,
+            "",
+            local.request_id,
+            resp_data["error"],
+        )
+    return resp_data
+
+
+def get_paas_offline_result(
+    app_code: str, module: str, deploy_id: str, user_credentials: Optional[UserCredentials] = None
+):
+    """
+    获取部署详情
+    """
+    host = get_paas_host()
+    url = url_join(host, f"/prod/bkapps/applications/{app_code}/modules/{module}/offlines/{deploy_id}/result/")
     headers = gen_gateway_headers(user_credentials)
     ok, resp_data = http_get(url, data={}, headers=headers, timeout=REQ_PAAS_API_TIMEOUT)
     if not ok:

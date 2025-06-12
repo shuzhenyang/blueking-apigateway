@@ -13,7 +13,8 @@
         <div class="sideslider-content">
           <div class="top-steps">
             <bk-steps
-              :controllable="stepsConfig.controllable" :cur-step="stepsConfig.curStep"
+              :controllable="stepsConfig.controllable"
+              :cur-step="stepsConfig.curStep"
               :steps="stepsConfig.objectSteps"
             />
           </div>
@@ -22,7 +23,7 @@
               <div class="main">
                 <bk-alert
                   theme="info"
-                  :title="$t('尚未发布')"
+                  :title="t('尚未发布')"
                   v-if="chooseAssets.release?.status === 'unreleased'"
                   class="mt15 mb15"
                 />
@@ -40,8 +41,8 @@
                 />
 
                 <bk-form ref="formRef" :model="formData" :rules="rules" form-type="vertical">
-                  <bk-form-item property="stage_id" :label="$t('发布的环境')">
-                    <bk-select v-model="formData.stage_id" :clearable="false">
+                  <bk-form-item :label="t('发布的环境')" property="stage_id">
+                    <bk-select v-model="formData.stage_id" :clearable="false" @change="getMcpServersDel()">
                       <bk-option
                         v-for="item in stageList"
                         :id="item.id"
@@ -119,26 +120,26 @@
                     </bk-select>
                     <p class="change-msg">
                       <span>
-                        {{ $t("新增") }}
+                        {{ t("新增") }}
                         <strong class="ag-strong success">{{ diffData.add.length }}</strong>
-                        {{ $t("个资源") }}，
+                        {{ t("个资源") }}，
                       </span>
                       <span>
-                        {{ $t("更新") }}
+                        {{ t("更新") }}
                         <strong class="ag-strong warning">{{ diffData.update.length }}</strong>
-                        {{ $t("个资源") }}，
+                        {{ t("个资源") }}，
                       </span>
                       <span>
-                        {{ $t("删除") }}
+                        {{ t("删除") }}
                         <strong class="ag-strong danger">{{ diffData.delete.length }}</strong>
-                        {{ $t("个资源") }}
+                        {{ t("个资源") }}
                       </span>
                     </p>
                   </bk-form-item>
-                  <!-- <bk-form-item property="comment" :label="$t('发布日志')">
+                  <!-- <bk-form-item property="comment" :label="t('发布日志')">
                     <bk-input v-model="formData.comment" type="textarea" :rows="4" :maxlength="100" />
                   </bk-form-item> -->
-                  <bk-form-item property="comment" :label="$t('版本日志')">
+                  <bk-form-item :label="t('版本日志')" property="comment">
                     <bk-input
                       v-model="chooseVersionComment"
                       placeholder="--"
@@ -149,6 +150,26 @@
                     />
                   </bk-form-item>
                 </bk-form>
+
+                <div class="del-mcp-confirm" v-show="mcpCheckData?.has_related_changes">
+                  <div class="title">{{ t('确认删除风险') }}</div>
+                  <bk-alert
+                    theme="error"
+                    class="tips"
+                    :title="t('删除的资源中以下 {count} 个资源被 MCP Server 用到，删除后也会同步删除 MCP Server 中的资源',
+                              { count: mcpCheckData?.deleted_resource_count } )"
+                    closable
+                  />
+                  <div class="table-layout">
+                    <bk-table
+                      :data="mcpCheckData?.details || []"
+                      show-overflow-tooltip
+                      :columns="mcpCheckColumns"
+                      border="outer"
+                    >
+                    </bk-table>
+                  </div>
+                </div>
               </div>
             </template>
             <template v-else>
@@ -173,19 +194,19 @@
                 v-bk-tooltips="{ content: t('请新建版本再发布'), disabled: !isNextBtnDisabled }"
                 @click="handleNext"
               >
-                {{ $t('下一步') }}
+                {{ t('下一步') }}
               </bk-button>
               <template v-else-if="stepsConfig.curStep === 2">
                 <bk-button theme="primary" style="width: 100px" @click="showPublishDia">
-                  <!-- {{ isRollback ? $t('确认回滚') : $t('确认发布') }} -->
-                  {{ $t('确认发布') }}
+                  <!-- {{ isRollback ? t('确认回滚') : t('确认发布') }} -->
+                  {{ t('确认发布') }}
                 </bk-button>
                 <bk-button style="margin-left: 4px; width: 100px" @click="handleBack">
-                  {{ $t('上一步') }}
+                  {{ t('上一步') }}
                 </bk-button>
               </template>
               <bk-button style="margin-left: 4px; width: 100px" @click="handleCancel">
-                {{ $t('取消') }}
+                {{ t('取消') }}
               </bk-button>
             </div>
           </div>
@@ -268,6 +289,7 @@ import {
 } from 'vue-router';
 import versionDiff from '@/components/version-diff/index.vue';
 import logDetails from '@/components/log-details/index.vue';
+import { checkMcpServersDel } from '@/http/mcp-market';
 import { Message } from 'bkui-vue';
 import {
   useGetStageList,
@@ -299,6 +321,26 @@ const { getStagesStatus } = useGetStageList();
 const apigwId = computed(() => +route.params.id);
 
 const { t } = useI18n();
+
+const mcpCheckData = ref({
+  has_related_changes: false,
+  deleted_resource_count: 0,
+  details: [],
+});
+const mcpCheckColumns = [
+  {
+    label: t('资源名称'),
+    field: 'resource_name',
+  },
+  {
+    label: 'MCP Server',
+    field: 'mcp_server.name',
+  },
+  // {
+  //   label: t('描述'),
+  //   field: 'commit_id',
+  // },
+];
 
 const resourceVersion = computed(() => {
   let version = '';
@@ -469,6 +511,23 @@ const getResourceVersions = async () => {
   versionList.value = response.results;
 };
 
+const getMcpServersDel = async () => {
+  const { stage_id, resource_version_id } = formData;
+
+  if (!stage_id || !resource_version_id) {
+    mcpCheckData.value.details = [];
+    mcpCheckData.value.has_related_changes = false;
+    return;
+  }
+
+  const params = {
+    stage_id,
+    resource_version_id,
+  };
+  const res = await checkMcpServersDel(apigwId.value, params);
+  mcpCheckData.value = res;
+};
+
 const handleVersionChange = async (payload: any) => {
   // 检查是否为 v1 版本，是的话不能发布，禁止选中
   if (payload.id === curVersionId.value || payload.schema_version === '1.0') return;
@@ -490,6 +549,7 @@ const handleVersionChange = async (payload: any) => {
   diffData.value = await resourceVersionsDiff(apigwId.value, query);
   formData.resource_version_id = payload?.id;
   selectVersionRef.value.hidePopover();
+  getMcpServersDel();
 };
 
 // 下一步
@@ -564,7 +624,7 @@ watch(
     } else {
       resetSliderData();
       emit('hidden');
-    };
+    }
   },
 );
 
@@ -775,5 +835,22 @@ defineExpose({
 .version-tips {
   color: #979ba5;
   margin-left: 4px;
+}
+
+.del-mcp-confirm {
+  margin-bottom: 24px;
+  .title {
+    font-size: 14px;
+    font-weight: Bold;
+    color: #4D4F56;
+    margin-bottom: 12px;
+  }
+  .tips {
+    margin-bottom: 12px;
+  }
+  .table-layout {
+    height: 215px;
+    overflow-y: auto;
+  }
 }
 </style>

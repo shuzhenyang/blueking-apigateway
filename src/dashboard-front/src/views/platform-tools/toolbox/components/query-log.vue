@@ -5,9 +5,9 @@
         class="header-input"
         v-model.trim="requestId"
         clearable
-        type="search"
         @enter="getDetailData"
         @clear="handleClear"
+        :placeholder="t('请输入 request_id 进行查询')"
       />
 
       <bk-button
@@ -29,6 +29,7 @@
             theme="primary"
             text
             @click="handleClickCopyLink(details.result)"
+            v-show="!isEmpty"
           >
             <copy-shape />
             <span class="copy-text">
@@ -40,7 +41,7 @@
 
       <bk-loading :loading="isDataLoading" color="#fafbfd" :opacity="1">
 
-        <div class="body-content" v-show="!!details.fields?.length">
+        <div class="body-content" v-show="!isEmpty">
           <dl class="details">
             <div
               class="item"
@@ -75,13 +76,12 @@
           </dl>
         </div>
 
-        <div class="empty-wrapper" v-show="!details.fields?.length">
-          <bk-exception
-            class="exception-part"
-            :title="t('暂无数据')"
-            :description="t('请先输入 request_id 进行查询')"
-            scene="part"
-            type="empty"
+        <div class="empty-wrapper" v-show="isEmpty">
+          <TableEmpty
+            :keyword="tableEmptyConf.keyword"
+            :abnormal="tableEmptyConf.isAbnormal"
+            @reacquire="refreshData"
+            @clear-filter="refreshData"
           />
         </div>
       </bk-loading>
@@ -90,12 +90,13 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { CopyShape } from 'bkui-vue/lib/icon';
 import { Message } from 'bkui-vue';
 import { copy as copyToClipboard } from '@/common/util';
+import TableEmpty from '@/components/table-empty.vue';
 import { getLogsInfo } from '@/http';
 import dayjs from 'dayjs';
 
@@ -107,6 +108,14 @@ const requestId = ref<string>('');
 const details = ref<any>({
   fields: [],
   result: {},
+});
+const tableEmptyConf = ref<{keyword: string, isAbnormal: boolean}>({
+  keyword: '',
+  isAbnormal: false,
+});
+
+const isEmpty = computed(() => {
+  return !Object.keys(details.value.result)?.length;
 });
 
 onMounted(() => {
@@ -128,6 +137,7 @@ const handleClear = () => {
     fields: [],
     result: {},
   };
+  updateTableEmptyConfig();
 };
 
 const getDetailData = async () => {
@@ -154,7 +164,20 @@ const getDetailData = async () => {
     };
   } finally {
     isDataLoading.value = false;
+    updateTableEmptyConfig();
   }
+};
+
+const refreshData = () => {
+  handleClear();
+};
+
+const updateTableEmptyConfig = () => {
+  if (requestId.value) {
+    tableEmptyConf.value.keyword = 'placeholder';
+    return;
+  }
+  tableEmptyConf.value.keyword = '';
 };
 
 const formatValue = (value: any, field: string) => {

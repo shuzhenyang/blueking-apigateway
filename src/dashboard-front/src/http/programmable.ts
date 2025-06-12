@@ -118,7 +118,7 @@ export interface IPaasEventInstance {
   display_name: string; // 显示名称
   type: string; // 类型
   steps: IInstanceStep[]; // 步骤数组
-  display_blocks: DisplayBlocksPreparation | DisplayBlocksBuild | DisplayBlocksRelease; // 显示块
+  display_blocks: DisplayBlocksPreparation | DisplayBlocksBuild | DisplayBlocksRelease | null; // 显示块
   uuid: string; // 唯一标识符
   status: null | string; // 状态
   start_time: null | string; // 开始时间
@@ -127,6 +127,11 @@ export interface IPaasEventInstance {
 
 // PaaS部署信息接口
 interface IPaasDeployInfo {
+  deploy_result: {
+    logs?: string;
+    log?: string;
+    err_detail?: string;
+  };
   events: IEvent[]; // 事件数组
   events_framework: IEventsFramework[]; // 事件框架数组
   events_instance: IPaasEventInstance[]; // 事件实例数组
@@ -222,3 +227,6 @@ export const getDeployEvents = (apigwId: number, deploy_id: string): Promise<IEv
 
 // 查询已完成部署后的发布事件
 export const getFinishedDeployEvents = (apigwId: number, history_id: number): Promise<IEventResponse> => fetch.get(`${BK_DASHBOARD_URL}/gateways/${apigwId}/releases/programmable/deploy/histories/${history_id}/events/`);
+
+// 查询部署历史
+export const getDeployHistories = (apigwId: number, data: Record<string, any>): Promise<IEventResponse> => fetch.get(`${BK_DASHBOARD_URL}/gateways/${apigwId}/releases/programmable/deploy/histories/?${json2Query(data)}`);

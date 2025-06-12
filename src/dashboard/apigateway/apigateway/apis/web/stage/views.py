@@ -24,15 +24,18 @@ from rest_framework import generics, status
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.programmable_gateway.models import ProgrammableGatewayDeployHistory
 from apigateway.biz.audit import Auditor
+from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.biz.release import ReleaseHandler
 from apigateway.biz.released_resource import ReleasedResourceHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.biz.stage import StageHandler
 from apigateway.common.error_codes import error_codes
-from apigateway.components.paas import get_paas_deployment_result, get_paas_repo_branch_info, paas_app_module_offline
+from apigateway.components.paas import (
+    get_paas_repo_branch_info,
+)
 from apigateway.controller.publisher.publish import trigger_gateway_publish
-from apigateway.core.constants import PublishSourceEnum, ReleaseHistoryStatusEnum, StageStatusEnum
-from apigateway.core.models import BackendConfig, ReleaseHistory, Stage
+from apigateway.core.constants import PublishSourceEnum, StageStatusEnum
+from apigateway.core.models import BackendConfig, Stage
 from apigateway.utils.django import get_model_dict
 from apigateway.utils.responses import OKJsonResponse
 from apigateway.utils.user_credentials import get_user_credentials_from_request
@@ -88,6 +91,11 @@ class StageListCreateApi(StageQuerySetMixin, generics.ListCreateAPIView):
                     gateway=request.gateway, stage_ids=stage_ids
                 ),
                 "stage_publish_status": ReleaseHandler.batch_get_stage_release_status(stage_ids),
+                "stage_deploy_status": ReleaseHandler.batch_get_stage_deploy_status(
+                    request.gateway, stage_ids, get_user_credentials_from_request(request)
+                )
+                if request.gateway.is_programmable
+                else {},
                 "new_resource_version": ResourceVersionHandler.get_latest_version_by_gateway(request.gateway.id),
             },
         )
@@ -163,6 +171,11 @@ class StageRetrieveUpdateDestroyApi(StageQuerySetMixin, generics.RetrieveUpdateD
                     gateway=request.gateway, stage_ids=[instance.id]
                 ),
                 "stage_publish_status": ReleaseHandler.batch_get_stage_release_status([instance.id]),
+                "stage_deploy_status": ReleaseHandler.batch_get_stage_deploy_status(
+                    request.gateway, [instance.id], get_user_credentials_from_request(request)
+                )
+                if request.gateway.is_programmable
+                else {},
                 "new_resource_version": ResourceVersionHandler.get_latest_version_by_gateway(request.gateway.id),
             },
         )
@@ -403,16 +416,13 @@ class StageStatusUpdateApi(StageQuerySetMixin, generics.UpdateAPIView):
         data_before = {"status": instance.status}
 
         username = request.user.username
-        StageHandler.set_status(instance, data["status"], username)
+        StageHandler.set_status(
+            instance, data["status"], username, user_credentials=get_user_credentials_from_request(request)
+        )
 
-        if data["status"] == StageStatusEnum.INACTIVE.value and instance.gateway.is_programmable:
-            # 调用paas下架接口
-            paas_app_module_offline(
-                app_code=request.gateway.name,
-                module="default",
-                env=instance.name,
-                user_credentials=get_user_credentials_from_request(request),
-            )
+        # 环境下架时，将环境下的所有 MCPServer 设置为停用
+        if data["status"] == StageStatusEnum.INACTIVE.value:
+            MCPServerHandler.disable_servers(gateway_id=request.gateway.id, stage_id=instance.id)
 
         Auditor.record_stage_op_success(
             op_type=OpTypeEnum.MODIFY,
@@ -442,92 +452,20 @@ class ProgrammableStageDeployRetrieveApi(StageQuerySetMixin, generics.RetrieveUp
     queryset = Stage.objects.all()
 
     def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
+        stage = self.get_object()
         gateway = request.gateway
-        stage_id = instance.id
-
-        latest_deploy_history = ProgrammableGatewayDeployHistory()
-
-        # 查询当前deploy历史
-        deploy_history = (
-            ProgrammableGatewayDeployHistory.objects.filter(
-                gateway=gateway,
-                stage=instance,
-            )
-            .order_by("-id")
-            .first()
+        stage_id = stage.id
+        stage_deploy_result = ReleaseHandler.get_stage_deploy_status(
+            gateway, stage_id, get_user_credentials_from_request(request)
         )
-
-        stage_release = ReleasedResourceHandler.get_stage_release(gateway, [stage_id]).get(stage_id)
-        # 正在发布版本状态
-        latest_publish_status = ""
-        latest_history_id = 0
-        # 当前生效版本状态
-        last_publish_status = ""
-        if stage_release:
-            # 优先使用与 stage_release 匹配的记录
-            instance = (
-                ProgrammableGatewayDeployHistory.objects.filter(
-                    gateway=gateway, stage=instance, version=stage_release["resource_version_display"]
-                ).first()
-                or deploy_history  # 回退到最新记录
-            )
-            # 查询当前生效环境的 release history
-            last_release_history = ReleaseHistory.objects.filter(
-                gateway=gateway, stage_id=stage_id, resource_version__version=stage_release["resource_version_display"]
-            ).first()
-            if last_release_history:
-                last_publish_status = ReleaseHandler.get_release_status(last_release_history.id)
-
-            # 如果 stage_release 的版本和 deploy_history的第一个不一致，说明正在发布
-            if stage_release["resource_version_display"] != deploy_history.version:
-                latest_deploy_history = deploy_history
-                latest_publish_status = ReleaseHistoryStatusEnum.DOING.value
-
-        if deploy_history and latest_publish_status != "":
-            latest_history = ReleaseHistory.objects.filter(
-                gateway=gateway, stage_id=stage_id, resource_version__version=deploy_history.version
-            ).first()
-            if not latest_history:
-                latest_publish_status = ReleaseHistoryStatusEnum.DOING.value
-            else:
-                latest_history_id = latest_history.id
-                latest_publish_status = ReleaseHandler.get_release_status(latest_history.id)
-
-        if deploy_history:
-            # 查询paas部署结果
-            result = get_paas_deployment_result(
-                app_code=gateway.name,
-                module="default",
-                deploy_id=deploy_history.deploy_id,
-                user_credentials=get_user_credentials_from_request(request),
-            )
-            # 正在发布的话需要判断是否失败
-            if latest_publish_status != "" and result.get("status", "") == "failed":
-                latest_publish_status = ReleaseHistoryStatusEnum.FAILURE.value
-
-            # 第一次发布
-            if last_publish_status == "" and result.get("status", "") == "failed":
-                instance = deploy_history
-                last_publish_status = ReleaseHistoryStatusEnum.FAILURE.value
-            elif last_publish_status == "" and result.get("status", "") != "failed":
-                latest_deploy_history = deploy_history
-                latest_history = ReleaseHistory.objects.filter(
-                    gateway=gateway, stage_id=stage_id, resource_version__version=deploy_history.version
-                ).first()
-                if latest_history:
-                    latest_publish_status = ReleaseHandler.get_release_status(latest_history.id)
-                else:
-                    latest_publish_status = ReleaseHistoryStatusEnum.DOING.value
-
         context_data = {
-            "latest_deploy_history": latest_deploy_history,
-            "latest_history_id": latest_history_id,
-            "latest_publish_status": latest_publish_status,
-            "last_publish_status": last_publish_status,
             "repo_info": get_paas_repo_branch_info(
                 gateway.name, "default", get_user_credentials_from_request(request)
             ),
         }
-        output_slz = self.get_serializer(instance=instance, context=context_data)
+        context_data.update(stage_deploy_result)
+        output_slz = self.get_serializer(
+            instance=stage_deploy_result.get("last_deploy_history", ProgrammableGatewayDeployHistory()),
+            context=context_data,
+        )
         return OKJsonResponse(data=output_slz.data)

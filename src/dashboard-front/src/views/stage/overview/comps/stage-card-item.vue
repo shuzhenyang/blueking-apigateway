@@ -1,8 +1,7 @@
 <template>
   <div class="stage-card-item">
     <div class="card-header">
-      <div class="name">{{ stage.name }}</div>
-      <div class="status-indicator">
+      <div v-if="!loading" class="status-indicator">
         <Spinner v-if="status === 'doing'" style="color:#3a84f6; font-size: 16px;" />
         <div
           v-else
@@ -14,6 +13,7 @@
         >
         </div>
       </div>
+      <div class="name">{{ stage.name }}</div>
     </div>
     <div class="card-main">
       <div class="text-info">
@@ -34,7 +34,7 @@
           </div>
           <div v-else class="value">
             <BkBadge
-              v-if="hasNewerVersion"
+              v-if="!common.isProgrammableGateway && stage.new_resource_version"
               v-bk-tooltips="{ content: `有新版本 ${stage.new_resource_version || '--'} 可以发布` }"
               :count="999"
               dot
@@ -54,7 +54,7 @@
             <span v-else-if="status === 'doing'" class="suffix">（<span
               style="font-weight: bold;"
             >{{
-              stage.paasInfo?.latest_deployment?.version || '--'
+              stage.paasInfo?.latest_deployment?.version || stage.publish_version || '--'
             }}</span> 版本正在发布中，<span><BkButton text theme="primary" @click.stop="handleCheckLog">{{
               t('查看日志')
             }}</BkButton></span>）</span>
@@ -76,6 +76,7 @@
           theme="primary"
           v-bk-tooltips="actionTooltipConfig"
           :disabled="isActionDisabled"
+          :loading="status === 'doing'"
           @click.stop="handlePublishClick"
         >
           {{ t('发布资源') }}
@@ -83,40 +84,52 @@
         <BkButton
           size="small"
           v-bk-tooltips="actionTooltipConfig"
-          :disabled="isActionDisabled"
+          :disabled="isUnlistDisabled"
+          :loading="status === 'doing'"
           @click.stop="handleDelistClick"
         >
           {{ t('下架') }}
         </BkButton>
       </div>
     </div>
-    <div class="divider"></div>
-    <div class="card-chart">
-      <div :class="{ 'empty-state': !data }" class="request-counter">
-        <div class="label">{{ t('总请求数') }}</div>
-        <div class="value">{{
-          data ? requestCount : t('无数据')
-        }}
+    <template v-if="user.featureFlags?.ENABLE_RUN_DATA_METRICS">
+      <div class="divider"></div>
+      <div class="card-chart" @click.stop="handleChartClick">
+        <div :class="{ 'empty-state': status === 'unreleased' }" class="request-counter">
+          <div class="label">{{ t('总请求数') }}</div>
+          <div class="value">{{ status === 'unreleased' ? t('尚未发布，无数据') : requestCount }}
+          </div>
+        </div>
+        <div class="item-chart-wrapper">
+          <StageCardLineChart v-if="status !== 'unreleased'" :data="data" :mount-id="uniqueId()" />
         </div>
       </div>
-      <div v-if="data" class="item-chart-wrapper">
-        <StageCardLineChart />
-      </div>
-    </div>
+    </template>
   </div>
 </template>
 
 <script lang="ts" setup>
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import {
   computed,
+  onBeforeMount,
   ref,
 } from 'vue';
-import { useCommon } from '@/store';
+import {
+  useCommon,
+  useUser,
+} from '@/store';
 import { useGetGlobalProperties } from '@/hooks';
 import { Spinner } from 'bkui-vue/lib/icon';
 import StageCardLineChart from '@/views/stage/overview/comps/stage-card-line-chart.vue';
 import { getStatusText } from '@/common/util';
+import {
+  getApigwMetrics,
+  getApigwMetricsInstant,
+} from '@/http';
+import dayjs from 'dayjs';
+import { uniqueId } from 'lodash';
 
 interface IRelease {
   status: string;
@@ -179,6 +192,7 @@ interface IStageItem {
 
 interface IProps {
   stage: IStageItem,
+  loading?: boolean,
 }
 
 const props = withDefaults(defineProps<IProps>(), {
@@ -206,32 +220,44 @@ const props = withDefaults(defineProps<IProps>(), {
     publish_validate_msg: '',
     new_resource_version: '',
   }),
+  loading: false,
 });
+
 const emit = defineEmits<{
   'check-log': [void],
   'publish': [void],
   'delist': [void],
 }>();
+
 const { t } = useI18n();
 const { GLOBAL_CONFIG } = useGetGlobalProperties();
+const user = useUser();
+const router = useRouter();
 const common = useCommon();
 
-const data = ref(null);
+const data = ref<number[]>([]);
 
 const requestCount = ref(0);
-const hasNewerVersion = ref(false);
 
 const status = computed(() => {
   if (!props.stage) {
     return '';
   }
   if (common.isProgrammableGateway) {
-    if (props.stage.paasInfo?.latest_deployment?.status) {
-      return props.stage.paasInfo?.latest_deployment?.status;
+    if (props.stage.paasInfo?.status === 'doing'
+      || props.stage.paasInfo?.status === 'pending'
+      || props.stage.paasInfo?.latest_deployment?.status === 'doing'
+      || props.stage.paasInfo?.latest_deployment?.status === 'pending') {
+      return 'doing';
     }
-    if (props.stage.paasInfo?.status) {
-      return props.stage.paasInfo?.status;
+    // 未发布
+    if (props.stage.status === 0 || props.stage.release?.status === 'unreleased') {
+      return 'unreleased';
     }
+    return props.stage.paasInfo?.status
+      || props.stage.paasInfo?.latest_deployment?.status
+      || props.stage.release?.status
+      || '';
   }
   // 未发布
   if (props.stage.status === 0 || props.stage.release?.status === 'unreleased') {
@@ -240,18 +266,17 @@ const status = computed(() => {
   return props.stage.release?.status;
 });
 
-// 发布和下架操作是否禁用
+// 发布操作是否禁用
 const isActionDisabled = computed(() => {
   return status.value === 'doing' || !!props.stage.publish_validate_msg;
 });
 
+// 下架操作是否禁用
+const isUnlistDisabled = computed(() => {
+  return status.value === 'doing' || status.value === 'unreleased' || !!props.stage.publish_validate_msg;
+});
+
 const actionTooltipConfig = computed(() => {
-  // if (props.stage.status === 0) {
-  //   return {
-  //     content: t('当前网关已停用，如需使用，请先启用'),
-  //     disabled: false,
-  //   };
-  // }
   if (status.value === 'doing') {
     return { content: t('发布中'), disabled: false };
   }
@@ -262,6 +287,51 @@ const actionTooltipConfig = computed(() => {
     disabled: true,
   };
 });
+
+const getRequestCount = async () => {
+  const now = dayjs().unix();
+  const sixHoursAgo = now - 6 * 60 * 60;
+  const { instant } = await getApigwMetricsInstant(common.apigwId, {
+    stage_id: props.stage.id,
+    time_start: sixHoursAgo,
+    time_end: now,
+    metrics: 'requests_total',
+  });
+  requestCount.value = instant;
+};
+
+const getRequestTrend = async () => {
+  if (!user.featureFlags?.ENABLE_RUN_DATA_METRICS) {
+    return;
+  }
+  const now = dayjs().unix();
+  const sixHoursAgo = now - 6 * 60 * 60;
+
+  const { series } = await getApigwMetrics(common.apigwId, {
+    stage_id: props.stage.id,
+    time_start: sixHoursAgo,
+    time_end: now,
+    metrics: 'requests',
+  });
+
+  const seriesDatapoints = series?.[0]?.datapoints as [number, number][] || [];
+  const results = [] as number[];
+  let count = 0;
+
+  seriesDatapoints.forEach((dataPoint, index) => {
+    count += (dataPoint[0] || 0);
+    if (index % 12 === 11) {
+      results.push(count);
+      count = 0;
+    }
+  });
+
+  while (results.length < 6) {
+    results.push(0);
+  }
+
+  data.value = results;
+};
 
 const handleCheckLog = () => {
   emit('check-log');
@@ -290,6 +360,17 @@ const handlePublishClick = () => {
 const handleDelistClick = () => {
   emit('delist');
 };
+
+const handleChartClick = () => {
+  router.push({ name: 'apigwDashboard', query: { time_span: 'now-6h', stage_id: props.stage.id } });
+};
+
+onBeforeMount(async () => {
+  await Promise.all([
+    getRequestCount(),
+    getRequestTrend(),
+  ]);
+});
 
 </script>
 
@@ -426,6 +507,7 @@ const handleDelistClick = () => {
     height: 60px;
     display: flex;
     justify-content: space-between;
+    cursor: pointer;
 
     .request-counter {
       display: flex;

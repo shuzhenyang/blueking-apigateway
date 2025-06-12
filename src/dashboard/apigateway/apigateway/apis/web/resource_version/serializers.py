@@ -21,7 +21,7 @@ from rest_framework import serializers
 
 from apigateway.apis.web.constants import PLUGIN_MERGE_TYPE
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
-from apigateway.biz.constants import SEMVER_PATTERN
+from apigateway.biz.constants import SEMVER_PATTERN, OpenAPIFormatEnum
 from apigateway.biz.validators import ResourceVersionValidator
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.core.constants import ResourceVersionSchemaEnum, ResourceVersionTypeEnum
@@ -37,6 +37,7 @@ class ResourceVersionCreateInputSLZ(serializers.Serializer):
 
 
 class ResourceInfoSLZ(serializers.Serializer):
+    id = serializers.IntegerField(help_text="资源id")
     name = serializers.CharField(help_text="资源名称")
     method = serializers.CharField(help_text="前端请求方法")
     path = serializers.CharField(help_text="前端请求路径")
@@ -58,6 +59,8 @@ class ResourceInfoSLZ(serializers.Serializer):
     contexts = serializers.DictField(help_text="资源认证等相关配置")
 
     plugins = serializers.SerializerMethodField(help_text="绑定插件")
+
+    has_openapi_schema = serializers.SerializerMethodField(help_text="是否配置了 openapi schema")
 
     def get_doc_updated_time(self, obj):
         return self.context["resource_doc_updated_time"].get(obj["id"], "")
@@ -110,7 +113,10 @@ class ResourceInfoSLZ(serializers.Serializer):
 
         plugins.extend(merge_plugins)
 
-        return sorted(plugins, key=lambda x: (x["priority"], x["binding_type"]))
+        return sorted(plugins, key=lambda x: (-x["priority"], x["binding_type"]))
+
+    def get_has_openapi_schema(self, obj) -> bool:
+        return self.context["resource_id_with_schema_dict"].get(obj["id"], False)
 
 
 class ResourceVersionRetrieveOutputSLZ(serializers.Serializer):
@@ -184,4 +190,12 @@ class NextProgrammableDeployVersionGetInputSLZ(serializers.Serializer):
     stage_name = serializers.CharField(required=True, help_text="环境name")
     version_type = serializers.ChoiceField(
         choices=ResourceVersionTypeEnum.get_choices(), help_text="版本类型：major/minor/patch"
+    )
+
+
+class ResourceVersionExportInputSLZ(serializers.Serializer):
+    file_type = serializers.ChoiceField(
+        choices=OpenAPIFormatEnum.get_choices(),
+        default=OpenAPIFormatEnum.YAML.value,
+        help_text="导出的文件类型，如 yaml/json",
     )

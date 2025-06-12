@@ -18,12 +18,11 @@
 #
 import datetime
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from cachetools import TTLCache, cached
 from django.conf import settings
-from django.utils.translation import gettext as _
-from rest_framework import serializers
+from django.utils.translation import gettext_lazy as _
 
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.openapi.models import OpenAPIResourceSchemaVersion
@@ -40,8 +39,9 @@ from apigateway.biz.resource_label import ResourceLabelHandler
 from apigateway.biz.resource_openapi_schema import ResourceOpenAPISchemaVersionHandler
 from apigateway.biz.stage_resource_disabled import StageResourceDisabledHandler
 from apigateway.common.constants import CACHE_TIME_5_MINUTES
+from apigateway.common.error_codes import error_codes
 from apigateway.core.constants import ContextScopeTypeEnum, ProxyTypeEnum, ResourceVersionSchemaEnum
-from apigateway.core.models import Gateway, Proxy, Release, Resource, ResourceVersion, Stage
+from apigateway.core.models import Gateway, Release, Resource, ResourceVersion, Stage
 from apigateway.utils import time as time_utils
 from apigateway.utils.version import max_version
 
@@ -50,6 +50,7 @@ class ResourceVersionHandler:
     @staticmethod
     def make_version(gateway: Gateway):
         resource_queryset = Resource.objects.filter(gateway_id=gateway.id).all()
+
         resource_ids = list(resource_queryset.values_list("id", flat=True))
 
         proxy_map = ProxyHandler.get_resource_id_to_snapshot(resource_ids)
@@ -142,25 +143,6 @@ class ResourceVersionHandler:
         )
 
         return resource_version
-
-    @staticmethod
-    def _validate_resource_version_data(gateway: Gateway, version: str):
-        # 判断是否创建资源
-        if not Resource.objects.filter(gateway_id=gateway.id).exists():
-            raise serializers.ValidationError(_("请先创建资源，然后再生成版本。"))
-
-        # TODO: 临时跳过 version 校验，待提供 version 后，此部分删除
-        if not version:
-            return
-
-        # 是否绑定backend
-        if Proxy.objects.filter(resource__gateway=gateway, backend__isnull=True).exists():
-            raise serializers.ValidationError(_("存在资源未绑定后端服务. "))
-
-        # ResourceVersion 中数据量较大，因此，不使用 UniqueTogetherValidator
-        if ResourceVersion.objects.filter(gateway=gateway, version=version).exists():
-            raise serializers.ValidationError(_("版本 {version} 已存在。").format(version=version))
-        return
 
     @staticmethod
     def get_released_public_resources(gateway_id: int, stage_name: Optional[str] = None) -> List[dict]:
@@ -274,6 +256,42 @@ class ResourceVersionHandler:
         return {}
 
     @staticmethod
+    def get_resource_id_to_schema_by_resource_version(resource_version_id: int) -> dict:
+        """
+        获取资源版本下的资源与 api schema 的映射关系
+        """
+        resources_version_schema = OpenAPIResourceSchemaVersion.objects.filter(
+            resource_version_id=resource_version_id
+        ).first()
+        if resources_version_schema is None:
+            return {}
+        return {schema_info["resource_id"]: schema_info["schema"] for schema_info in resources_version_schema.schema}
+
+    @staticmethod
+    def get_resource_ids_has_openapi_schema_by_resource_version(resource_version_id: int) -> Dict[int, bool]:
+        """
+        判断资源版本中每个资源是否有配置
+        """
+        resource_id_to_schema = ResourceVersionHandler.get_resource_id_to_schema_by_resource_version(
+            resource_version_id
+        )
+        resource_id_to_has_openapi_schema = {}
+        for resource_id, schema in resource_id_to_schema.items():
+            if schema is None:
+                resource_id_to_has_openapi_schema[resource_id] = False
+                continue
+
+            # currently, the schema.responses is initialized during import openapi file
+            # so, we can't judge whether the schema has configured the schema or not
+            if "requestBody" in schema or "parameters" in schema:
+                resource_id_to_has_openapi_schema[resource_id] = True
+                continue
+
+            resource_id_to_has_openapi_schema[resource_id] = False
+
+        return resource_id_to_has_openapi_schema
+
+    @staticmethod
     def get_resource_id(resource_version_id: int, resource_name: str) -> int:
         resource_version = ResourceVersion.objects.filter(id=resource_version_id).first()
         if not resource_version:
@@ -282,6 +300,22 @@ class ResourceVersionHandler:
             if resource["name"] == resource_name:
                 return resource["id"]
         return -1
+
+    @staticmethod
+    @cached(cache=TTLCache(maxsize=300, ttl=CACHE_TIME_5_MINUTES))
+    def get_resource_names_set(resource_version_id: int, raise_exception: bool = False) -> Set[str]:
+        """获取资源版本中的资源名称列表, 缓存 5 分钟
+
+        Args:
+            resource_version_id (int): 资源版本 ID
+            raise_exception (bool, optional): 是否抛出异常, 如果资源版本不存在, 则抛出异常. 默认 False
+        """
+        resource_version = ResourceVersion.objects.filter(id=resource_version_id).first()
+        if not resource_version:
+            if raise_exception:
+                raise error_codes.NOT_FOUND.format(_("资源版本不存在"))
+            return set()
+        return {resource["name"] for resource in resource_version.data}
 
 
 class ResourceDocVersionHandler:
@@ -334,5 +368,5 @@ class ResourceDocVersionHandler:
         if doc_last_updated_time and doc_last_updated_time > latest_version.created_time:
             return True
 
-        # 文档不可直接删除，资源删除导致的文档删除，在判断“是否需要创建资源版本”时校验
+        # 文档不可直接删除，资源删除导致的文档删除，在判断"是否需要创建资源版本"时校验
         return False

@@ -151,6 +151,64 @@ paths:
           appVerifiedRequired: true
           resourcePermissionRequired: false
         descriptionEn: None
+
+  /api/v2/mcp-servers/{mcp_server_name}/sse:
+    get:
+      operationId: mcp_proxy_sse
+      description: mcp proxy sse接口
+      tags:
+        - v2_mcp
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: mcp-proxy
+          method: get
+          path: /{mcp_server_name}/sse
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: true
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/mcp-servers/{mcp_server_name}/sse/message:
+    post:
+      operationId: mcp_proxy_message
+      description: mcp proxy message接口
+      tags:
+        - v2_mcp
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: mcp-proxy
+          method: post
+          path: /{mcp_server_name}/sse/message
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: true
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
   /api/v1/apis/{api_name}/related-apps/:
     post:
       operationId: add_related_apps
@@ -724,6 +782,35 @@ paths:
           appVerifiedRequired: true
           resourcePermissionRequired: false
         descriptionEn: None
+  /api/v2/open/gateways/{gateway_name}/permissions/apply/:
+    post:
+      operationId: v2_open_apply_gateway_permission
+      description: 申请网关权限
+      tags:
+        - v2_open
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: true
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /api/v2/open/gateways/{gateway_name}/permissions/apply/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
   /api/v2/sync/gateways/{gateway_name}/public_key/:
     get:
       operationId: v2_sync_get_gateway_public_key_new
@@ -782,6 +869,151 @@ paths:
           appVerifiedRequired: true
           resourcePermissionRequired: false
         descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/stages/:
+    post:
+      operationId: v2_sync_stages
+      description: 添加网关的关联应用
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/stages/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/:
+    post:
+      operationId: v2_sync_gateway
+      description: 同步网关
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/resources/:
+    post:
+      operationId: v2_sync_resources
+      description: 同步网关资源
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resources/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/resource-docs/:
+    post:
+      operationId: v2_sync_resource_doc
+      description: 同步网关资源文档
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resource-docs/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/sdks/:
+    post:
+      operationId: v2_sync_generate_sdk
+      description: 生成网关sdk
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resources/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
   /api/v2/sync/gateways/{gateway_name}/permissions/:
     get:
       operationId: v2_sync_list_permissions
@@ -806,6 +1038,152 @@ paths:
           matchSubpath: false
           timeout: 0
         pluginConfigs: []
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+
+  /api/v2/sync/gateways/{gateway_name}/permissions/grant/:
+    post:
+      operationId: v2_sync_grant_permission
+      description: 网关权限授权
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/permissions/grant/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+
+  /api/v2/sync/gateways/{gateway_name}/resource_versions/:
+    post:
+      operationId: v2_sync_create_resource_version
+      description: 网关资源版本创建
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resource_versions/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+    get:
+      operationId: v2_sync_list_resource_versions
+      description: 查询网关资源版本列表
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: get
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resource_versions/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/resource_versions/latest:
+    get:
+      operationId: v2_sync_get_latest_resource_version
+      description: 获取网关资源版本最新版本
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: get
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resource_versions/latest
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: false
+        descriptionEn: None
+  /api/v2/sync/gateways/{gateway_name}/resource_versions/release/:
+    post:
+      operationId: v2_sync_release
+      description: 网关资源版本发布
+      tags:
+        - v2_sync
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: { }
+      x-bk-apigateway-resource:
+        isPublic: true
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/sync/gateways/{gateway_name}/resource_versions/release/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: [ ]
         authConfig:
           userVerifiedRequired: false
           appVerifiedRequired: true
@@ -871,7 +1249,7 @@ paths:
         descriptionEn: None
   /api/v2/inner/gateways/{gateway_name}/permissions/resources/:
     get:
-      operationId: v2_inner_get_gateway_resources
+      operationId: v2_inner_list_gateway_permission_resources
       description: 获取网关资源
       tags:
       - v2_inner
@@ -900,7 +1278,7 @@ paths:
         descriptionEn: None
   /api/v2/inner/gateways/{gateway_name}/permissions/app-permissions/allow-apply-by-gateway/:
     get:
-      operationId: v2_inner_allow_apply_by_gateway
+      operationId: v2_inner_check_is_allowed_apply_by_gateway
       description: 是否允许按网关申请资源权限
       tags:
       - v2_inner
@@ -929,7 +1307,7 @@ paths:
         descriptionEn: None
   /api/v2/inner/gateways/{gateway_name}/permissions/app-permissions/apply/:
     post:
-      operationId: v2_inner_apply_resource_permission
+      operationId: v2_inner_apply_gateway_resource_permission
       description: 网关资源权限申请
       tags:
       - v2_inner
@@ -1046,7 +1424,7 @@ paths:
   /api/v2/inner/gateways/permissions/apply-records/{record_id}/:
     get:
       operationId: v2_inner_retrieve_resource_permission_apply_record
-      description: '资源权限申请记录详情'
+      description: 资源权限申请记录详情
       tags:
       - v2_inner
       responses:
@@ -1074,8 +1452,8 @@ paths:
         descriptionEn: None
   /api/v2/inner/esb/systems/:
     get:
-      operationId: v2_inner_get_esb_systems
-      description: '查询组件系统列表'
+      operationId: v2_inner_list_esb_systems
+      description: 查询组件系统列表
       tags:
       - v2_inner
       responses:
@@ -1103,8 +1481,8 @@ paths:
         descriptionEn: None
   /api/v2/inner/esb/systems/{system_id}/permissions/components/:
     get:
-      operationId: v2_inner_get_system_permission_components
-      description: '查询系统权限组件'
+      operationId: v2_inner_list_esb_system_permission_components
+      description: 查询系统权限组件
       tags:
       - v2_inner
       responses:
@@ -1132,7 +1510,7 @@ paths:
         descriptionEn: None
   /api/v2/inner/esb/systems/{system_id}/permissions/apply/:
     get:
-      operationId: v2_inner_apply_esb_component_permissions
+      operationId: v2_inner_apply_esb_system_component_permissions
       description: '创建申请ESB组件权限的申请单据'
       tags:
       - v2_inner
@@ -1162,7 +1540,7 @@ paths:
   /api/v2/inner/esb/systems/permissions/renew/:
     post:
       operationId: v2_inner_renew_esb_component_permissions
-      description: 'ESB组件权限续期'
+      description: ESB 组件权限续期
       tags:
       - v2_inner
       responses:
@@ -1190,8 +1568,8 @@ paths:
         descriptionEn: None
   /api/v2/inner/esb/systems/permissions/app-permissions/:
     post:
-      operationId: v2_inner_get_app_component_systems
-      description: '已申请权限列表'
+      operationId: v2_inner_list_app_esb_component_permissions
+      description: 已申请权限列表
       tags:
       - v2_inner
       responses:
@@ -1219,8 +1597,8 @@ paths:
         descriptionEn: None
   /api/v2/inner/esb/systems/permissions/apply-records/:
     get:
-      operationId: v2_inner_get_app_permission_apply_records
-      description: '查询应用权限申请记录列表'
+      operationId: v2_inner_list_app_esb_component_permission_apply_records
+      description: 查询应用权限申请记录列表
       tags:
       - v2_inner
       responses:
@@ -1248,8 +1626,8 @@ paths:
         descriptionEn: None
   /api/v2/inner/esb/systems/permissions/apply-records/{record_id}/:
     get:
-      operationId: v2_inner_get_app_permission_apply_record
-      description: '查询应用权限申请记录详情'
+      operationId: v2_inner_get_app_esb_component_permission_apply_record
+      description: 查询应用权限申请记录详情
       tags:
       - v2_inner
       responses:
@@ -1267,6 +1645,151 @@ paths:
           name: default
           method: get
           path: /backend/api/v2/inner/esb/systems/permissions/apply-records/{record_id}/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: []
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: true
+        descriptionEn: None
+  /api/v2/inner/mcp-server/permissions/:
+    get:
+      operationId: v2_inner_list_mcp_server_permissions
+      description: 'mcp_server 申请权限列表'
+      tags:
+      - v2_inner
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: get
+          path: /backend/api/v2/inner/mcp-server/permissions/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: []
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: true
+        descriptionEn: None
+  /api/v2/inner/mcp-server/permissions/apply/:
+    get:
+      operationId: v2_inner_apply_mcp_server_permission
+      description: 'mcp_server 权限申请/批量申请'
+      tags:
+      - v2_inner
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: post
+          path: /backend/api/v2/inner/mcp-server/permissions/apply/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: []
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: true
+        descriptionEn: None
+  /api/v2/inner/mcp-server/permissions/app-permissions/:
+    get:
+      operationId: v2_inner_list_mcp_server_app_permissions
+      description: 'mcp_server 已申请权限列表'
+      tags:
+      - v2_inner
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: get
+          path: /backend/api/v2/inner/mcp-server/permissions/app-permissions/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: []
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: true
+        descriptionEn: None
+  /api/v2/inner/mcp-server/permissions/apply-records/:
+    get:
+      operationId: v2_inner_list_mcp_server_permission_apply_records
+      description: 'mcp_server 申请记录列表'
+      tags:
+      - v2_inner
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: get
+          path: /backend/api/v2/inner/mcp-server/permissions/apply-records/
+          matchSubpath: false
+          timeout: 0
+        pluginConfigs: []
+        authConfig:
+          userVerifiedRequired: false
+          appVerifiedRequired: true
+          resourcePermissionRequired: true
+        descriptionEn: None
+  /api/v2/inner/mcp-server/permissions/apply-records/{record_id}/:
+    get:
+      operationId: v2_inner_retrieve_mcp_server_permission_apply_record
+      description: 'mcp_server 申请记录详情'
+      tags:
+      - v2_inner
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      x-bk-apigateway-resource:
+        isPublic: false
+        allowApplyPermission: false
+        matchSubpath: false
+        enableWebsocket: false
+        backend:
+          name: default
+          method: get
+          path: /backend/api/v2/inner/mcp-server/permissions/apply-records/{record_id}/
           matchSubpath: false
           timeout: 0
         pluginConfigs: []

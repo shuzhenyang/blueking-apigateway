@@ -1,9 +1,13 @@
 <template>
-  <BkLoading :loading="isLoading">
+  <div>
+    <BkLoading :loading="isLoading && !stageList.length">
+      <div style="width: 100%;"></div>
+    </BkLoading>
     <div class="card-list">
       <StageCardItem
         v-for="stage in stageList"
         :key="stage.id"
+        :loading="loadingProgrammableStageIds.includes(stage.id)"
         :stage="stage"
         @click="handleToDetail(stage)"
         @delist="() => handleStageUnlist(stage.id)"
@@ -11,44 +15,45 @@
         @check-log="() => showLogs(stage)"
       />
 
-      <div v-if="!common.isProgrammableGateway" class="card-item add-stage" @click="handleAddStage">
+      <div v-if="!common.isProgrammableGateway && !isLoading" class="card-item add-stage" @click="handleAddStage">
         <i class="apigateway-icon icon-ag-add-small" />
       </div>
-
-      <!-- 环境侧边栏 -->
-      <edit-stage-sideslider ref="stageSidesliderRef" />
-
-      <!-- 发布资源至环境 -->
-      <release-sideslider
-        ref="releaseSidesliderRef"
-        :current-assets="currentStage"
-        @hidden="handleReleaseSuccess(false)"
-        @release-success="handleReleaseSuccess"
-      />
-
-      <!-- 发布可编程网关的资源至环境 -->
-      <ReleaseProgrammableSlider
-        ref="releaseProgrammableSliderRef"
-        :current-stage="currentStage"
-        @hidden="handleReleaseSuccess(false)"
-        @release-success="handleReleaseSuccess"
-        @closed-on-publishing="handleSliderHideWhenPending"
-      />
-
-      <!-- 日志抽屉 -->
-      <log-details ref="logDetailsRef" :history-id="historyId" />
-
-      <!-- 可编程网关日志抽屉 -->
-      <ProgrammableEventSlider
-        ref="programmableEventSliderRef"
-        :deploy-id="deployId"
-        :history-id="historyId"
-        :stage="currentStage"
-        @retry="handleRetry"
-        @hide-when-pending="handleSliderHideWhenPending"
-      />
     </div>
-  </BkLoading>
+
+    <!-- 环境侧边栏 -->
+    <EditStageSideslider ref="stageSidesliderRef" />
+
+    <!-- 发布普通网关的资源至环境 -->
+    <ReleaseSideslider
+      ref="releaseSidesliderRef"
+      :current-assets="currentStage"
+      @hidden="handleReleaseSuccess(false)"
+      @release-success="handleReleaseSuccess"
+      @closed-on-publishing="handleSliderHideWhenPending"
+    />
+
+    <!-- 发布可编程网关的资源至环境 -->
+    <ReleaseProgrammableSlider
+      ref="releaseProgrammableSliderRef"
+      :current-stage="currentStage"
+      @hidden="handleReleaseSuccess(false)"
+      @release-success="handleReleaseSuccess"
+      @closed-on-publishing="handleSliderHideWhenPending"
+    />
+
+    <!-- 日志抽屉 -->
+    <LogDetails ref="logDetailsRef" :history-id="historyId" @release-doing="handleSliderHideWhenPending" />
+
+    <!-- 可编程网关日志抽屉 -->
+    <ProgrammableEventSlider
+      ref="programmableEventSliderRef"
+      :deploy-id="deployId"
+      :history-id="historyId"
+      :stage="currentStage"
+      @retry="handleRetry"
+      @hide-when-pending="handleSliderHideWhenPending"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -66,7 +71,7 @@ import {
   InfoBox,
   Message,
 } from 'bkui-vue';
-import logDetails from '@/components/log-details/index.vue';
+import LogDetails from '@/components/log-details/index.vue';
 import mitt from '@/common/event-bus';
 import {
   useCommon,
@@ -78,8 +83,8 @@ import {
   removalStage,
 } from '@/http';
 import { BasicInfoParams } from '@/views/basic-info/common/type';
-import editStageSideslider from './edit-stage-sideslider.vue';
-import releaseSideslider from './release-sideslider.vue';
+import EditStageSideslider from './edit-stage-sideslider.vue';
+import ReleaseSideslider from './release-sideslider.vue';
 import ReleaseProgrammableSlider from './release-programmable-slider.vue';
 import StageCardItem from '@/views/stage/overview/comps/stage-card-item.vue';
 import { getProgrammableStageDetail } from '@/http/programmable';
@@ -91,8 +96,8 @@ const route = useRoute();
 const common = useCommon();
 const stageStore = useStage();
 
-const historyId = ref<number | undefined>(undefined);
-const deployId = ref<string | undefined>(undefined);
+const historyId = ref<number>();
+const deployId = ref<string>();
 const currentStage = ref<any>({});
 
 const releaseSidesliderRef = ref();
@@ -125,6 +130,7 @@ const basicInfoData = ref<BasicInfoParams>({
 const stageList = ref<any[]>([]);
 const stageSidesliderRef = ref(null);
 const isLoading = ref(false);
+const loadingProgrammableStageIds = ref<number[]>([]);
 
 const fetchStageList = async () => {
   isLoading.value = true;
@@ -139,7 +145,16 @@ const fetchStageList = async () => {
     const tasks: ReturnType<typeof getProgrammableStageDetail>[] = [];
 
     for (const stage of _stageList) {
-      tasks.push(getProgrammableStageDetail(common.apigwId, stage.id));
+      if (stage.publish_version) {
+        tasks.push(getProgrammableStageDetail(common.apigwId, stage.id));
+        loadingProgrammableStageIds.value.push(stage.id);
+      } else {
+        tasks.push(Promise.resolve(undefined));
+        const index = loadingProgrammableStageIds.value.findIndex(id => id === stage.id);
+        if (index !== -1) {
+          loadingProgrammableStageIds.value.splice(index, 1);
+        }
+      }
     }
 
     const responses = await Promise.all(tasks);
@@ -147,6 +162,7 @@ const fetchStageList = async () => {
     for (let i = 0; i < _stageList.length; i++) {
       _stageList[i].paasInfo = responses[i];
     }
+    loadingProgrammableStageIds.value = [];
   }
   stageList.value = _stageList || [];
   stageStore.setStageList(_stageList);
@@ -187,6 +203,9 @@ watch(() => common.curApigwData, () => {
 
 // 环境详情
 const handleToDetail = (data: any) => {
+  if (isLoading.value) {
+    return;
+  }
   mitt.emit('switch-mode', { id: data.id, name: data.name });
 };
 
@@ -205,6 +224,7 @@ const handleRelease = async (stage: any) => {
 // 发布成功
 const handleReleaseSuccess = async (loading = true) => {
   await mitt.emit('get-environment-list-data', loading);
+  await fetchStageList();
 };
 
 // 查看日志
@@ -238,18 +258,14 @@ const handleStageUnlist = async (id: number) => {
       const data = {
         status: 0,
       };
-      try {
-        await removalStage(apigwId.value, id, data);
-        Message({
-          message: t('下架成功'),
-          theme: 'success',
-        });
-        // 获取网关列表
-        await mitt.emit('get-environment-list-data', true);
-        // 开启loading
-      } catch (error) {
-        console.error(error);
-      }
+      await removalStage(apigwId.value, id, data);
+      Message({
+        message: t('下架成功'),
+        theme: 'success',
+      });
+      // 获取网关列表
+      await mitt.emit('get-environment-list-data', true);
+      await fetchStageList();
     },
   });
 };
@@ -290,25 +306,11 @@ onUnmounted(() => {
 </script>
 
 <style lang="scss" scoped>
+
 .card-list {
-  min-width: calc(1280px - 260px);
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-gap: 18px; /* 设置盒子之间的间隔 */
-}
-
-/* 分辨率大于1920时 */
-@media (min-width: 1921px) {
-  .card-list {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-/* 适应更小的分辨率，每行最多显示三个盒子 */
-@media (max-width: 1920px) {
-  .card-list {
-    grid-template-columns: repeat(3, 1fr);
-  }
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
 }
 
 .card-item {
@@ -400,7 +402,7 @@ onUnmounted(() => {
   }
 
   &.add-stage {
-    flex: 1;
+    width: 517px;
     display: flex;
     align-items: center;
     justify-content: center;

@@ -39,8 +39,10 @@ from apigateway.components.paas import (
     get_paas_deploy_phases_framework,
     get_paas_deploy_phases_instance,
     get_paas_deployment_result,
+    get_paas_offline_result,
     get_pass_deploy_streams_history_events,
 )
+from apigateway.core.constants import PublishSourceEnum
 from apigateway.core.models import PublishEvent, Release, ReleaseHistory, ResourceVersion
 from apigateway.utils import openapi as openapi_utils
 from apigateway.utils.exception import LockTimeout
@@ -49,6 +51,7 @@ from apigateway.utils.responses import FailJsonResponse, OKJsonResponse
 from apigateway.utils.user_credentials import get_user_credentials_from_request
 
 from .serializers import (
+    DeployHistoryOutputSLZ,
     ProgrammableDeployCreateInputSLZ,
     ProgrammableDeployEventGetOutputSLZ,
     ReleaseHistoryEventRetrieveOutputSLZ,
@@ -253,6 +256,49 @@ class ReleaseHistoryListApi(generics.ListAPIView):
 @method_decorator(
     name="get",
     decorator=swagger_auto_schema(
+        query_serializer=ReleaseHistoryQueryInputSLZ(),
+        responses={status.HTTP_200_OK: DeployHistoryOutputSLZ(many=True)},
+        tags=["WebAPI.Release"],
+        operation_description="编程部署历史列表获取接口",
+    ),
+)
+class DeployHistoryListApi(generics.ListAPIView):
+    serializer_class = DeployHistoryOutputSLZ
+
+    def get_queryset(self):
+        return ProgrammableGatewayDeployHistory.objects.filter(gateway=self.request.gateway)
+
+    def list(self, request, *args, **kwargs):
+        slz = ReleaseHistoryQueryInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+
+        data = slz.validated_data
+        queryset = ProgrammableGatewayDeployHistory.objects.filter_deploy_history(
+            gateway=request.gateway,
+            query=data.get("keyword"),
+            stage_id=data.get("stage_id"),
+            created_by=data.get("created_by"),
+            time_start=data.get("time_start"),
+            time_end=data.get("time_end"),
+            order_by="-created_time",
+            fuzzy=True,
+        )
+        page = self.paginate_queryset(queryset)
+        slz = self.get_serializer(
+            page,
+            many=True,
+            context={
+                "release_history_events_map": PublishEvent.objects.get_release_history_id_to_latest_publish_event_map(
+                    [deploy_history.publish_id for deploy_history in page if deploy_history.publish_id]
+                )
+            },
+        )
+        return self.get_paginated_response(slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
         responses={status.HTTP_200_OK: ReleaseHistoryOutputSLZ()},
         tags=["WebAPI.Release"],
         operation_description="发布详情接口",
@@ -328,7 +374,13 @@ class ProgrammableDeployCreateApi(generics.CreateAPIView):
         if not request.gateway.is_programmable:
             raise error_codes.FAILED_PRECONDITION.format(_("当前网关类型不支持应用部署。"), replace=True)
 
-        slz = ProgrammableDeployCreateInputSLZ(data=request.data)
+        slz = ProgrammableDeployCreateInputSLZ(
+            data=request.data,
+            context={
+                "gateway": request.gateway,
+            },
+        )
+
         slz.is_valid(raise_exception=True)
 
         deploy_id = ProgramGatewayReleaser.deploy(
@@ -379,30 +431,52 @@ class BaseProgrammableDeployEventsRetrieveApi(generics.RetrieveAPIView):
         """公共上下文数据准备"""
         user_credentials = get_user_credentials_from_request(self.request)
 
-        # 获取部署阶段框架数据
-        events_framework = get_paas_deploy_phases_framework(
-            app_code=self.request.gateway.name,
-            module="default",
-            env=instance.stage.name,
-            user_credentials=user_credentials,
-        )
-        # 获取部署实例阶段数据
-        events_instance = get_paas_deploy_phases_instance(
-            app_code=self.request.gateway.name,
-            env=instance.stage.name,
-            module="default",
-            deploy_id=instance.deploy_id,
-            user_credentials=user_credentials,
-        )
-        # 获取部署事件流数据
-        events = get_pass_deploy_streams_history_events(
-            deploy_id=instance.deploy_id,
-            user_credentials=user_credentials,
-        )
+        events_framework = {}
+        events_instance = {}
+        deploy_result = {}
+        events = []
+
+        # 是否是下线
+        is_offline = instance.source != PublishSourceEnum.VERSION_PUBLISH.value
+
         # 获取发布历史事件
-        release_history = ReleaseHistory.objects.filter(
-            gateway=self.request.gateway, stage=instance.stage, resource_version__version=instance.version
-        ).first()
+        release_history = ReleaseHistory.objects.filter(id=instance.publish_id).first()
+        if not is_offline:
+            # 获取部署阶段框架数据
+            events_framework = get_paas_deploy_phases_framework(
+                app_code=self.request.gateway.name,
+                module="default",
+                env=instance.stage.name,
+                user_credentials=user_credentials,
+            )
+            # 获取部署实例阶段数据
+            events_instance = get_paas_deploy_phases_instance(
+                app_code=self.request.gateway.name,
+                env=instance.stage.name,
+                module="default",
+                deploy_id=instance.deploy_id,
+                user_credentials=user_credentials,
+            )
+            # 获取部署事件流数据
+            events = get_pass_deploy_streams_history_events(
+                deploy_id=instance.deploy_id,
+                user_credentials=user_credentials,
+            )
+            if len(events) == 0:
+                # 如果paas event没有了，补充返回 result
+                deploy_result = get_paas_deployment_result(
+                    app_code=self.request.gateway.name,
+                    module="default",
+                    deploy_id=instance.deploy_id,
+                    user_credentials=user_credentials,
+                )
+        else:
+            deploy_result = get_paas_offline_result(
+                app_code=self.request.gateway.name,
+                module="default",
+                deploy_id=instance.deploy_id,
+                user_credentials=user_credentials,
+            )
 
         release_history_events = []
         release_history_events_map = {}
@@ -415,15 +489,14 @@ class BaseProgrammableDeployEventsRetrieveApi(generics.RetrieveAPIView):
             "events_framework": events_framework,
             "events_instance": events_instance,
             "events": events,
+            "deploy_result": deploy_result,
             "release_history_events": release_history_events,
             "release_history_events_map": release_history_events_map,
         }
 
     def build_response_data(self, instance):
         """构造响应数据"""
-        release_history = ReleaseHistory.objects.filter(
-            gateway=self.request.gateway, stage=instance.stage, resource_version__version=instance.version
-        ).first()
+        release_history = ReleaseHistory.objects.filter(pk=instance.publish_id).first()
         slz = self.get_serializer(
             release_history
             or ReleaseHistory(
@@ -489,14 +562,10 @@ class DeployIdEventsRetrieveApi(BaseProgrammableDeployEventsRetrieveApi):
 class HistoryIdEventsRetrieveApi(BaseProgrammableDeployEventsRetrieveApi):
     def get_object(self):
         """通过 history_id 获取部署历史"""
-        # 先获取发布历史记录
-        release_history = get_object_or_404(
-            ReleaseHistory.objects.filter(gateway=self.request.gateway), pk=self.kwargs["history_id"]
-        )
         # 再获取对应的部署记录
         return get_object_or_404(
             ProgrammableGatewayDeployHistory.objects.filter(gateway=self.request.gateway),
-            version=release_history.resource_version.version,
+            publish_id=self.kwargs["history_id"],
         )
 
     def retrieve(self, request, *args, **kwargs):

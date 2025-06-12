@@ -16,6 +16,7 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import os
 from pathlib import Path
 
 
@@ -37,3 +38,12 @@ def iter_files_recursive(path: Path):
             yield from iter_files_recursive(p)
         else:
             yield p
+
+
+def read_file_content(file_path: str) -> str:
+    """读取文件内容"""
+    content = ""
+    if os.path.isfile(file_path):
+        with open(file_path, encoding="utf-8") as f:
+            content = f.read()
+    return content

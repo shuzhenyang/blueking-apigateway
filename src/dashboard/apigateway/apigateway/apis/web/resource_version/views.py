@@ -24,16 +24,18 @@ from drf_yasg import openapi as parameters
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, serializers, status
 
+from apigateway.apps.openapi.models import OpenAPIFileResourceSchemaVersion
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.apps.plugin.models import PluginType
 from apigateway.apps.support.models import ResourceDoc, ResourceDocVersion
 from apigateway.biz.backend import BackendHandler
 from apigateway.biz.plugin_binding import PluginBindingHandler
+from apigateway.biz.resource.importer.openapi import OpenAPIExportManager
 from apigateway.biz.resource_version import ResourceDocVersionHandler, ResourceVersionHandler
 from apigateway.biz.resource_version_diff import ResourceDifferHandler
 from apigateway.biz.sdk.gateway_sdk import GatewaySDKHandler
 from apigateway.core.models import Release, Resource, ResourceVersion
-from apigateway.utils.responses import OKJsonResponse
+from apigateway.utils.responses import DownloadableResponse, OKJsonResponse
 from apigateway.utils.version import get_nex_version_with_type, get_next_version
 
 from .serializers import (
@@ -42,6 +44,7 @@ from .serializers import (
     ResourceVersionCreateInputSLZ,
     ResourceVersionDiffOutputSLZ,
     ResourceVersionDiffQueryInputSLZ,
+    ResourceVersionExportInputSLZ,
     ResourceVersionListInputSLZ,
     ResourceVersionListOutputSLZ,
     ResourceVersionRetrieveOutputSLZ,
@@ -113,9 +116,16 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
                 resource_version=instance,
                 data=ResourceDocVersion.objects.make_version(request.gateway.id),
             )
-
-        # 创建resource_schema版本
-
+        exporter = OpenAPIExportManager(
+            api_version=instance.version,
+            title="the openapi of %s" % request.gateway.name,
+        )
+        # 创建openapi file版本
+        OpenAPIFileResourceSchemaVersion.objects.create(
+            gateway=request.gateway,
+            resource_version=instance,
+            schema=exporter.export_resource_version_openapi(instance),
+        )
         return OKJsonResponse(status=status.HTTP_201_CREATED)
 
 
@@ -152,11 +162,17 @@ class ResourceVersionRetrieveApi(generics.RetrieveAPIView):
         # 查询网关后端服务
         resource_backends = BackendHandler.get_id_to_instance(request.gateway.id)
 
+        # 查询哪些资源有配置对应的 schema
+        resource_id_with_schema_dict = ResourceVersionHandler.get_resource_ids_has_openapi_schema_by_resource_version(
+            instance.id
+        )
+
         context = {
             "resource_doc_updated_time": resource_docs_updated_time,
             "resource_backends": resource_backends,
             "is_schema_v2": instance.is_schema_v2,
             "plugin_priority": {obj["code"]: obj["priority"] for obj in PluginType.objects.values("code", "priority")},
+            "resource_id_with_schema_dict": resource_id_with_schema_dict,
         }
 
         # 如果传入了stage,返回对应stage的backend_config以及合并资源插件
@@ -314,3 +330,30 @@ class NextProgramGatewayResourceVersionRetrieveApi(generics.RetrieveAPIView):
         return OKJsonResponse(
             data={"version": "1.0.0"},
         )
+
+
+class ResourceVersionExportApi(generics.CreateAPIView):
+    lookup_field = "id"
+
+    def get_queryset(self):
+        return ResourceVersion.objects.filter(gateway=self.request.gateway)
+
+    @swagger_auto_schema(
+        operation_description="导出资源版本",
+        request_body=ResourceVersionExportInputSLZ,
+        responses={status.HTTP_200_OK: ""},
+        tags=["WebAPI.ResourceVersion"],
+    )
+    def post(self, request, *args, **kwargs):
+        instance = self.get_object()
+        slz = ResourceVersionExportInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+        file_type = slz.validated_data["file_type"]
+        exporter = OpenAPIExportManager(
+            api_version=instance.version,
+            title=f"the openapi of {request.gateway.name}",
+        )
+        content = exporter.export_resource_version_openapi(instance, file_type=file_type)
+        # 导出的文件名，需满足规范：bk_产品名_功能名_文件名.后缀
+        export_filename = f"bk_apigw_resources_{self.request.gateway.name}_{instance.version}.{file_type}"
+        return DownloadableResponse(content, filename=export_filename)

@@ -115,6 +115,7 @@ class TestResourceVersionRetrieveApi:
             "schema_version": fake_resource_version_v2.schema_version,
             "resources": [
                 {
+                    "id": fake_resource_version_v2.data[0]["id"],
                     "name": fake_resource_version_v2.data[0]["name"],
                     "method": fake_resource_version_v2.data[0]["method"],
                     "path": fake_resource_version_v2.data[0]["path"],
@@ -135,6 +136,7 @@ class TestResourceVersionRetrieveApi:
                     },
                     "contexts": fake_resource_version_v2.data[0]["contexts"],
                     "plugins": [],
+                    "has_openapi_schema": False,
                 }
             ],
             "created_time": fake_resource_version_v2.created_time,

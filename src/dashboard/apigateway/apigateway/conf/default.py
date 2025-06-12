@@ -40,7 +40,6 @@ pymysql.version_info = 1, 4, 6, "final", 0
 # 目前 Django 仅是对 5.7 做了软性的不兼容改动，在没有使用 8.0 特异的功能时，对 5.7 版本的使用无影响
 DatabaseFeatures.minimum_database_version = PatchFeatures.minimum_database_version
 
-
 # Patch the SSL module for compatibility with legacy CA credentials.
 # https://stackoverflow.com/questions/72479812/how-to-change-tweak-python-3-10-default-ssl-settings-for-requests-sslv3-alert
 urllib3.util.ssl_.DEFAULT_CIPHERS = "ALL:@SECLEVEL=1"
@@ -109,6 +108,7 @@ INSTALLED_APPS = [
     "apigateway.apps.docs",
     "apigateway.apps.esb.bkcore",
     "apigateway.apps.api_debug",
+    "apigateway.apps.mcp_server",
     "apigw_manager.apigw",
     "apigateway.controller",
     "apigateway.healthz",
@@ -168,7 +168,6 @@ DATABASE_ROUTERS = [
 
 # django 3.2 add
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
-
 
 # CSRF Config
 CSRF_TRUSTED_ORIGINS = env.list("DASHBOARD_CSRF_TRUSTED_ORIGINS", default=[])
@@ -320,7 +319,6 @@ if BK_ESB_DATABASE_TLS_ENABLED:
 
     DATABASES["bkcore"]["OPTIONS"]["ssl"] = bkcore_ssl_options
 
-
 # ==============================================================================
 # redis 配置
 # ==============================================================================
@@ -336,7 +334,6 @@ REDIS_TLS_CERT_CA_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_CA_FILE", "")
 REDIS_TLS_CERT_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_FILE", "")
 REDIS_TLS_CERT_KEY_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_KEY_FILE", "")
 REDIS_TLS_CHECK_HOSTNAME = env.bool("BK_APIGW_REDIS_TLS_CHECK_HOSTNAME", True)
-
 
 # redis lock 配置
 REDIS_PUBLISH_LOCK_TIMEOUT = env.int("BK_APIGW_PUBLISH_LOCK_TIMEOUT", 5)
@@ -416,7 +413,6 @@ else:
         CELERY_BROKER_URL = broker_url
         CELERY_RESULT_BACKEND = broker_url
 
-
 if env.bool("FEATURE_FLAG_ENABLE_RUN_DATA_METRICS", True):
     CELERY_BEAT_SCHEDULE.update(
         {
@@ -454,7 +450,6 @@ else:
     # the value with project's base directory
     logging_directory = Path(BASE_DIR) / Path(LOG_DIR)
     logging_directory.mkdir(exist_ok=True)
-
 
 # 是否总是打印日志到控制台，默认关闭
 LOGGING_ALWAYS_CONSOLE = env.bool("LOGGING_ALWAYS_CONSOLE", False)
@@ -510,6 +505,13 @@ BK_PAAS3_API_URL = BK_API_INNER_URL_TMPL.format(api_name="bkpaas3")
 BK_APIGATEWAY_API_URL = env.str("BK_APIGATEWAY_API_URL", "")
 
 # ==============================================================================
+# AI Open API 配置
+# ==============================================================================
+AI_OPEN_API_BASE_URL = env.str("AI_OPEN_API_BASE_URL", "")
+AI_MODEL = env.str("AI_MODEL", "")
+AI_API_KEY = env.str("AI_API_KEY", "")
+
+# ==============================================================================
 # 网关全局配置
 # ==============================================================================
 DASHBOARD_URL = env.str("DASHBOARD_URL", "").rstrip("/")
@@ -533,6 +535,9 @@ CHECK_RESERVED_GATEWAY_NAME = True
 RESERVED_GATEWAY_NAME_PREFIXES = ["bk-", "bp-"]
 # 官方网关命名前缀，仅做标记
 OFFICIAL_GATEWAY_NAME_PREFIXES = ["bk-"]
+# 网关名校验白名单
+IGNORE_GATEWAY_NAME_CHECK_WHITELIST = env.list("IGNORE_GATEWAY_NAME_CHECK_WHITELIST", default=["bkpaas3", "paasv3"])
+
 # 允许管理端更新网关认证信息
 DEFAULT_ALLOW_UPDATE_API_AUTH = True
 
@@ -557,6 +562,12 @@ BK_LOGIN_TICKET_KEY_TO_COOKIE_NAME = {
     "bk_token": "bk_token",
 }
 
+# access token 文档链接地址
+BK_ACCESS_TOKEN_DOC_URL = env.str(
+    "BK_ACCESS_TOKEN_DOC_URL",
+    "https://bk.tencent.com/docs/markdown/ZH/APIGateway/1.14/UserGuide/Explanation/access-token.md",
+)
+
 BK_API_DEFAULT_STAGE_MAPPINGS = env.dict("BK_API_DEFAULT_STAGE_MAPPINGS", default={})
 
 FAKE_SEND_NOTICE = env.bool("FAKE_SEND_NOTICE", default=False)
@@ -572,14 +583,19 @@ USE_GATEWAY_BK_ESB_MANAGE_COMPONENT_PERMISSIONS = env.bool("USE_GATEWAY_BK_ESB_M
 BK_PAAS3_URL = env.str("BK_PAAS3_URL", "")
 PAAS_RENEW_API_PERMISSION_URL = f"{BK_PAAS3_URL}/developer-center/apps/{{bk_app_code}}/cloudapi"
 
-
 # Requests pool config
 REQUESTS_POOL_CONNECTIONS = env.int("REQUESTS_POOL_CONNECTIONS", default=20)
 REQUESTS_POOL_MAXSIZE = env.int("REQUESTS_POOL_MAXSIZE", default=20)
 
 # 可编程网关开发文档链接地址
-PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL = env.str("PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL", "")
-PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL = env.str("PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL", "")
+PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL = env.str(
+    "PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL",
+    "https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/python.md",
+)
+PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL = env.str(
+    "PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL",
+    "https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/golang.md",
+)
 
 # ==============================================================================
 # bkpaas-auth 配置
@@ -653,6 +669,10 @@ BK_NOTICE = {
 # ==============================================================================
 VERSION_LOG_DIR = os.path.join(BASE_DIR, "data/version_log")
 
+# ==============================================================================
+# 网关响应错误码说明文档
+# ==============================================================================
+API_RESPONSE_ERR_CODE_DOC_DIR = os.path.join(BASE_DIR, "data/knowledge_doc/api_response")
 
 # ==============================================================================
 # 访问日志
@@ -699,7 +719,6 @@ OTEL_SERVICE_NAME = env.str("DASHBOARD_OTEL_SERVICE_NAME", default="bk-apigatewa
 OTEL_INSTRUMENT_DB_API = env.bool("DASHBOARD_OTEL_INSTRUMENT_DB_API", default=False)
 OTEL_INSTRUMENT_CELERY = env.bool("DASHBOARD_OTEL_INSTRUMENT_CELERY", default=False)
 OTEL_INSTRUMENT_REDIS = env.bool("DASHBOARD_OTEL_INSTRUMENT_REDIS", default=False)
-
 
 # 网关部署集群所属业务 ID，影响从蓝鲸监控拉取 Prometheus 数据等功能；开源环境默认部署在蓝鲸业务 (业务 ID=2)
 BCS_CLUSTER_BK_BIZ_ID = env.str("BCS_CLUSTER_BK_BIZ_ID", "2")
@@ -793,7 +812,6 @@ PLUGIN_METADATA_CONFIG = {
 # 目前这个插件有缺陷，暂时支持关闭; https://github.com/apache/apisix/issues/11868
 GATEWAY_CONCURRENCY_LIMIT_ENABLED = env.bool("GATEWAY_CONCURRENCY_LIMIT_ENABLED", True)
 
-
 BK_GATEWAY_ETCD_NAMESPACE_PREFIX = env.str("BK_GATEWAY_ETCD_NAMESPACE_PREFIX", default="/bk-gateway-apigw")
 
 # ==============================================================================
@@ -826,6 +844,8 @@ DEFAULT_FEATURE_FLAG = {
     # ----------------------------------------------------------------------------
     # 是否展示蓝鲸通知中心组件
     "ENABLE_BK_NOTICE": ENABLE_BK_NOTICE,
+    # 是否开启网关AI相关功能
+    "ENABLE_AI_COMPLETION": AI_OPEN_API_BASE_URL != "",
 }
 
 # 用户功能开关，将与 DEFAULT_FEATURE_FLAG 合并
@@ -857,7 +877,6 @@ ENV_VARS_FOR_FRONTEND = {
     "BK_DASHBOARD_URL": DASHBOARD_URL,
     "BK_DASHBOARD_CSRF_COOKIE_NAME": CSRF_COOKIE_NAME,
 }
-
 
 # ==============================================================================
 # 网关资源数量限制

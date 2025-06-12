@@ -16,17 +16,20 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+from datetime import datetime
 
 from django.http import Http404
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apigateway.apps.programmable_gateway.models import ProgrammableGatewayDeployHistory
 from apigateway.common.fields import CurrentGatewayDefault, TimestampField
 from apigateway.common.i18n.field import SerializerTranslatedField
 from apigateway.core.constants import (
     PublishEventEnum,
     PublishEventNameTypeEnum,
     PublishEventStatusEnum,
+    PublishSourceEnum,
     ReleaseHistoryStatusEnum,
 )
 from apigateway.core.models import PublishEvent, ReleaseHistory, ResourceVersion, Stage
@@ -163,6 +166,32 @@ class ReleaseHistoryEventRetrieveOutputSLZ(ReleaseHistoryOutputSLZ):
         return events_template
 
 
+class DeployHistoryOutputSLZ(serializers.Serializer):
+    deploy_id = serializers.CharField(read_only=True, help_text="paas部署id")
+    history_id = serializers.IntegerField(source="publish_id", read_only=True, help_text="网关发布历史id")
+    commit_id = serializers.CharField(read_only=True, help_text="commit_id")
+    branch = serializers.CharField(read_only=True, help_text="分支")
+    source = serializers.CharField(read_only=True, help_text="发布来源")
+    stage = ReleaseStageSLZ()
+    status = serializers.SerializerMethodField(read_only=True, help_text="paas部署状态")
+    created_time = serializers.DateTimeField(read_only=True, help_text="paas部署创建时间")
+    version = serializers.CharField(read_only=True, help_text="发布版本")
+    created_by = serializers.CharField(read_only=True, help_text="发布人")
+
+    def get_status(self, obj: ProgrammableGatewayDeployHistory) -> str:
+        event = self.context["release_history_events_map"].get(obj.publish_id, None)
+        if event:
+            return event.get_release_history_status()
+
+        # 还在paas那边还没到网关发布阶段
+        now = datetime.now().timestamp()
+        # todo: 这里最好是返回paas状态
+        if now - obj.created_time.timestamp() > 300:
+            return ReleaseHistoryStatusEnum.FAILURE.value
+
+        return ReleaseHistoryStatusEnum.DOING.value
+
+
 class ProgrammableDeployCreateInputSLZ(serializers.Serializer):
     stage_id = serializers.IntegerField(required=True, help_text="环境id")
     branch = serializers.CharField(help_text="部署分支")
@@ -171,11 +200,17 @@ class ProgrammableDeployCreateInputSLZ(serializers.Serializer):
     version = serializers.CharField(required=True, help_text="发布版本号")
     comment = serializers.CharField(help_text="版本日志")
 
-    def validate_version(self, value):
-        if ReleaseHistory.objects.filter(resource_version__version=value).exists():
+    def validate(self, data):
+        gateway = self.context["gateway"]
+        # 判断该版本是否已经发布过
+        if ProgrammableGatewayDeployHistory.objects.filter(
+            gateway=gateway,
+            stage_id=data["stage_id"],
+            source=PublishSourceEnum.VERSION_PUBLISH.value,
+            version=data["version"],
+        ).exists():
             raise serializers.ValidationError(_("编程网关每个版本只允许发布一次"))
-
-        return value
+        return data
 
 
 class ProgrammableDeployEventGetOutputSLZ(ReleaseHistoryEventRetrieveOutputSLZ):
@@ -184,6 +219,7 @@ class ProgrammableDeployEventGetOutputSLZ(ReleaseHistoryEventRetrieveOutputSLZ):
     def get_paas_deploy_info(self, obj):
         return {
             "events": self.context["events"],
+            "deploy_result": self.context["deploy_result"],
             "events_instance": self.context["events_instance"],
             "events_framework": self.context["events_framework"],
         }

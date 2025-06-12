@@ -1,68 +1,65 @@
 <template>
   <div class="access-log-wrapper page-wrapper-padding">
+    <div class="ag-top-header">
+      <bk-form class="search-form" form-type="vertical">
+        <bk-form-item :label="t('起止时间')" class="ag-form-item-datepicker">
+          <bk-date-picker
+            :key="dateKey"
+            ref="datePickerRef"
+            v-model="dateTimeRange"
+            style="width: 312px;"
+            :clearable="false"
+            :placeholder="t('选择日期时间范围')"
+            :shortcut-close="true"
+            :shortcut-selected-index="shortcutSelectedIndex"
+            :shortcuts="AccessLogStore.datepickerShortcuts"
+            :use-shortcut-text="true"
+            type="datetimerange"
+            @change="handlePickerChange"
+            @shortcut-change="handleShortcutChange"
+            @pick-success="handlePickerConfirm"
+          />
+        </bk-form-item>
+        <bk-form-item :label="t('环境')">
+          <bk-select
+            v-model="searchParams.stage_id"
+            :clearable="false"
+            searchable
+            style="width: 150px;"
+            @change="handleStageChange"
+          >
+            <bk-option v-for="option in stageList" :id="option.id" :key="option.id" :name="option.name">
+            </bk-option>
+          </bk-select>
+        </bk-form-item>
+        <bk-form-item :label="t('资源')">
+          <ResourceSearcher
+            v-model="searchParams.resource_id"
+            :list="resourceList"
+            :need-prefix="false"
+            :placeholder="t('请输入资源名称或资源URL链接')"
+            style="min-width: 296.5px;"
+            @change="handleResourceChange"
+          />
+        </bk-form-item>
+        <bk-form-item :label="t('查询语句')" class="ag-form-item-inline">
+          <SearchInput
+            v-model:mode-value="keyword"
+            style="width: 466px;"
+            @choose="handleChoose"
+            @search="handleSearch"
+          />
+        </bk-form-item>
+        <bk-form-item label=" ">
+          <div style="display: flex;justify-content: center;align-items: center;">
+            <bk-button theme="primary" @click="handleSearch(keyword)">{{ t('查询') }}</bk-button>
+            <bk-button class="ml10" @click="handleClearFilterKey">{{ t('重置') }}</bk-button>
+          </div>
+        </bk-form-item>
+      </bk-form>
+    </div>
     <bk-loading :loading="!isPageLoading && isDataLoading" :z-index="100">
       <bk-collapse v-model="activeIndex">
-        <bk-collapse-panel :name="1" class="collapse-panel mb16">
-          <template #header>
-            <div class="collapse-panel-header">
-              <angle-up-fill :class="['panel-title-icon', activeIndex?.includes(1) ? '' : 'packUp']" />
-              <span class="panel-title">{{ t('查询条件') }}</span>
-            </div>
-          </template>
-          <template #content>
-            <div class="ag-top-header">
-              <bk-form class="search-form" form-type="vertical">
-                <bk-form-item :label="t('起止时间')" class="ag-form-item-datepicker">
-                  <bk-date-picker
-                    ref="datePickerRef"
-                    type="datetimerange"
-                    style="width: 310px"
-                    v-model="dateTimeRange"
-                    :key="dateKey"
-                    :placeholder="t('选择日期时间范围')"
-                    :shortcuts="AccessLogStore.datepickerShortcuts"
-                    :shortcut-close="true"
-                    :use-shortcut-text="true"
-                    :clearable="false"
-                    :shortcut-selected-index="shortcutSelectedIndex"
-                    @shortcut-change="handleShortcutChange"
-                    @change="handlePickerChange"
-                    @pick-success="handlePickerConfirm"
-                  />
-                </bk-form-item>
-                <bk-form-item :label="t('环境')">
-                  <bk-select
-                    style="width: 200px" v-model="searchParams.stage_id" :clearable="false" searchable
-                    @change="handleStageChange">
-                    <bk-option v-for="option in stageList" :key="option.id" :id="option.id" :name="option.name">
-                    </bk-option>
-                  </bk-select>
-                </bk-form-item>
-                <bk-form-item :label="t('资源')">
-                  <ResourceSearcher
-                    v-model="searchParams.resource_id"
-                    :list="resourceList"
-                    :need-prefix="false"
-                    style="width: 250px; margin-right: 8px;"
-                    @change="handleResourceChange"
-                  />
-                </bk-form-item>
-                <bk-form-item :label="t('查询语句')" class="ag-form-item-inline">
-                  <SearchInput
-                    v-model:mode-value="keyword"
-                    @search="handleSearch"
-                    @choose="handleChoose"
-                    class="top-search-input"
-                  />
-                </bk-form-item>
-                <bk-form-item label="" style="margin-left: 0">
-                  <bk-button theme="primary" @click="handleSearch(keyword)">{{ t('查询') }}</bk-button>
-                  <bk-button class="ml10" @click="handleClearFilterKey">{{ t('重置') }}</bk-button>
-                </bk-form-item>
-              </bk-form>
-            </div>
-          </template>
-        </bk-collapse-panel>
         <div class="search-term" v-show="!!searchConditions?.length">
           <funnel class="icon" />
           <span class="title">{{ t('检索项：') }}</span>
@@ -187,14 +184,17 @@
 
                       </dd>
                     </div>
-                    <bk-button
-                      class="share-btn"
-                      theme="primary"
-                      outline
-                      @click="handleClickCopyLink(row)"
-                      :loading="isShareLoading">
-                      {{ t('复制分享链接') }}
-                    </bk-button>
+                    <div class="share-btn">
+                      <AiBluekingButton v-if="user.isAIEnabled" @click="() => handleAIChatClick(row)" />
+                      <bk-button
+                        :loading="isShareLoading"
+                        outline
+                        theme="primary"
+                        @click="handleClickCopyLink(row)"
+                      >
+                        {{ t('复制分享链接') }}
+                      </bk-button>
+                    </div>
                   </dl>
                 </template>
                 <template #empty>
@@ -208,18 +208,30 @@
         </bk-collapse-panel>
       </bk-collapse>
     </bk-loading>
+    <AiChatSlider
+      v-if="user.isAIEnabled"
+      v-model="isAISliderShow"
+      :message="aiRequestMessage"
+      :title="t('日志详情分析')"
+    />
   </div>
 </template>
 
 <script lang="ts" setup>
 import dayjs from 'dayjs';
-import i18n from '@/language/i18n';
 import SearchInput from './components/search-input.vue';
 import TableEmpty from '@/components/table-empty.vue';
 import echarts from 'echarts';
 import 'echarts/lib/chart/bar';
 import 'echarts/lib/component/tooltip';
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, markRaw } from 'vue';
+import {
+  computed,
+  markRaw,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+} from 'vue';
 import {
   merge,
   trim,
@@ -227,37 +239,46 @@ import {
 } from 'lodash';
 import { copy } from '@/common/util';
 import { SearchParamsInterface } from './common/type';
-import { useCommon, useAccessLog } from '@/store';
+import {
+  useAccessLog,
+  useCommon,
+  useUser,
+} from '@/store';
 import { userChartIntervalOption } from '@/hooks';
 import {
-  fetchApigwAccessLogList,
-  fetchApigwAccessLogChart,
-  fetchApigwStages,
-  fetchApigwAccessLogShareLink,
-  getApigwResources,
   exportLogs,
+  fetchApigwAccessLogChart,
+  fetchApigwAccessLogList,
+  fetchApigwAccessLogShareLink,
+  fetchApigwStages,
+  getApigwResources,
 } from '@/http';
 import {
   AngleUpFill,
   CopyShape,
   EnlargeLine,
-  NarrowLine,
-  InfoLine,
   Funnel,
+  InfoLine,
+  NarrowLine,
 } from 'bkui-vue/lib/icon';
 import { Message } from 'bkui-vue';
 import { useStorage } from '@vueuse/core';
 import AgIcon from '@/components/ag-icon.vue';
 import ResourceSearcher from '@/views/operate-data/dashboard/components/resource-searcher.vue';
+import AiBluekingButton from '@/components/ai-blueking-button.vue';
+import AiChatSlider from '@/components/ai-chat-slider.vue';
+import { useI18n } from 'vue-i18n';
 
-const { t } = i18n.global;
+const { t } = useI18n();
 const { getChartIntervalOption } = userChartIntervalOption();
 const commonStore = useCommon();
 const AccessLogStore = useAccessLog();
+const user = useUser();
 // const globalProperties = useGetGlobalProperties();
 // const { GLOBAL_CONFIG } = globalProperties;
 // 从localStorage 提取搜索历史
 const queryHistory = useStorage('access-log-query-history', []);
+
 const activeIndex = ref<number[]>([1, 2, 3]);
 const keyword = ref('');
 const chartInstance = ref(null);
@@ -327,6 +348,14 @@ const table = ref({
 const includeObj = ref<string[]>([]);
 const excludeObj = ref<string[]>([]);
 
+// const searchUsage = ref({
+//   showed: false,
+// });
+const chartData: Record<string, any> = ref({});
+const stageList = ref([]);
+const isAISliderShow = ref(false);
+const aiRequestMessage = ref('');
+
 const searchConditions = computed(() => {
   const res: string[] = [];
   includeObj.value?.forEach((item: string) => {
@@ -344,19 +373,9 @@ const pageCount = computed(() => {
   return pagination.value.count;
 });
 
-// const searchUsage = ref({
-//   showed: false,
-// });
-const chartData: Record<string, any> = ref({});
-const stageList = ref([]);
-
 const isShowChart = computed(() => {
   return chartData.value?.series?.length > 0;
 });
-
-// const localLanguage = computed(() => {
-//   return 'zh-cn';
-// });
 
 const formatterValue = (params: Record<string, any>) => {
   return `${params.value.toLocaleString()}次`;
@@ -565,14 +584,10 @@ const getApigwStages = async () => {
     no_page: true,
     order_by: 'name',
   };
-  try {
-    const res = await fetchApigwStages(apigwId.value, pageParams);
-    stageList.value = res || [];
-    if (stageList.value.length) {
-      searchParams.value.stage_id = stageList.value[0].id;
-    }
-  } catch (e) {
-    console.error(e);
+  const res = await fetchApigwStages(apigwId.value, pageParams);
+  stageList.value = res || [];
+  if (stageList.value.length) {
+    searchParams.value.stage_id = stageList.value[0].id;
   }
 };
 
@@ -741,7 +756,8 @@ const handleDownload = async (e: Event) => {
         theme: 'success',
       });
     }
-  } catch ({ error }: any) {
+  } catch (e) {
+    const error = e as Error;
     Message({
       message: error.message || t('导出失败'),
       theme: 'error',
@@ -774,15 +790,8 @@ const handlePickerChange = () => {
   });
 };
 
-// 处理用户自行输入日期，点击确认后的情况。v-model 不会自动更新，要从 picker 内部拿输入的日期。
 const handlePickerConfirm = () => {
-  const internalValue = datePickerRef.value?.internalValue;
-  if (internalValue) {
-    dateTimeRange.value = internalValue;
-    handlePickerChange();
-  } else {
-    Message({ theme: 'warning', message: t('输入的时间错误'), delay: 2000, dismissable: false });
-  }
+  handlePickerChange();
 };
 
 const handleStageChange = (value: number) => {
@@ -894,6 +903,19 @@ const initChart = async () => {
   });
 };
 
+const handleAIChatClick = (row: any) => {
+  const res: Record<string, any> = {};
+  table.value.fields.forEach(({ label, field }) => {
+    res[`${label}(${field})`] = row[field] || '--';
+  });
+  try {
+    aiRequestMessage.value = JSON.stringify(res, null, 2);
+    isAISliderShow.value = true;
+  } catch {
+    aiRequestMessage.value = '';
+  }
+};
+
 onMounted(() => {
   initData();
   initChart();
@@ -907,7 +929,7 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .access-log-wrapper {
   min-height: calc(100vh - 208px);
-  padding-bottom: 24px;
+  padding: 20px 24px;
 
   .collapse-panel {
     background-color: #fff;
@@ -955,7 +977,7 @@ onBeforeUnmount(() => {
   }
 
   .search-term {
-    margin-bottom: 16px;
+    margin-bottom: 24px;
     display: flex;
     align-items: center;
     .icon {
@@ -986,21 +1008,19 @@ onBeforeUnmount(() => {
   }
 
   .ag-top-header {
-    padding-left: 24px;
-    padding-right: 4px;
+    margin-bottom: 24px;
 
     :deep(.search-form) {
-      .bk-form-item {
-        display: inline-block;
-        margin-bottom: 16px;
-        margin-left: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0 16px;
 
+      .bk-form-item {
         &:first-child {
           margin-left: 0;
         }
 
         .bk-form-label {
-          line-height: 32px;
           padding: 0 15px 0 0;
 
           span {
@@ -1015,9 +1035,8 @@ onBeforeUnmount(() => {
       }
 
       .ag-form-item-inline {
-        margin-top: 0px !important;
-        margin-left: 0px !important;
-        margin-right: 8px;
+        margin-top: 0 !important;
+        margin-left: 0 !important;
 
         .bk-form-content {
           display: flex !important;
@@ -1027,10 +1046,6 @@ onBeforeUnmount(() => {
         .suffix {
           margin-left: 4px;
         }
-      }
-
-      .top-search-input {
-        width: 400px;
       }
     }
   }
@@ -1127,6 +1142,9 @@ onBeforeUnmount(() => {
         position: absolute;
         right: 28px;
         top: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
     }
   }
@@ -1204,16 +1222,6 @@ onBeforeUnmount(() => {
 
     .link {
       color: #3a84ff;
-    }
-  }
-}
-
-@media (max-width: 1753px) {
-  :deep(.search-form) {
-
-    .ag-form-item-inline {
-      margin-left: 0px !important;
-      margin-top: 10px !important;
     }
   }
 }

@@ -2,13 +2,23 @@
   <div class="page-wrapper-padding app-content">
     <div class="ag-top-header">
       <bk-form class="search-form" form-type="vertical">
+        <bk-form-item :label="t('日期选择器')">
+          <date-picker
+            v-model="dateTime"
+            :valid-date-range="['now-6M', 'now/d']"
+            format="YYYY-MM-DD HH:mm:ss"
+            style="min-width: 154px;background: #fff;flex-shrink: 0;"
+            :common-use-list="AccessLogStore.commonUseList"
+            @update:model-value="handleValueChange"
+          />
+        </bk-form-item>
         <bk-form-item :label="t('环境')">
           <bk-select
-            style="width: 316px;"
             v-model="searchParams.stage_id"
             :clearable="false"
             filterable
             :input-search="false"
+            style="width: 150px;"
             @change="handleSearchChange()">
             <bk-option
               v-for="option in stageList"
@@ -18,9 +28,19 @@
             </bk-option>
           </bk-select>
         </bk-form-item>
-        <bk-form-item :label="t('调用方')">
+        <bk-form-item :label="t('资源')">
+          <ResourceSearcher
+            v-model="searchParams.resource_id"
+            :list="resourceList"
+            :need-prefix="false"
+            :placeholder="t('请输入资源名称或资源URL链接')"
+            style="min-width: 296.5px;"
+            @change="handleSearchChange()"
+          />
+        </bk-form-item>
+        <bk-form-item :label="t('蓝鲸应用')">
           <bk-select
-            style="width: 316px;"
+            style="min-width: 296.5px;"
             v-model="searchParams.bk_app_code"
             @change="handleSearchChange()">
             <bk-option
@@ -30,23 +50,6 @@
               :name="option">
             </bk-option>
           </bk-select>
-        </bk-form-item>
-        <bk-form-item :label="t('资源')">
-          <ResourceSearcher
-            v-model="searchParams.resource_id"
-            :list="resourceList"
-            :need-prefix="false"
-            style="width: 316px;"
-            @change="handleSearchChange()"
-          />
-        </bk-form-item>
-        <bk-form-item :label="t('日期选择器')">
-          <date-picker
-            class="date-choose"
-            v-model="dateTime"
-            @update:model-value="handleValueChange"
-            :valid-date-range="['now-6M', 'now/d']"
-            format="YYYY-MM-DD HH:mm:ss" />
         </bk-form-item>
       </bk-form>
     </div>
@@ -110,15 +113,28 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, watch } from 'vue';
+import {
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 import dayjs from 'dayjs';
 import { Message } from 'bkui-vue';
 import { useI18n } from 'vue-i18n';
-import { useCommon } from '@/store';
+import {
+  useAccessLog,
+  useCommon,
+} from '@/store';
 import DatePicker from '@blueking/date-picker';
 import '@blueking/date-picker/vue3/vue3.css';
 import ResourceSearcher from '@/views/operate-data/dashboard/components/resource-searcher.vue';
-import { getApigwStages, getApigwResources, getReportSummary, exportReportSummary, getCallers } from '@/http';
+import {
+  exportReportSummary,
+  getApigwResources,
+  getApigwStages,
+  getCallers,
+  getReportSummary,
+} from '@/http';
 import Chart from './components/chart.vue';
 import { ChartDataLoading } from './type';
 
@@ -129,6 +145,7 @@ type InfoTypeItem = {
 
 const { t } = useI18n();
 const common = useCommon();
+const AccessLogStore = useAccessLog();
 
 const dateTime = ref(['now-30d', 'now']);
 const formatTime = ref<string[]>([dayjs().subtract(30, 'day')
@@ -155,6 +172,17 @@ const metricsList = ref<string[]>([
   'requests_failed_total', // 请求失败总数
 ]);
 
+watch(
+  () => [
+    formatTime.value,
+    searchParams.stage_id,
+  ],
+  () => {
+    setSearchTimeRange();
+    getCallersData();
+  },
+);
+
 const getStages = async () => {
   const { apigwId } = common;
   const pageParams = {
@@ -166,7 +194,9 @@ const getStages = async () => {
     const res = await getApigwStages(apigwId, pageParams);
 
     stageList.value = res;
-    searchParams.stage_id = stageList.value[0]?.id;
+    if (!searchParams.stage_id) {
+      searchParams.stage_id = stageList.value[0]?.id;
+    }
   } catch (e) {
     console.log(e);
   }
@@ -330,14 +360,6 @@ const init = async () => {
 };
 
 init();
-
-watch(
-  () => [formatTime.value, searchParams.stage_id],
-  () => {
-    setSearchTimeRange();
-    getCallersData();
-  },
-);
 </script>
 
 <style lang="scss" scoped>
@@ -425,11 +447,7 @@ watch(
 .search-form {
   width: 100%;
   display: flex;
-  :deep(.bk-form-item) {
-    margin-right: 16px;
-  }
-  .date-choose {
-    background: #FFFFFF;
-  }
+  flex-wrap: wrap;
+  gap: 0 16px;
 }
 </style>

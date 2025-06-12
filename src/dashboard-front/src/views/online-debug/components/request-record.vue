@@ -48,7 +48,7 @@
             @row-click="handleRowClick"
           >
             <bk-table-column :label="t('资源名称')" prop="resource_name"></bk-table-column>
-            <bk-table-column :label="t('响应状态码')" prop="status_code">
+            <bk-table-column :label="t('响应状态码')" prop="status_code" width="120">
               <template #default="{ data }">
                 <span
                   :class="['dot', String(data?.response?.data?.status_code)?.startsWith('2') ? 'success' : 'failure']">
@@ -56,13 +56,13 @@
                 {{ data?.response?.data?.status_code }}
               </template>
             </bk-table-column>
-            <bk-table-column :label="t('耗时')" prop="proxy_time">
+            <bk-table-column :label="t('耗时')" prop="proxy_time" width="120">
               <template #default="{ data }">
                 {{ data?.response?.data?.proxy_time }} ms
               </template>
             </bk-table-column>
             <bk-table-column :label="t('调用时间')" prop="created_time"></bk-table-column>
-            <bk-table-column :label="t('操作')">
+            <bk-table-column :label="t('操作')" width="120">
               <template #default="{ row }">
                 <bk-button theme="primary" text @click="(e: any) => handleShowDetails(e, row)">
                   {{ t('请求详情') }}
@@ -170,15 +170,25 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, shallowRef, reactive, nextTick } from 'vue';
+import {
+  nextTick,
+  reactive,
+  ref,
+  shallowRef,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useAccessLog, useCommon } from '@/store';
+import {
+  useAccessLog,
+  useCommon,
+} from '@/store';
 // @ts-ignore
 import TableEmpty from '@/components/table-empty.vue';
 // @ts-ignore
 import editorMonaco from '@/components/ag-editor.vue';
-import { getTestHistories, getTestHistoriesDetails } from '@/http';
-import { Message } from 'bkui-vue';
+import {
+  getTestHistories,
+  getTestHistoriesDetails,
+} from '@/http';
 import { CopyShape } from 'bkui-vue/lib/icon';
 import { copy } from '@/common/util';
 
@@ -315,13 +325,7 @@ const setSearchTimeRange = () => {
 };
 
 const handleTimeChange = () => {
-  const internalValue = topDatePicker.value?.internalValue;
-  if (internalValue) {
-    dateTimeRange.value = internalValue;
-    setSearchTimeRange();
-  } else {
-    Message({ theme: 'warning', message: t('输入的时间错误'), delay: 2000, dismissable: false });
-  }
+  setSearchTimeRange();
 };
 
 const handleTimeClear = () => {
