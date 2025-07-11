@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,15 +17,16 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import json
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List
 
 from openapi_spec_validator.validation.exceptions import UnresolvableParameterError
 from openapi_spec_validator.versions import OPENAPIV2, get_spec_version
 from openapi_spec_validator.versions.exceptions import OpenAPIVersionNotFound
 from prance import ResolvingParser
 
+from apigateway.apps.support.constants import OpenAPIFormatEnum
 from apigateway.biz.backend import BackendHandler
-from apigateway.biz.constants import OpenAPIFormatEnum
+from apigateway.biz.resource import ResourceLabelHandler
 from apigateway.biz.resource.importer.constants import OpenAPIVersionKeyEnum
 from apigateway.biz.resource.importer.parser import BaseExporter, BaseParser, OpenAPIV3Parser, ResourceDataConvertor
 from apigateway.biz.resource.importer.schema import (
@@ -34,8 +35,9 @@ from apigateway.biz.resource.importer.schema import (
     openapi_validator_mapping,
 )
 from apigateway.biz.resource.importer.validate import ResourceImportValidator
-from apigateway.biz.resource.models import ResourceData
-from apigateway.biz.resource_label import ResourceLabelHandler
+
+if TYPE_CHECKING:
+    from apigateway.biz.resource.models import ResourceData
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.core.models import Gateway, ResourceVersion
 from apigateway.utils.yaml import yaml_loads

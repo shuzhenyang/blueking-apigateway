@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -77,8 +77,6 @@ class ResourceIDValidator(GetGatewayFromContextMixin):
             resource_ids = [value]
 
         assert isinstance(resource_ids, list)
-
-        from apigateway.core.models import Resource
 
         count = Resource.objects.filter(gateway_id=gateway.id, id__in=resource_ids).count()
         if count != len(set(resource_ids)):
@@ -399,7 +397,7 @@ class StageVarsValidator(GetGatewayFromContextMixin):
         )
 
 
-class APIDocMaintainerValidator:
+class GatewayAPIDocMaintainerValidator:
     def __call__(self, data: dict):
         if data.get("type") == GatewayAPIDocMaintainerTypeEnum.USER.value and not data.get("contacts"):
             raise serializers.ValidationError(_("联系人不可为空。"))

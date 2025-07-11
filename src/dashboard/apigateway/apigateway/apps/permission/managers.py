@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,7 +27,7 @@ from apigateway.apps.permission.constants import (
     GrantDimensionEnum,
     GrantTypeEnum,
 )
-from apigateway.apps.permission.utils import calculate_expires, calculate_renew_time
+from apigateway.common.time import calculate_expires, calculate_renew_time
 from apigateway.utils.time import now_datetime, to_datetime_from_now
 
 
@@ -117,31 +117,6 @@ class AppResourcePermissionManager(models.Manager):
                     "grant_type": grant_type,
                     "created_time": now_datetime(),
                     "updated_time": now_datetime(),
-                },
-            )
-
-    def sync_from_gateway_permission(self, gateway, bk_app_code, resource_ids):
-        from apigateway.apps.permission.models import AppGatewayPermission
-
-        api_perm = AppGatewayPermission.objects.filter(bk_app_code=bk_app_code, gateway_id=gateway.id).first()
-        if not api_perm or api_perm.has_expired:
-            return
-
-        has_perm_resource_ids = list(
-            self.filter(bk_app_code=bk_app_code, gateway_id=gateway.id, resource_id__in=resource_ids).values_list(
-                "resource_id", flat=True
-            )
-        )
-
-        for resource_id in set(resource_ids) - set(has_perm_resource_ids):
-            # 此处使用 get_or_create, 其它功能同时添加权限时，可跳过此处的同步
-            self.get_or_create(
-                gateway=gateway,
-                resource_id=resource_id,
-                bk_app_code=bk_app_code,
-                defaults={
-                    "expires": api_perm.expires,
-                    "grant_type": GrantTypeEnum.SYNC.value,
                 },
             )
 

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,19 +27,22 @@ from apigateway.apis.web.gateway.serializers import (
     GatewayRetrieveOutputSLZ,
     GatewayUpdateInputSLZ,
     GatewayUpdateStatusInputSLZ,
+    ProgrammableGatewayGitInfoSLZ,
 )
 from apigateway.biz.gateway import GatewayHandler
-from apigateway.biz.gateway_jwt import GatewayJWTHandler
-from apigateway.common.contexts import GatewayAuthConfig
 from apigateway.core.constants import GatewayTypeEnum
 from apigateway.core.models import Gateway, Resource, Stage
+from apigateway.service.contexts import GatewayAuthConfig
+from apigateway.service.gateway_jwt import GatewayJWTHandler
 from apigateway.utils.crypto import calculate_fingerprint
 
 
 class TestGatewayListOutputSLZ:
     def test_to_representation(self):
-        gateway_1 = G(Gateway, created_by="admin", status=1, is_public=True)
-        gateway_2 = G(Gateway, created_by="admin", status=0, is_public=False)
+        gateway_1 = G(Gateway, created_by="admin", status=1, is_public=True, tenant_mode="single", tenant_id="default")
+        gateway_2 = G(
+            Gateway, created_by="admin", status=0, is_public=False, tenant_mode="single", tenant_id="default"
+        )
 
         stage_1 = G(Stage, gateway=gateway_1, name="prod")
         stage_2 = G(Stage, gateway=gateway_1, name="test")
@@ -66,6 +69,8 @@ class TestGatewayListOutputSLZ:
                     },
                 ],
                 "resource_count": 2,
+                "tenant_mode": "single",
+                "tenant_id": "default",
                 "status": 1,
                 "kind": 0,
                 "is_public": True,
@@ -81,6 +86,8 @@ class TestGatewayListOutputSLZ:
                 "created_by": gateway_2.created_by,
                 "stages": [],
                 "resource_count": 0,
+                "tenant_mode": "single",
+                "tenant_id": "default",
                 "status": 0,
                 "kind": 0,
                 "is_public": False,
@@ -121,6 +128,8 @@ class TestGatewayCreateInputSLZ:
                     "developers": ["t1", "t2"],
                     "is_public": True,
                     "bk_app_codes": ["app1", "app2"],
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 {
                     "name": "test",
@@ -129,6 +138,8 @@ class TestGatewayCreateInputSLZ:
                     "developers": ["t1", "t2"],
                     "is_public": True,
                     "bk_app_codes": ["app1", "app2"],
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
             ),
             # ok, default value
@@ -139,6 +150,8 @@ class TestGatewayCreateInputSLZ:
                     "description": "test",
                     "maintainers": ["guest"],
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 {
                     "name": "test",
@@ -146,6 +159,8 @@ class TestGatewayCreateInputSLZ:
                     "maintainers": ["guest", "admin"],
                     "developers": [],
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
             ),
             # name length < 3
@@ -156,6 +171,8 @@ class TestGatewayCreateInputSLZ:
                     "description": "test",
                     "maintainers": ["admin"],
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 None,
             ),
@@ -167,6 +184,8 @@ class TestGatewayCreateInputSLZ:
                     "description": "test",
                     "maintainers": ["admin"],
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 None,
             ),
@@ -178,6 +197,8 @@ class TestGatewayCreateInputSLZ:
                     "description": "test",
                     "maintainers": ["admin"],
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 None,
             ),
@@ -191,6 +212,8 @@ class TestGatewayCreateInputSLZ:
                     "status": 1,
                     "is_public": True,
                     "user_auth_type": "ieod",
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 None,
             ),
@@ -202,6 +225,8 @@ class TestGatewayCreateInputSLZ:
                     "description": "test",
                     "maintainers": ["admin"],
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 None,
             ),
@@ -214,6 +239,8 @@ class TestGatewayCreateInputSLZ:
                     "maintainers": ["admin", "guest"],
                     "status": 1,
                     "is_public": True,
+                    "tenant_mode": "single",
+                    "tenant_id": "default",
                 },
                 None,
             ),
@@ -277,6 +304,8 @@ class TestGatewayRetrieveOutputSLZ:
             "is_official": False,
             "bk_app_codes": [],
             "related_app_codes": [],
+            "tenant_id": "default",
+            "tenant_mode": "single",
             "extra_info": {},
             "links": {},
         }
@@ -559,3 +588,17 @@ class TestGatewayUpdateStatusInputSLZ:
             return
 
         assert slz.validated_data == expected
+
+
+class TestProgrammableGatewayGitInfoSLZ:
+    def test_valid_http_git_repo(self):
+        data = {"repository": "http://github.com/user/repo.git", "account": "user", "password": "pass"}
+        slz = ProgrammableGatewayGitInfoSLZ(data=data)
+        assert slz.is_valid()
+
+    def test_missing_git_suffix(self):
+        data = {"repository": "https://github.com/user/repo", "account": "user", "password": "pass"}
+        slz = ProgrammableGatewayGitInfoSLZ(data=data)
+        with pytest.raises(ValidationError) as e:
+            slz.is_valid(raise_exception=True)
+        assert "必须以 .git 结尾" in str(e.value)

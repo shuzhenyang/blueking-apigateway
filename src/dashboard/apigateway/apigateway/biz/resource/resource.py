@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -29,13 +29,14 @@ from apigateway.apps.openapi.models import OpenAPIResourceSchema
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.apps.plugin.models import PluginBinding
 from apigateway.apps.support.models import ResourceDoc
-from apigateway.common.contexts import ResourceAuthContext
 from apigateway.core.constants import STAGE_VAR_PATTERN, ContextScopeTypeEnum, ProxyTypeEnum
 from apigateway.core.models import Context, Gateway, Proxy, Resource, StageResourceDisabled
+from apigateway.service.contexts import ResourceAuthContext
 from apigateway.utils import time
 
 
 class ResourceHandler:
+    # NOTE: only unittest use this func
     @classmethod
     def save_auth_config(cls, resource_id: int, config: Dict[str, Any]):
         """存储资源认证配置"""
@@ -210,6 +211,8 @@ class ResourceHandler:
 
         if condition.get("order_by"):
             queryset = queryset.order_by(condition["order_by"])
+        else:
+            queryset = queryset.order_by("-updated_time")
 
         return queryset
 

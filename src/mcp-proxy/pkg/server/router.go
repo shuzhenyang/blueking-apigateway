@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+ * Copyright (C) 2025 Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -71,10 +71,12 @@ func NewRouter(cfg *config.Config) *gin.Engine {
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	ctx := context.Background()
+
+	// mcp 用户态mcp proxy
 	mcpProxy := proxy.NewMCPProxy(cfg.McpServer.MessageUrlFormat)
 	mcpSvc, err := mcp.Init(ctx, mcpProxy)
 	if err != nil {
-		logging.GetLogger().Panic("mcp init failed: %v", err)
+		logging.GetLogger().Panic("mcp user proxy init failed: %v", err)
 		return nil
 	}
 	util.GoroutineWithRecovery(ctx, func() {
@@ -88,6 +90,25 @@ func NewRouter(cfg *config.Config) *gin.Engine {
 	seeRouter.Use(middleware.MCPServerHeaderMiddleware())
 	seeRouter.GET("/sse", mcpProxy.SseHandler())
 	seeRouter.POST("/sse/message", mcpProxy.SseMessageHandler())
+
+	// mcp application 应用态mcp proxy
+	mcpApplicationProxy := proxy.NewMCPProxy(cfg.McpServer.MessageApplicationUrlFormat)
+	mcpApplicationSvc, err := mcp.Init(ctx, mcpApplicationProxy)
+	if err != nil {
+		logging.GetLogger().Panic("mcp application proxy init failed: %v", err)
+		return nil
+	}
+	util.GoroutineWithRecovery(ctx, func() {
+		mcpApplicationSvc.Run(ctx)
+	})
+
+	seeAppRouter := router.Group("/:name/application")
+	seeAppRouter.Use(middleware.APILogger())
+	seeAppRouter.Use(middleware.BkGatewayJWTAuthMiddleware())
+	seeAppRouter.Use(middleware.MCPServerPermissionMiddleware())
+	seeAppRouter.Use(middleware.MCPServerHeaderMiddleware())
+	seeAppRouter.GET("/sse", mcpApplicationProxy.SseHandler())
+	seeAppRouter.POST("/sse/message", mcpApplicationProxy.SseMessageHandler())
 
 	// trace
 	if cfg.Tracing.GinAPIEnabled() {

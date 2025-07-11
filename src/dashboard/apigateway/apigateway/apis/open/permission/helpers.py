@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,7 +22,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Union
 
 from django.utils.functional import cached_property
-from pydantic import BaseModel, parse_obj_as
+from pydantic import BaseModel, TypeAdapter
 
 from apigateway.apps.permission.constants import (
     GrantDimensionEnum,
@@ -152,7 +152,7 @@ class ResourcePermissionBuilder:
                 resource["id"], ""
             )
 
-        resource_permissions = parse_obj_as(List[ResourcePermission], resources)
+        resource_permissions = TypeAdapter(List[ResourcePermission]).validate_python(resources)
 
         return [perm.as_dict() for perm in resource_permissions]
 
@@ -244,7 +244,7 @@ class AppPermissionBuilder:
                     resource_id, ""
                 )
 
-        resource_permissions = parse_obj_as(List[ResourcePermission], list(resource_map.values()))
+        resource_permissions = TypeAdapter(List[ResourcePermission]).validate_python(list(resource_map.values()))
         return [perm.as_dict() for perm in resource_permissions]
 
     def _get_api_permission_map(self) -> Dict[int, AppGatewayPermission]:

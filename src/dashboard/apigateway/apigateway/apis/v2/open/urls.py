@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -41,8 +41,8 @@ urlpatterns = [
                         [
                             # GET /api/v2/open/gateways/{gateway_name}/
                             path("", views.GatewayRetrieveApi.as_view(), name="openapi.v2.open.gateway.retrieve"),
+                            # NOTE: this url been redirected to core-api, so no need to implement this
                             # GET /api/v2/open/gateways/{gateway_name}/public_key/
-                            # FIXME: this url been redirected to core-api, so no need to implement this
                             # POST /api/v2/open/gateways/{gateway_name}/permissions/apply/
                             path(
                                 "permissions/apply/",
@@ -54,5 +54,55 @@ urlpatterns = [
                 ),
             ]
         ),
+    ),
+    path(
+        "mcp-servers/",
+        include(
+            [
+                # GET /api/v2/open/mcp-servers/
+                path(
+                    "",
+                    views.MCPServerListApi.as_view(),
+                    name="openapi.v2.open.mcp_server.list",
+                ),
+                # GET /api/v2/open/mcp-servers/{mcp_server_id}/permissions/
+                path(
+                    "<int:mcp_server_id>/permissions/",
+                    views.MCPServerPermissionListApi.as_view(),
+                    name="openapi.v2.open.mcp_server.permissions.list",
+                ),
+                path(
+                    "permissions/",
+                    include(
+                        [
+                            # GET /api/v2/open/mcp-servers/permissions/
+                            path(
+                                "",
+                                views.MCPServerAppPermissionListApi.as_view(),
+                                name="openapi.v2.open.mcp_server.app.permissions.list",
+                            ),
+                            # POST /api/v2/open/mcp-servers/permissions/apply/
+                            path(
+                                "apply/",
+                                views.MCPServerAppPermissionApplyCreateApi.as_view(),
+                                name="openapi.v2.open.mcp_server.app.permissions.apply",
+                            ),
+                            # GET /api/v2/open/mcp-servers/permissions/apply-records/
+                            path(
+                                "apply-records/",
+                                views.MCPServerAppPermissionRecordListApi.as_view(),
+                                name="openapi.v2.open.mcp_server.app.permissions.apply-records.list",
+                            ),
+                        ]
+                    ),
+                ),
+            ]
+        ),
+    ),
+    # GET /api/v2/open/user/mcp-servers/
+    path(
+        "user/mcp-servers/",
+        views.UserMCPServerListApi.as_view(),
+        name="openapi.v2.open.user.mcp_server.list",
     ),
 ]

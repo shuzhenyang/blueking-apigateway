@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, parse_obj_as
+from pydantic import BaseModel, TypeAdapter
 
 
 class FieldTypeEnum(str, Enum):
@@ -52,4 +52,6 @@ def enrich_config_fields(config_fields: List[dict], config: Dict[str, Any]) -> L
             }
         )
 
-    return [field.dict(exclude_none=True) for field in parse_obj_as(List[ConfigField], config_fields)]
+    return [
+        field.model_dump(exclude_none=True) for field in TypeAdapter(List[ConfigField]).validate_python(config_fields)
+    ]

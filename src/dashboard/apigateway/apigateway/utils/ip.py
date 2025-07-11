@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -40,8 +40,7 @@ def parse_ip_content_to_list(ip_content: str) -> List[str]:
         #     IPv6Interface('::ffff:c001:101/96')
         # while the apisix not support the `::ffff:192.1.1.1/96`, we need to convert here
         ip_line_lower = ip_line.lower()
-        if ip_line_lower.startswith("0:0:0:0:0:ffff:") or ip_line_lower.startswith("::ffff:") and "/" in ip_line_lower:
-            # ipv4 in ipv6
+        if ip_line_lower.startswith(("0:0:0:0:0:ffff:", "::ffff:")) and "/" in ip_line_lower:
             ips.add(str(ipaddress.ip_interface(ip_line)))
             continue
 

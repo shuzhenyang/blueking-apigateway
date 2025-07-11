@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -24,8 +24,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIRequestFactory as DRFAPIRequestFactory
 
-from apigateway.common.contexts import GatewayAuthContext
 from apigateway.core.models import Gateway
+from apigateway.service.contexts import GatewayAuthContext
 
 UserModel = get_user_model()
 

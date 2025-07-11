@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,6 +19,7 @@
 from typing import Any, Dict, cast
 
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
@@ -26,10 +27,10 @@ from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
 from apigateway.apis.web.sdk import serializers
-from apigateway.apps.support.api_sdk import exceptions
-from apigateway.apps.support.api_sdk.helper import SDKHelper
-from apigateway.apps.support.api_sdk.models import SDKFactory
 from apigateway.apps.support.models import GatewaySDK
+from apigateway.biz.sdk import exceptions
+from apigateway.biz.sdk.helper import SDKHelper
+from apigateway.biz.sdk.models import SDKFactory
 from apigateway.common.error_codes import error_codes
 from apigateway.core.models import ResourceVersion
 from apigateway.utils.responses import OKJsonResponse
@@ -61,7 +62,7 @@ class GatewaySDKListCreateApi(generics.ListCreateAPIView):
         slz = serializers.GatewaySDKQueryInputSLZ(data=request.query_params, context={"request": request})
         slz.is_valid(raise_exception=True)
 
-        queryset = GatewaySDK.objects.filter_sdk(
+        queryset = self._filter_sdk(
             gateway=self.request.gateway,
             language=slz.validated_data.get("language"),
             version_number=slz.validated_data.get("version_number"),
@@ -77,6 +78,42 @@ class GatewaySDKListCreateApi(generics.ListCreateAPIView):
         slz = self.get_serializer(sdks, many=True)
         return self.get_paginated_response(slz.data)
 
+    def _filter_sdk(
+        self,
+        gateway,
+        language=None,
+        order_by=None,
+        version_number="",
+        resource_version_id=None,
+        fuzzy=False,
+        keyword=None,
+    ):
+        queryset = GatewaySDK.objects.filter(gateway=gateway)
+
+        if keyword:
+            queryset = queryset.filter(
+                Q(language__icontains=keyword)
+                | Q(version_number__contains=keyword)
+                | Q(resource_version__version__contains=keyword)
+            )
+
+        if language:
+            queryset = queryset.filter(language=language)
+
+        if version_number:
+            if fuzzy:
+                queryset = queryset.filter(version_number__contains=version_number)
+            else:
+                queryset = queryset.filter(version_number=version_number)
+
+        if resource_version_id is not None:
+            queryset = queryset.filter(resource_version_id=resource_version_id)
+
+        if order_by:
+            queryset = queryset.order_by(order_by)
+
+        return queryset
+
     @transaction.atomic
     def create(self, request, gateway_id):
         """
@@ -90,7 +127,7 @@ class GatewaySDKListCreateApi(generics.ListCreateAPIView):
         )
         slz.is_valid(raise_exception=True)
 
-        data = cast(Dict[str, Any], slz.validated_data)
+        data = cast("Dict[str, Any]", slz.validated_data)
         resource_version = get_object_or_404(ResourceVersion, gateway=request.gateway, id=data["resource_version_id"])
 
         with SDKHelper(resource_version=resource_version) as helper:

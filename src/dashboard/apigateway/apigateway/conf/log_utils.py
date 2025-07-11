@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -119,15 +119,14 @@ def build_logging_config(log_level: str, to_console: bool, file_directory: Optio
                 "level": log_level,
                 "propagate": False,
             },
+            "bkpaas_auth": {
+                "handlers": [*logger_handlers_map["component"], "sentry"],
+                "level": "WARNING",
+                "propagate": True,
+            },
             "celery": {
                 "handlers": [*logger_handlers_map["celery"], "sentry"],
                 "level": "INFO",
-                "propagate": False,
-            },
-            "opentelemetry.util._time": {
-                # TODO: 升级 python >= 3.7 后，可删除此 logger
-                "handlers": [*logger_handlers_map["celery"], "sentry"],
-                "level": "ERROR",
                 "propagate": False,
             },
             "apigateway.core.management": {

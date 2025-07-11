@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -73,7 +73,7 @@ class TestResourceBackendConfig:
         ],
     )
     def test_dict(self, data, expected, expected_legacy_upstreams, expected_legacy_transform_headers):
-        config = ResourceBackendConfig.parse_obj(data)
+        config = ResourceBackendConfig.model_validate(data)
         assert config.legacy_upstreams == expected_legacy_upstreams
         assert config.legacy_transform_headers == expected_legacy_transform_headers
-        assert config.dict() == expected
+        assert config.model_dump() == expected

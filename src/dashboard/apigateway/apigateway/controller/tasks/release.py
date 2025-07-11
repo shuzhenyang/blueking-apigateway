@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,9 +22,8 @@ from datetime import datetime
 from celery import shared_task
 
 from apigateway.apps.support.models import ReleasedResourceDoc, ResourceDocVersion
+from apigateway.biz.resource_version import ResourceDocVersionHandler
 from apigateway.common.constants import RELEASE_GATEWAY_INTERVAL_SECOND
-from apigateway.common.event.event import PublishEventReporter
-from apigateway.common.mcp.mcp_server import update_stage_mcp_server_related_resource_names
 from apigateway.controller.distributor.base import BaseDistributor
 from apigateway.controller.distributor.etcd import EtcdDistributor
 from apigateway.controller.procedure_logger.release_logger import ReleaseProcedureLogger
@@ -38,6 +37,8 @@ from apigateway.core.models import (
     ResourceVersion,
     Stage,
 )
+from apigateway.service.event.event import PublishEventReporter
+from apigateway.service.mcp.mcp_server import update_stage_mcp_server_related_resource_names
 from apigateway.utils.time import now_datetime
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ def update_release_data_after_success(
         resource_version.id,
     )
     ReleasedResourceDoc.objects.save_released_resource_doc(resource_doc_version)
-    ReleasedResourceDoc.objects.clear_unreleased_resource_doc(release.gateway.id)
+    ResourceDocVersionHandler().clear_unreleased_resource_doc(release.gateway.id)
 
     # update the mcp_server related resource_names
     update_stage_mcp_server_related_resource_names(

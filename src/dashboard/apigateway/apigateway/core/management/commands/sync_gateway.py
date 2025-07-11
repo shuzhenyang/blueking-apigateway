@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,7 +22,11 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apigateway.biz.gateway.saver import GatewayData, GatewaySaver
+from apigateway.biz.gateway import GatewayData, GatewaySaver
+from apigateway.common.tenant.constants import (
+    SELF_HOST_GATEWAY_DEFAULT_TENANT_ID,
+    SELF_HOST_GATEWAY_DEFAULT_TENANT_MODE,
+)
 from apigateway.core.constants import GatewayStatusEnum
 from apigateway.core.models import Gateway
 from apigateway.utils.django import get_object_or_None
@@ -46,6 +50,13 @@ class Command(BaseCommand):
         if gateway:
             logger.info("gateway[name=%s] has exist not need update", name)
             return
+
+        tenant_mode = None
+        tenant_id = None
+        # assign the tenant_mode and tenant_id
+        tenant_mode = SELF_HOST_GATEWAY_DEFAULT_TENANT_MODE
+        tenant_id = SELF_HOST_GATEWAY_DEFAULT_TENANT_ID
+
         saver = GatewaySaver(
             id=None,
             data=GatewayData(
@@ -53,6 +64,8 @@ class Command(BaseCommand):
                 maintainers=[settings.GATEWAY_DEFAULT_CREATOR],
                 status=GatewayStatusEnum.ACTIVE.value,
                 is_public=False,
+                tenant_mode=tenant_mode,
+                tenant_id=tenant_id,
             ),
             username=settings.GATEWAY_DEFAULT_CREATOR,
         )

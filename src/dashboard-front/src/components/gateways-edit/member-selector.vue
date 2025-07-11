@@ -5,8 +5,13 @@
         <div class="edit-content">
           <slot>
             <template v-if="membersText">
-              <span class="member-item" v-bk-tooltips="{ content: membersText, placement: 'top-start' }">
-                {{ membersText }}
+              <span class="member-item">
+                <bk-popover>
+                  <bk-user-display-name :user-id="membersText" />
+                  <template #content>
+                    <span><bk-user-display-name :user-id="membersText" /></span>
+                  </template>
+                </bk-popover>
               </span>
             </template>
             <template v-else>--</template>
@@ -56,10 +61,16 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, nextTick, watch, onBeforeMount, onMounted } from 'vue';
+import {
+  computed,
+  nextTick,
+  ref,
+  watch,
+} from 'vue';
 import MemberSelector from '../member-select';
 import { useUser } from '@/store/user';
 import { useI18n } from 'vue-i18n';
+
 const props = defineProps({
   field: {
     type: String,
@@ -108,10 +119,10 @@ const isEditable = ref(false);
 const errorTips = ref('');
 const displayValue = ref([]);
 
-const handleValidate = () => {
-  isShowError.value = false;
-  errorTips.value = '';
-};
+// const handleValidate = () => {
+//   isShowError.value = false;
+//   errorTips.value = '';
+// };
 
 const handleEdit = () => {
   document.body.click();
@@ -153,24 +164,6 @@ const handleEnter = (event: any) => {
   if (event.key === 'Enter' && event.keyCode === 13) {
     triggerChange();
   }
-};
-
-const hideEdit = (event: any) => {
-  if (props.isRequired && !displayValue.value.length) {
-    isShowError.value = true;
-    errorTips.value = props.errorValue;
-    return;
-  }
-  if (!displayValue.value?.includes(user.user.username)) {
-    isShowError.value = true;
-    errorTips.value = t('您已将自己从维护人员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！');
-    return;
-  }
-  if (memberSelectorEditRef.value?.contains(event.target)) {
-    return;
-  }
-  handleValidate();
-  triggerChange();
 };
 
 const triggerChange = () => {
@@ -218,13 +211,6 @@ watch(
   { immediate: true },
 );
 
-onMounted(() => {
-  document.body.addEventListener('click', hideEdit);
-});
-
-onBeforeMount(() => {
-  document.body.removeEventListener('click', hideEdit);
-});
 </script>
 
 <style lang="scss" scoped>

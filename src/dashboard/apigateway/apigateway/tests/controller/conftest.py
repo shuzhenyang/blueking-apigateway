@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,9 +23,7 @@ from ddf import G
 from pytest import fixture
 
 from apigateway.apps.plugin.models import PluginConfig, PluginType
-from apigateway.biz.gateway_jwt import GatewayJWTHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
-from apigateway.common.contexts import StageProxyHTTPContext
 from apigateway.controller.crds.base import KubernetesResource
 from apigateway.controller.crds.release_data.release_data import ReleaseData
 from apigateway.controller.crds.v1beta1.convertor import CustomResourceConvertor
@@ -37,6 +35,8 @@ from apigateway.controller.crds.v1beta1.convertors.service import ServiceConvert
 from apigateway.controller.crds.v1beta1.convertors.stage import StageConvertor
 from apigateway.core.constants import StageStatusEnum
 from apigateway.core.models import MicroGateway, Proxy, Release, ResourceVersion
+from apigateway.service.contexts import StageProxyHTTPContext
+from apigateway.service.gateway_jwt import GatewayJWTHandler
 from apigateway.utils.yaml import yaml_dumps
 
 

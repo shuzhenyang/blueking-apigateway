@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -40,6 +40,9 @@ class ReleaseInputSLZ(serializers.Serializer):
     stage_id = serializers.IntegerField(required=True, help_text="环境 id")
     resource_version_id = serializers.IntegerField(required=True, help_text="资源版本 id")
     comment = serializers.CharField(allow_blank=True, required=False, help_text="发布日志")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseInputSLZ"
 
     def validate_stage_id(self, value):
         if not Stage.objects.filter(gateway=self.context["gateway"], id=value).exists():
@@ -82,6 +85,9 @@ class ReleaseResourceSchemaOutputSLZ(serializers.Serializer):
     parameter_schema = serializers.JSONField(required=False, help_text="parameters schema")
     response_schema = serializers.JSONField(required=False, help_text="response schema")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseResourceSchemaOutputSLZ"
+
 
 class ReleaseHistoryQueryInputSLZ(serializers.Serializer):
     keyword = serializers.CharField(allow_blank=True, required=False, help_text="查询参数关键字")
@@ -90,10 +96,16 @@ class ReleaseHistoryQueryInputSLZ(serializers.Serializer):
     time_start = TimestampField(allow_null=True, required=False, help_text="开始时间")
     time_end = TimestampField(allow_null=True, required=False, help_text="结束时间")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseHistoryQueryInputSLZ"
+
 
 class ReleaseStageSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True, help_text="环境 id")
     name = serializers.CharField(allow_blank=True, required=False, help_text="环境 name")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseStageSLZ"
 
 
 class ReleaseHistoryOutputSLZ(serializers.Serializer):
@@ -105,6 +117,9 @@ class ReleaseHistoryOutputSLZ(serializers.Serializer):
     source = serializers.CharField(read_only=True, help_text="发布来源")
     duration = serializers.SerializerMethodField(read_only=True, help_text="发布耗时 (s)")
     status = serializers.SerializerMethodField(read_only=True, help_text="发布状态")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseHistoryOutputSLZ"
 
     def get_resource_version_display(self, obj: ReleaseHistory) -> str:
         return obj.resource_version.object_display
@@ -146,6 +161,9 @@ class ReleaseHistoryEventInfoSLZ(serializers.Serializer):
     created_time = serializers.DateTimeField(read_only=True, help_text="发布节点事件创建时间")
     detail = serializers.DictField(read_only=True, help_text="发布日志")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseHistoryEventInfoSLZ"
+
     def get_name(self, obj: PublishEvent) -> str:
         return _(obj.name)
 
@@ -153,6 +171,9 @@ class ReleaseHistoryEventInfoSLZ(serializers.Serializer):
 class ReleaseHistoryEventRetrieveOutputSLZ(ReleaseHistoryOutputSLZ):
     events = serializers.ListField(child=ReleaseHistoryEventInfoSLZ(), allow_empty=True, help_text="发布事件列表")
     events_template = serializers.SerializerMethodField(read_only=True, help_text="发布事件模板")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ReleaseHistoryEventRetrieveOutputSLZ"
 
     def to_representation(self, obj):
         obj.events = self.context["release_history_events"]
@@ -178,6 +199,9 @@ class DeployHistoryOutputSLZ(serializers.Serializer):
     version = serializers.CharField(read_only=True, help_text="发布版本")
     created_by = serializers.CharField(read_only=True, help_text="发布人")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.DeployHistoryOutputSLZ"
+
     def get_status(self, obj: ProgrammableGatewayDeployHistory) -> str:
         event = self.context["release_history_events_map"].get(obj.publish_id, None)
         if event:
@@ -200,6 +224,9 @@ class ProgrammableDeployCreateInputSLZ(serializers.Serializer):
     version = serializers.CharField(required=True, help_text="发布版本号")
     comment = serializers.CharField(help_text="版本日志")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.release.serializers.ProgrammableDeployCreateInputSLZ"
+
     def validate(self, data):
         gateway = self.context["gateway"]
         # 判断该版本是否已经发布过
@@ -209,7 +236,7 @@ class ProgrammableDeployCreateInputSLZ(serializers.Serializer):
             source=PublishSourceEnum.VERSION_PUBLISH.value,
             version=data["version"],
         ).exists():
-            raise serializers.ValidationError(_("编程网关每个版本只允许发布一次"))
+            raise serializers.ValidationError(_("编程网关每个版本只允许发布一次，请修改版本号后再发布"))
         return data
 
 

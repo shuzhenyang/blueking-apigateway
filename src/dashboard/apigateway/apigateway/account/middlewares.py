@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -29,10 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 class ApiGatewayJWTAppMiddleware(BaseApiGatewayJWTAppMiddleware):
-    App = namedtuple("App", ["app_code"])
+    App = namedtuple("App", ["app_code", "tenant_mode", "tenant_id"])
 
-    def make_app(self, bk_app_code=None, verified=False, **jwt_app):
-        return self.App(app_code=bk_app_code or "")
+    def make_app(self, bk_app_code=None, verified=False, tenant_mode="", tenant_id="", **jwt_app):
+        return self.App(
+            app_code=bk_app_code or "",
+            tenant_mode=tenant_mode,
+            tenant_id=tenant_id,
+        )
 
 
 class ApiGatewayJWTUserMiddleware(BaseApiGatewayJWTUserMiddleware):

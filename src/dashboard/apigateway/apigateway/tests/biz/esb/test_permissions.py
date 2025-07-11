@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -435,7 +435,7 @@ class TestComponentPermission:
             "apigateway.biz.esb.permissions.get_component_doc_link",
             return_value="",
         )
-        perm = ComponentPermission.parse_obj(component)
+        perm = ComponentPermission.model_validate(component)
         assert perm.as_dict() == expected
 
     @pytest.mark.parametrize(
@@ -450,7 +450,7 @@ class TestComponentPermission:
     def test_component_perm_required(self, mocked_component, permission_level, expected):
         mocked_component["permission_level"] = permission_level
 
-        perm = ComponentPermission.parse_obj(mocked_component)
+        perm = ComponentPermission.model_validate(mocked_component)
         assert perm.component_perm_required == expected
 
     @pytest.mark.parametrize(
@@ -516,7 +516,7 @@ class TestComponentPermission:
 
         mocked_component.update(params)
 
-        perm = ComponentPermission.parse_obj(mocked_component)
+        perm = ComponentPermission.model_validate(mocked_component)
         assert perm.permission_status == expected
 
     @pytest.mark.parametrize(
@@ -570,5 +570,5 @@ class TestComponentPermission:
 
         mocked_component.update(params)
 
-        perm = ComponentPermission.parse_obj(mocked_component)
+        perm = ComponentPermission.model_validate(mocked_component)
         assert perm.expires_in == expected

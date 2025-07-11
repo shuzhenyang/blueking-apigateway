@@ -3,7 +3,7 @@
     <bk-alert
       v-if="!tableData?.length && !commonStore.isProgrammableGateway"
       theme="warning"
-      title="如需生成新版本，请前往'资源配置'页面操作"
+      :title="t(`如需生成新版本，请前往'资源配置'页面操作`)"
       class="mb20"
     />
     <div class="operate flex-row justify-content-between mb15">
@@ -51,7 +51,6 @@
             <bk-table-column
               :label="t('生效环境')"
               prop="released_stages"
-
             >
               <template #default="{ data }">
                 {{ data?.released_stages?.map((item: any) => item.name).join(", ") }}
@@ -75,6 +74,9 @@
               </template>
             </bk-table-column>
             <bk-table-column :label="t('创建者')" prop="created_by">
+              <template #default="{ row }">
+                <span><bk-user-display-name :user-id="row.created_by" /></span>
+              </template>
             </bk-table-column>
             <bk-table-column :label="t('操作')" width="200">
               <template #default="{ data }">
@@ -113,6 +115,13 @@
                     </bk-dropdown-menu>
                   </template>
                 </bk-dropdown>
+                <bk-button
+                  text
+                  theme="primary"
+                  @click.stop="handleShowExport(data)"
+                >
+                  {{ t('导出') }}
+                </bk-button>
               </template>
             </bk-table-column>
             <template #empty>
@@ -167,6 +176,14 @@
       @hidden="getList()"
       @release-success="getList()"
     />
+
+    <!-- 资源版本导出 -->
+    <ExportResourceDialog
+      class="resource-version-export-dialog"
+      v-model:dialog-config="exportDialogConfig"
+      v-model:dialog-params="exportParams"
+      @confirm="handleExportDownload"
+    />
   </div>
 </template>
 
@@ -186,13 +203,14 @@ import dayjs from 'dayjs';
 
 import { getStatus } from '@/common/util';
 import {
-  useQueryList,
-  useSelection,
-} from '@/hooks';
-import {
+  exportVersion,
   getResourceVersionsList,
   getStageList,
 } from '@/http';
+import {
+  useQueryList,
+  useSelection,
+} from '@/hooks';
 import createSdk from '../components/createSdk.vue';
 import resourceDetail from '../components/resourceDetail.vue';
 import versionDiff from '@/components/version-diff/index.vue';
@@ -201,8 +219,13 @@ import {
   useResourceVersion,
   useUser,
 } from '@/store';
+import {
+  IExportDialog,
+  IExportParams,
+} from '@/types';
 import releaseSideslider from '@/views/stage/overview/comps/release-sideslider.vue';
 import TableEmpty from '@/components/table-empty.vue';
+import ExportResourceDialog from '@/components/export-resource-dialog/index.vue';
 import { orderBy } from 'lodash';
 
 const props = defineProps({
@@ -212,17 +235,32 @@ const props = defineProps({
   },
 });
 
-const user = useUser();
-
 const route = useRoute();
 const { t } = useI18n();
 const resourceVersionStore = useResourceVersion();
 const commonStore = useCommon();
+const user = useUser();
 
 const apigwId = computed(() => +route.params.id);
 
 const filterData = ref({ keyword: props.version });
 const diffDisabled = ref<boolean>(true);
+// 导出配置
+const exportDialogConfig = reactive<IExportDialog>({
+  isShow: false,
+  title: t('请选择导出的格式'),
+  loading: false,
+  exportFileDocType: 'resource',
+  hiddenExportContent: true,
+  hiddenResourceTip: true,
+  hiddenExportTypeLabel: true,
+});
+// 导出参数
+const exportParams = reactive<IExportParams & { id?: number}>({
+  export_type: 'all',
+  file_type: 'yaml',
+  id: 0,
+});
 
 // 列表hooks
 const {
@@ -273,6 +311,7 @@ const diffSidesliderConf = reactive({
 });
 const diffSourceId = ref();
 const diffTargetId = ref();
+const resourceDetailShow = ref(false);
 
 // 版本对比
 const handleShowDiff = () => {
@@ -289,7 +328,38 @@ const handleShowDiff = () => {
   resetSelections();
 };
 
-const resourceDetailShow = ref(false);
+// 版本导出
+const handleShowExport = ({ id }: { id: number}) => {
+  exportDialogConfig.isShow = true;
+  exportParams.id = id;
+};
+
+// 版本导出下载
+const handleExportDownload = async () => {
+  const params = { ...exportParams };
+  delete params.export_type;
+  exportDialogConfig.loading = true;
+  try {
+    const res = await exportVersion(apigwId.value, params);
+    if (res.success) {
+      Message({
+        message: t('导出成功'),
+        theme: 'success',
+        width: 'auto',
+      });
+    }
+    exportDialogConfig.isShow = false;
+  } catch (e) {
+    const error = e as Error;
+    Message({
+      message: error?.message || t('导出失败'),
+      theme: 'error',
+      width: 'auto',
+    });
+  } finally {
+    exportDialogConfig.loading = false;
+  }
+};
 
 // 展示详情
 const handleShowInfo = (id: number) => {
@@ -407,7 +477,7 @@ let timeId: any = null;
 onMounted(() => {
   timeId = setInterval(async () => {
     await getList(getResourceVersionsList, false);
-    tableData.value.forEach((item) => {
+    tableData.value.forEach((item: Record<string, any>) => {
       if (selections.value.find(sel => sel.id === item.id)) {
         bkTableRef.value?.toggleRowSelection(item, true);
       }
@@ -441,6 +511,16 @@ onUnmounted(() => {
     background-color: #dcdee5;
     color: #fff;
     cursor: not-allowed;
+  }
+}
+</style>
+
+<style lang="scss">
+.resource-version-export-dialog {
+  .bk-form-item {
+    .bk-form-content {
+      margin-left: 0 !important;
+    }
   }
 }
 </style>

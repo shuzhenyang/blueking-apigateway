@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -28,15 +28,6 @@ from bkapi_client_core.esb import generic_type_partial as _partial
 from bkapi_client_core.esb.django_helper import get_client_by_username as _get_client_by_username
 
 
-class BkLogGroup(OperationGroup):
-    esquery_dsl = bind_property(
-        Operation,
-        name="esquery_dsl",
-        method="POST",
-        path="/api/c/compapi/v2/bk_log/esquery_dsl/",
-    )
-
-
 class EsbGroup(OperationGroup):
     get_synchronized_components = bind_property(
         Operation,
@@ -46,21 +37,10 @@ class EsbGroup(OperationGroup):
     )
 
 
-class MonitorV3Group(OperationGroup):
-    promql_query = bind_property(
-        Operation,
-        name="promql_query",
-        method="POST",
-        path="/api/c/compapi/v2/monitor_v3/graph_promql_query/",
-    )
-
-
 class Client(ESBClient):
     """ESB Components"""
 
-    bk_log = bind_property(BkLogGroup, name="bk_log")
     esb = bind_property(EsbGroup, name="esb")
-    monitor_v3 = bind_property(MonitorV3Group, name="monitor_v3")
 
 
 get_client_by_username = _partial(Client, _get_client_by_username)

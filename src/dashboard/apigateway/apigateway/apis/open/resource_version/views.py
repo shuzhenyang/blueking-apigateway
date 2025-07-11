@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -25,9 +25,11 @@ from rest_framework import generics, status
 from apigateway.apis.open.permissions import (
     OpenAPIGatewayRelatedAppPermission,
 )
+from apigateway.apps.openapi.models import OpenAPIFileResourceSchemaVersion
 from apigateway.apps.support.models import ResourceDoc, ResourceDocVersion
-from apigateway.biz.releaser import ReleaseError, release
-from apigateway.biz.resource_version import ResourceVersionHandler
+from apigateway.biz.gateway import ReleaseError, release
+from apigateway.biz.resource.importer.openapi import OpenAPIExportManager
+from apigateway.biz.resource_version import ResourceDocVersionHandler, ResourceVersionHandler
 from apigateway.core.models import ResourceVersion, Stage
 from apigateway.utils.exception import LockTimeout
 from apigateway.utils.redis_utils import Lock
@@ -83,8 +85,19 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
             ResourceDocVersion.objects.create(
                 gateway=request.gateway,
                 resource_version=instance,
-                data=ResourceDocVersion.objects.make_version(request.gateway.id),
+                data=ResourceDocVersionHandler().make_version(request.gateway.id),
             )
+
+        exporter = OpenAPIExportManager(
+            api_version=instance.version,
+            title="the openapi of %s" % request.gateway.name,
+        )
+        # 创建openapi file版本
+        OpenAPIFileResourceSchemaVersion.objects.create(
+            gateway=request.gateway,
+            resource_version=instance,
+            schema=exporter.export_resource_version_openapi(instance),
+        )
 
         return V1OKJsonResponse(
             "OK",
@@ -124,7 +137,7 @@ class ResourceVersionReleaseApi(generics.CreateAPIView):
                         resource_version_id=data["resource_version_id"],
                         comment=data["comment"],
                         username=request.user.username,
-                    )  # TODO open api 不能创建微网关, 这里不需要传BCS需要的user credentials, 后续有需求再补充
+                    )
             except LockTimeout as err:
                 return V1FailJsonResponse(str(err))
             except ReleaseError as err:

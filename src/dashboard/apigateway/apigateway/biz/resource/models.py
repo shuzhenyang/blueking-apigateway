@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from apigateway.biz.plugin.plugin_synchronizers import PluginConfigData
+from apigateway.biz.plugin.synchronizers import PluginConfigData
 from apigateway.core.models import Backend, Resource
 
 
@@ -70,7 +70,7 @@ class ResourceData(BaseModel):
 
     @property
     def basic_data(self) -> Dict[str, Any]:
-        return self.dict(include=set(self.basic_field_names()))
+        return self.model_dump(include=set(self.basic_field_names()))
 
     @staticmethod
     def basic_field_names() -> List[str]:
@@ -100,9 +100,9 @@ class ResourceData(BaseModel):
             "enable_websocket": self.enable_websocket,
             "is_public": self.is_public,
             "allow_apply_permission": self.allow_apply_permission,
-            "auth_config": self.auth_config.dict(),
+            "auth_config": self.auth_config.model_dump(),
             "backend_id": self.backend.id,
-            "backend_config": self.backend_config.dict(),
+            "backend_config": self.backend_config.model_dump(),
             "metadata": self.metadata,
         }
 
@@ -116,7 +116,7 @@ class ResourceData(BaseModel):
             "enable_websocket": self.enable_websocket,
             "is_public": self.is_public,
             "allow_apply_permission": self.allow_apply_permission,
-            "auth_config": self.auth_config.dict(),
+            "auth_config": self.auth_config.model_dump(),
             "metadata": self.metadata,
         }
         if self.resource:

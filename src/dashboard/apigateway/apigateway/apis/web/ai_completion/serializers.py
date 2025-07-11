@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -31,7 +31,13 @@ class AICompletionContentInfo(serializers.Serializer):
     input = serializers.CharField(required=True, help_text="ai content")
     enable_streaming = serializers.BooleanField(default=False, help_text="开启流式返回")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.ai_completion.serializers.AICompletionContentInfo"
+
 
 class AICompletionInputSLZ(serializers.Serializer):
     # 前端组件规定传入的参数必须放在一个名为inputs的对象中
     inputs = AICompletionContentInfo()
+
+    class Meta:
+        ref_name = "apigateway.apis.web.ai_completion.serializers.AICompletionInputSLZ"

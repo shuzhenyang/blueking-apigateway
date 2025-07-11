@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,18 +19,23 @@ from django.conf import settings
 from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils.decorators import method_decorator
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
 from apigateway.apps.mcp_server.constants import MCPServerStatusEnum
 from apigateway.apps.mcp_server.models import MCPServer
-from apigateway.apps.mcp_server.utils import build_mcp_server_url
+from apigateway.biz.gateway.type import GatewayTypeHandler
 from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
+from apigateway.common.tenant.query import gateway_mcp_server_filter_by_user_tenant_id
+from apigateway.common.tenant.request import get_user_tenant_id
+from apigateway.common.tenant.validators import check_user_can_access_gateway
 from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
 from apigateway.core.models import Gateway, Stage
+from apigateway.service.contexts import GatewayAuthContext
+from apigateway.service.mcp.mcp_server import build_mcp_server_url
 from apigateway.utils.responses import OKJsonResponse
 
 from .serializers import (
@@ -62,11 +67,16 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
         # the stage should be active and online
         queryset = queryset.filter(stage__status=StageStatusEnum.ACTIVE.value)
 
-        if slz.validated_data.get("keyword"):
+        keyword = slz.validated_data.get("keyword")
+        if keyword:
             queryset = queryset.filter(
-                Q(name__icontains=slz.validated_data["keyword"])
-                | Q(description__icontains=slz.validated_data["keyword"])
+                Q(name__icontains=keyword) | Q(description__icontains=keyword) | Q(_labels__icontains=keyword)
             )
+
+        # tenant_id filter here
+        user_tenant_id = get_user_tenant_id(request)
+        if user_tenant_id:
+            queryset = gateway_mcp_server_filter_by_user_tenant_id(queryset, user_tenant_id)
 
         # optimize query by using select_related
         queryset = queryset.select_related("gateway", "stage")
@@ -77,14 +87,17 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
 
         page = self.paginate_queryset(queryset)
 
-        gateway_ids = [mcp_server.gateway.id for mcp_server in page]
+        gateway_ids = list({mcp_server.gateway.id for mcp_server in page})
+        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config(gateway_ids)
         gateways = {
             gateway.id: {
                 "id": gateway.id,
                 "name": gateway.name,
+                "is_official": GatewayTypeHandler.is_official(gateway_auth_configs[gateway.id].gateway_type),
             }
             for gateway in Gateway.objects.filter(id__in=gateway_ids)
         }
+
         stage_ids = [mcp_server.stage.id for mcp_server in page]
         stages = {
             stage.id: {
@@ -129,6 +142,9 @@ class MCPMarketplaceServerRetrieveApi(generics.RetrieveAPIView):
             raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关未启用，无法访问。"))
         if instance.stage.status != StageStatusEnum.ACTIVE.value:
             raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关对应的环境未启用，无法访问。"))
+
+        user_tenant_id = get_user_tenant_id(request)
+        check_user_can_access_gateway(instance.gateway.tenant_mode, instance.gateway.tenant_id, user_tenant_id)
 
         template_name = f"mcp_server/{get_current_language_code()}/guideline.md"
         guideline = render_to_string(
@@ -175,7 +191,6 @@ class MCPMarketplaceServerRetrieveApi(generics.RetrieveAPIView):
                 "labels": labels,
             },
         )
-        # FIXME: return the tools details and usage page
         # 返回工具列表页面需要的信息
         return OKJsonResponse(data=serializer.data)
 
@@ -203,6 +218,9 @@ class MCPMarketplaceServerToolDocRetrieveApi(generics.RetrieveAPIView):
             raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关未启用，无法访问。"))
         if instance.stage.status != StageStatusEnum.ACTIVE.value:
             raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关对应的环境未启用，无法访问。"))
+
+        user_tenant_id = get_user_tenant_id(request)
+        check_user_can_access_gateway(instance.gateway.tenant_mode, instance.gateway.tenant_id, user_tenant_id)
 
         resource_name = kwargs.get("tool_name")
 

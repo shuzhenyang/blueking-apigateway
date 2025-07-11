@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,10 +22,11 @@ from django.conf import settings
 from elasticsearch_dsl import Search
 from elasticsearch_dsl.aggs import A
 
-from apigateway.biz.access_log.constants import ES_OUTPUT_FIELDS
-from apigateway.common.es.clients import BKLogESClient
+from apigateway.service.es.clients import BKLogESClient
 from apigateway.utils import time as time_utils
 from apigateway.utils.time import SmartTimeRange
+
+from .constants import ES_OUTPUT_FIELDS
 
 logger = logging.getLogger(__name__)
 

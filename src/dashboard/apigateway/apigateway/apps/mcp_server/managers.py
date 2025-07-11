@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,7 +20,7 @@ from typing import List
 
 from django.db import models
 
-from apigateway.apps.permission.utils import calculate_renew_time
+from apigateway.common.time import calculate_renew_time
 
 
 class MCPServerAppPermissionManager(models.Manager):
@@ -40,7 +40,7 @@ class MCPServerAppPermissionApplyManager(models.Manager):
         queryset = queryset.filter(status__in=status_list)
 
         if bk_app_code:
-            queryset = queryset.filter(bk_app_code=bk_app_code)
+            queryset = queryset.filter(bk_app_code__icontains=bk_app_code)
         if applied_by:
             queryset = queryset.filter(applied_by=applied_by)
 

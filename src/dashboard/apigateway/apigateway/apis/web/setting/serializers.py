@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,6 +23,12 @@ class LoginTicket(serializers.Serializer):
     key = serializers.CharField()
     cookie_name = serializers.CharField()
 
+    class Meta:
+        ref_name = "apigateway.apis.web.setting.serializers.LoginTicket"
+
 
 class UserAuthTypeOutputSLZ(serializers.Serializer):
     login_ticket = serializers.ListField(child=LoginTicket(), help_text="登录票据")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.setting.serializers.UserAuthTypeOutputSLZ"

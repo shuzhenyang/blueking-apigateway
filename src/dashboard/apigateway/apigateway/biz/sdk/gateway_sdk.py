@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,10 +18,12 @@
 from typing import Dict, List
 
 from django.db.models import Count
+from django.db.transaction import atomic
 
-from apigateway.apps.support.api_sdk.models import SDKFactory
 from apigateway.apps.support.models import GatewaySDK
 from apigateway.core.models import Release
+
+from .models import SDKFactory
 
 
 class GatewaySDKHandler:
@@ -102,3 +104,17 @@ class GatewaySDKHandler:
                 data[gateway_id].append(sdk_dict)
 
         return data
+
+    @staticmethod
+    @atomic
+    def mark_is_recommended(sdk: GatewaySDK):
+        # 清理之前的标记
+        GatewaySDK.objects.filter(
+            is_recommended=True,
+            gateway=sdk.gateway,
+            language=sdk.language,
+        ).update(is_public_latest=False, is_recommended=False)
+
+        sdk.is_public_latest = True
+        sdk.is_recommended = True
+        sdk.save(update_fields=["is_public_latest", "is_recommended"])

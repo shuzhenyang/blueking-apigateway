@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -34,8 +34,8 @@ class SystemDocCategoryHandler:
 
     @staticmethod
     def _get_system_doc_categories_by_db():
-        from apigateway.apps.esb.bkcore.models import DocCategory, SystemDocCategory
-        from apigateway.apps.esb.constants import DataTypeEnum
+        from apigateway.apps.esb.bkcore.models import DocCategory, SystemDocCategory  # noqa
+        from apigateway.apps.esb.constants import DataTypeEnum  # noqa
 
         board_to_category_ids = SystemDocCategory.objects.group_category_id_by_board()
         category_id_to_system_ids = SystemDocCategory.objects.group_system_id_by_category_id()

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -32,6 +32,9 @@ class AuthorizationSLZ(serializers.Serializer):
     uin = serializers.CharField(allow_blank=True, required=False, help_text="uin")
     skey = serializers.CharField(allow_blank=True, required=False, help_text="skey")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.api_test.serializers.AuthorizationSLZ"
+
     def validate_uin(self, value):
         try:
             return value.lstrip("o0")
@@ -57,6 +60,9 @@ class APITestInputSLZ(serializers.Serializer):
     )
     authorization = AuthorizationSLZ(required=False, allow_null=True, help_text="认证信息")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.api_test.serializers.APITestInputSLZ"
+
     def validate(self, data: Dict[str, Any]) -> Dict[str, Any]:
         data.setdefault("authorization", {})
         if data.get("use_test_app"):
@@ -72,6 +78,9 @@ class APITestOutputSLZ(serializers.Serializer):
     body = serializers.CharField(help_text="响应体内容")
     headers = serializers.DictField(help_text="响应头")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.api_test.serializers.APITestOutputSLZ"
+
 
 class APIDebugHistoriesListOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True, help_text="测试历史ID")
@@ -80,3 +89,6 @@ class APIDebugHistoriesListOutputSLZ(serializers.Serializer):
     resource_name = serializers.CharField(read_only=True, help_text="资源名称")
     request = serializers.JSONField(help_text="请求参数")
     response = serializers.JSONField(help_text="返回结果")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.api_test.serializers.APIDebugHistoriesListOutputSLZ"

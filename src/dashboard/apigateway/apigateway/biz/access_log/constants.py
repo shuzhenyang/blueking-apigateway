@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,6 +17,7 @@
 #
 import re
 
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 ES_LOG_FIELDS = [
@@ -152,6 +153,17 @@ ES_LOG_FIELDS = [
     },
 ]
 
+
+# insert into the 3rd position of ES_LOG_FIELDS
+if settings.ENABLE_MULTI_TENANT_MODE:
+    ES_LOG_FIELDS.insert(
+        2,
+        {
+            "label": _("请求租户"),
+            "field": "bk_tenant_id",
+            "is_filter": True,
+        },
+    )
 
 # ES_QUERY_FIELDS = [field["field"] for field in ES_LOG_FIELDS if field["is_filter"]]
 

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -30,6 +30,9 @@ class GatewaySDKGenerateInputSLZ(serializers.Serializer):
     resource_version_id = serializers.IntegerField(required=True, help_text="资源版本号id")
     language = serializers.ChoiceField(choices=ProgrammingLanguageEnum.get_choices(), help_text="sdk语言")
     version = serializers.CharField(label="版本", default="", allow_null=True, allow_blank=True, help_text="sdk版本号")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.sdk.serializers.GatewaySDKGenerateInputSLZ"
 
     def validate(self, data):
         # 用户指定版本号的情况下，需要检查一下版本是否存在
@@ -61,10 +64,16 @@ class GatewaySDKQueryInputSLZ(serializers.Serializer):
     resource_version_id = serializers.IntegerField(allow_null=True, required=False, help_text="资源版本号id")
     keyword = serializers.CharField(allow_blank=True, required=False, help_text="查询关键字，支持模糊匹配")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.sdk.serializers.GatewaySDKQueryInputSLZ"
+
 
 class ResourceVersionInfoSlz(serializers.Serializer):
     id = serializers.IntegerField(help_text="资源版本号id")
     version = serializers.CharField(help_text="资源版本")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.sdk.serializers.ResourceVersionInfoSlz"
 
 
 class GatewaySDKListOutputSLZ(serializers.Serializer):

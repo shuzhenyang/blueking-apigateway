@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,8 +27,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils.encoding import smart_bytes
 
 from apigateway.apps.esb.bkcore.models import FunctionController
-from apigateway.biz.gateway_jwt import GatewayJWTHandler
 from apigateway.core.models import Gateway
+from apigateway.service.gateway_jwt import GatewayJWTHandler
 from apigateway.utils.django import get_object_or_None
 
 logger = logging.getLogger(__name__)

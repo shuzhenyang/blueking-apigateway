@@ -44,12 +44,14 @@
               </bk-select>
             </bk-form-item>
             <bk-form-item :label="t('申请人')" class="mb20 flex-1" label-width="100">
-              <bk-input
-                clearable
-                type="search"
-                v-model="filterData.applied_by"
-                :placeholder="t('请输入用户')">
-              </bk-input>
+              <bk-select v-model="filterData.applied_by" clearable :placeholder="t('请选择用户')">
+                <bk-option
+                  v-for="option of applicantList"
+                  :key="option"
+                  :id="option"
+                  :name="option">
+                </bk-option>
+              </bk-select>
             </bk-form-item>
           </bk-form>
         </div>
@@ -159,8 +161,11 @@ import { useQueryList } from '@/hooks';
 import {
   getMcpAppPermissionApply,
   updateMcpPermissions,
-  getMcpMarketplace,
+  getMcpPermissionsApplicant,
 } from '@/http/mcp-market';
+import {
+  getServers,
+} from '@/http/mcp-server';
 // @ts-ignore
 import TableEmpty from '@/components/table-empty.vue';
 // @ts-ignore
@@ -198,6 +203,7 @@ const statusMap = reactive({
   pending: t('未审批'),
 });
 const mcpList = ref([]);
+const applicantList = ref([]);
 const approveForm = ref();
 const applyActionDialogConf = reactive({
   isShow: false,
@@ -225,14 +231,15 @@ const rules = reactive({
 });
 
 const getMcpList = async () => {
-  const params = {
-    offset: 0,
-    limit: 999,
-  };
-  const res = await getMcpMarketplace(params);
+  const res = await getServers(common.apigwId);
   mcpList.value = res.results;
 };
 getMcpList();
+
+const getApplicant = async () => {
+  const response = await getMcpPermissionsApplicant(common.apigwId, filterData.value.mcp_server_id);
+  applicantList.value = response?.applicants || [];
+};
 
 const handleTabChange = (name: string) => {
   if (name === filterData.value.state) {
@@ -361,6 +368,16 @@ watch(
     if (val) {
       filterData.value.mcp_server_id = Number(val) || 0;
       defaultMcpId.value = Number(val) || 0;
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => filterData.value.mcp_server_id,
+  (val) => {
+    if (val) {
+      getApplicant();
     }
   },
   { immediate: true },

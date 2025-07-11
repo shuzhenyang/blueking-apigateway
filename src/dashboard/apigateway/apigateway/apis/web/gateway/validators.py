@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,7 +20,7 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from rest_framework import serializers
 
-from apigateway.components.paas import is_app_code_occupied
+from apigateway.components.bkpaas import is_app_code_occupied
 from apigateway.core.constants import GatewayKindEnum
 
 
@@ -50,5 +50,9 @@ class ProgrammableGatewayNameValidator:
         if attrs.get("kind") == GatewayKindEnum.PROGRAMMABLE.value:
             name = attrs.get("name", "")
             # check if the name is already occupied on PaaS
-            if is_app_code_occupied(name):
+
+            gateway_tenant_mode = attrs.get("tenant_mode", "")
+            gateway_tenant_id = attrs.get("tenant_id", "")
+
+            if is_app_code_occupied(gateway_tenant_mode, gateway_tenant_id, name):
                 raise serializers.ValidationError(self.message)

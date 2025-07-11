@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -25,7 +25,7 @@ from rest_framework import generics, status
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.biz.audit import Auditor
 from apigateway.biz.backend import BackendHandler
-from apigateway.biz.proxy import ProxyHandler
+from apigateway.biz.resource import ProxyHandler
 from apigateway.common.error_codes import error_codes
 from apigateway.core.models import Backend, BackendConfig, Stage
 from apigateway.utils.django import get_model_dict

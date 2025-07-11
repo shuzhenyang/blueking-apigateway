@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -46,6 +46,7 @@ class BackendInputSLZ(serializers.Serializer):
     configs = serializers.ListField(child=BackendConfigSLZ(), allow_empty=False, help_text="配置")
 
     class Meta:
+        ref_name = "apigateway.apis.web.backend.serializers.BackendInputSLZ"
         validators = [
             UniqueTogetherValidator(
                 queryset=Backend.objects.all(),
@@ -97,6 +98,7 @@ class BackendListOutputSLZ(serializers.ModelSerializer):
     deletable = serializers.SerializerMethodField(help_text="是否可删除")
 
     class Meta:
+        ref_name = "apigateway.apis.web.backend.serializers.BackendListOutputSLZ"
         model = Backend
         fields = ["id", "name", "description", "resource_count", "deletable", "updated_time"]
 
@@ -115,6 +117,9 @@ class BackendRetrieveOutputSLZ(serializers.Serializer):
     name = serializers.CharField(help_text="名称")
     description = serializers.CharField(help_text="描述")
     configs = serializers.SerializerMethodField(help_text="配置")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.backend.serializers.BackendRetrieveOutputSLZ"
 
     def get_configs(self, obj):
         backend_configs = BackendConfig.objects.filter(backend=obj).prefetch_related("stage")
@@ -136,7 +141,13 @@ class StageSLZ(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField(help_text="")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.backend.serializers.StageSLZ"
+
 
 class BackendUpdateOutputSLZ(serializers.Serializer):
     bound_stages = serializers.ListField(child=StageSLZ(), help_text="已绑定的环境列表")
     updated_stages = serializers.ListField(child=StageSLZ(), help_text="更改的环境列表")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.backend.serializers.BackendUpdateOutputSLZ"

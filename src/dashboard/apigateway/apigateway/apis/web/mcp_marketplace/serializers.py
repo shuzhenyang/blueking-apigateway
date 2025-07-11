@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -21,13 +21,16 @@ from typing import Any, Dict
 from rest_framework import serializers
 
 from apigateway.apps.mcp_server.constants import MCPServerStatusEnum
-from apigateway.apps.mcp_server.utils import build_mcp_server_url
+from apigateway.service.mcp.mcp_server import build_mcp_server_url
 
 
 class MCPServerListInputSLZ(serializers.Serializer):
     keyword = serializers.CharField(
         allow_blank=True, required=False, help_text="MCPServer 筛选条件，支持模糊匹配 MCPServer 名称或描述"
     )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerListInputSLZ"
 
 
 class MCPServerBaseOutputSLZ(serializers.Serializer):
@@ -49,6 +52,9 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
 
     tools_count = serializers.IntegerField(read_only=True, help_text="MCPServer 工具数量")
     url = serializers.SerializerMethodField(help_text="MCPServer 访问 URL")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerBaseOutputSLZ"
 
     def get_stage(self, obj) -> Dict[str, Any]:
         return self.context["stages"][obj.stage.id]
@@ -98,6 +104,7 @@ class MCPServerToolDocOutputSLZ(serializers.Serializer):
     type = serializers.CharField(read_only=True, help_text="文档类型")
     content = serializers.CharField(read_only=True, help_text="文档内容")
     updated_time = serializers.DateTimeField(read_only=True, help_text="文档更新时间")
+    schema = serializers.DictField(read_only=True, help_text="资源 schema")
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerToolDocOutputSLZ"

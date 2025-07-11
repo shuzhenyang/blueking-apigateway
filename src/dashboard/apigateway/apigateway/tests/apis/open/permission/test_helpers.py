@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -82,7 +82,7 @@ class TestResourcePermission:
         ],
     )
     def test_as_dict(self, resource, expected):
-        perm = ResourcePermission.parse_obj(resource)
+        perm = ResourcePermission.model_validate(resource)
         assert perm.as_dict() == expected
 
     @pytest.mark.parametrize(
@@ -95,7 +95,7 @@ class TestResourcePermission:
     def test_permission_level(self, mocked_resource, resource_perm_required, expected):
         mocked_resource["resource_perm_required"] = resource_perm_required
 
-        perm = ResourcePermission.parse_obj(mocked_resource)
+        perm = ResourcePermission.model_validate(mocked_resource)
         assert perm.permission_level == expected
 
     @pytest.mark.parametrize(
@@ -161,7 +161,7 @@ class TestResourcePermission:
 
         mocked_resource.update(params)
 
-        perm = ResourcePermission.parse_obj(mocked_resource)
+        perm = ResourcePermission.model_validate(mocked_resource)
         assert perm.permission_status == expected
 
     @pytest.mark.parametrize(
@@ -249,7 +249,7 @@ class TestResourcePermission:
 
         mocked_resource.update(params)
 
-        perm = ResourcePermission.parse_obj(mocked_resource)
+        perm = ResourcePermission.model_validate(mocked_resource)
         assert perm.expires_in == expected
 
 

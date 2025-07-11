@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -66,12 +66,7 @@ class TestResourceVersionListCreateApi:
         result = response.json()
         assert result["data"]["count"] == 0
 
-    def test_create(self, request_view, fake_gateway, fake_resource, mocker):
-        mocker.patch(
-            "apigateway.biz.resource_version.ResourceVersionHandler.make_version",
-            return_value=[{"name": "test"}],
-        )
-
+    def test_create(self, request_view, fake_gateway, fake_resource, fake_resource_version, mocker):
         resp = request_view(
             method="POST",
             view_name="openapi.resource_versions.list_create",
@@ -96,7 +91,7 @@ class TestResourceVersionReleaseApi:
     def test_release(self, faker, request_view, fake_admin_user, fake_gateway, mocker):
         G(ResourceVersion, gateway=fake_gateway)
         mocker.patch(
-            "apigateway.biz.releaser.BaseGatewayReleaser.release",
+            "apigateway.biz.gateway.releaser.GatewayReleaser.release",
             return_value=None,
         )
         mocker.patch(

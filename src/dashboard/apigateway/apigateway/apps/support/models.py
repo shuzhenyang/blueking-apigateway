@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,13 +20,12 @@ import json
 from typing import ClassVar
 
 from django.db import models
-from django.db.transaction import atomic
 from django.utils.translation import gettext_lazy as _
 from jsonfield import JSONField
 
 from apigateway.apps.support.constants import DocLanguageEnum, DocSourceEnum, DocTypeEnum, ProgrammingLanguageEnum
 from apigateway.apps.support.managers import (
-    APISDKManager,
+    GatewaySDKManager,
     ReleasedResourceDocManager,
     ResourceDocVersionManager,
 )
@@ -130,11 +129,13 @@ class GatewaySDK(ConfigModelMixin):
     resource_version = models.ForeignKey(ResourceVersion, on_delete=models.CASCADE, blank=True, null=True)
     name = models.CharField(max_length=128, blank=True, default="", help_text=_("SDK 名称"))
     url = models.TextField(blank=True, default="", help_text=_("下载地址"))
-    filename = models.CharField(max_length=128, help_text=_("SDK 文件名, 废弃"))
     language = models.CharField(max_length=32, choices=ProgrammingLanguageEnum.get_choices())
     version_number = models.CharField(max_length=64)
     include_private_resources = models.BooleanField(default=False)
+    # FIXME: remove those fields
+    filename = models.CharField(max_length=128, help_text=_("SDK 文件名, 废弃"))
     is_public_latest = models.BooleanField(default=False, db_index=True, help_text=_("废弃"))
+
     # is_recommended 说明这个版本是被推荐的，隐含了2个前提
     # 1. 这个版本是公开的
     # 2. 这个版本是最新的
@@ -146,7 +147,7 @@ class GatewaySDK(ConfigModelMixin):
 
     schema = models.ForeignKey(Schema, on_delete=models.PROTECT, null=True)
 
-    objects: ClassVar[APISDKManager] = APISDKManager()
+    objects: ClassVar[GatewaySDKManager] = GatewaySDKManager()
 
     def __self__(self):
         return f"<APISDK: {self.gateway}>"
@@ -156,16 +157,3 @@ class GatewaySDK(ConfigModelMixin):
         verbose_name_plural = _("网关SDK")
         db_table = "support_api_sdk"
         unique_together = ("gateway", "language", "version_number")
-
-    @atomic
-    def mark_is_recommended(self):
-        # FIXME: should move to manager or biz
-        # 清理之前的标记
-        GatewaySDK.objects.filter(
-            is_recommended=True,
-            gateway=self.gateway,
-        ).update(is_public_latest=False, is_recommended=False)
-
-        self.is_public_latest = True
-        self.is_recommended = True
-        self.save(update_fields=["is_public_latest", "is_recommended"])

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -29,7 +29,7 @@ class PluginConfigManager(models.Manager):
 
 
 class PluginBindingManager(models.Manager):
-    def delete_by_gateway_id(self, gateway_id):
+    def delete_by_gateway_id(self, gateway_id: int):
         self.filter(gateway_id=gateway_id).delete()
 
     def create_or_update_bindings(

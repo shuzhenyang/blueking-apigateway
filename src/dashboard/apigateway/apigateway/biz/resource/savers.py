@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,17 +20,17 @@ from typing import Any, Dict, List
 
 from django.db.models import Count
 from django.utils.translation import gettext as _
-from pydantic import parse_obj_as
+from pydantic import TypeAdapter
 
 from apigateway.apps.label.models import APILabel, ResourceLabel
 from apigateway.apps.openapi.models import OpenAPIResourceSchema
-from apigateway.biz.resource import ResourceHandler
 from apigateway.common.factories import SchemaFactory
 from apigateway.core.constants import ContextScopeTypeEnum, ContextTypeEnum, ProxyTypeEnum
 from apigateway.core.models import Context, Gateway, Proxy, Resource
 from apigateway.utils.time import now_datetime
 
 from .models import ResourceData
+from .resource import ResourceHandler
 
 BULK_BATCH_SIZE = 100
 
@@ -47,7 +47,7 @@ class ResourcesSaver:
 
     @classmethod
     def from_resources(cls, gateway: Gateway, resources: List[Dict[str, Any]], username: str):
-        resource_data_list = parse_obj_as(List[ResourceData], resources)
+        resource_data_list = TypeAdapter(List[ResourceData]).validate_python(resources)
         return cls(gateway, resource_data_list, username)
 
     def save(self) -> List[Resource]:
@@ -197,7 +197,7 @@ class ResourcesSaver:
             context = contexts.get(resource_data.resource.id)
 
             auth_config = (context and context.config) or ResourceHandler.get_default_auth_config()
-            auth_config.update(resource_data.auth_config.dict())
+            auth_config.update(resource_data.auth_config.model_dump())
 
             if context:
                 context._config = json.dumps(auth_config)

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -71,7 +71,7 @@ class StageConvertor(BaseConvertor):
 
     def _get_default_stage_plugins(self) -> List[PluginConfig]:
         """Get the default plugins for stage, which is shared by all resources in the stage"""
-        default_plugins = [
+        default_stage_plugins = [
             # 2024-08-19 disable the bk-opentelemetry plugin, we should let each gateway set their own opentelemetry
             # PluginConfig(name="bk-opentelemetry"),
             PluginConfig(name="prometheus"),
@@ -107,9 +107,26 @@ class StageConvertor(BaseConvertor):
         ]
 
         if settings.GATEWAY_CONCURRENCY_LIMIT_ENABLED:
-            default_plugins.append(PluginConfig(name="bk-concurrency-limit"))
+            default_stage_plugins.append(PluginConfig(name="bk-concurrency-limit"))
 
-        return default_plugins
+        # 多租户模式
+        if settings.ENABLE_MULTI_TENANT_MODE:
+            default_stage_plugins.extend(
+                [
+                    PluginConfig(name="bk-tenant-verify"),
+                    PluginConfig(
+                        name="bk-tenant-validate",
+                        config={
+                            "tenant_mode": self._release_data.gateway.tenant_mode,
+                            "tenant_id": self._release_data.gateway.tenant_id,
+                        },
+                    ),
+                ]
+            )
+        else:
+            default_stage_plugins.append(PluginConfig(name="bk-default-tenant"))
+
+        return default_stage_plugins
 
     def _get_stage_plugins(self) -> List[PluginConfig]:
         return [

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -46,6 +46,9 @@ class AppPermissionQueryInputSLZ(serializers.Serializer):
         help_text="授权维度", choices=GrantDimensionEnum.get_choices(), required=False
     )
     applied_by = serializers.CharField(help_text="申请人", required=False)
+
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionQueryInputSLZ"
 
 
 class AppPermissionOutputSLZ(serializers.Serializer):
@@ -106,6 +109,9 @@ class AppPermissionRenewInputSLZ(serializers.Serializer):
         required=True,
     )
 
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionRenewInputSLZ"
+
     def validate(self, data):
         gateway_dimension_ids = data.get("gateway_dimension_ids", [])
         resource_dimension_ids = data.get("resource_dimension_ids", [])
@@ -127,6 +133,9 @@ class AppPermissionInputSLZ(serializers.Serializer):
         allow_null=True,
         help_text="资源ID列表",
     )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionInputSLZ"
 
 
 class AppPermissionExportInputSLZ(serializers.Serializer):
@@ -165,6 +174,9 @@ class AppPermissionExportInputSLZ(serializers.Serializer):
         help_text='resource维度:export_type 值为已选资源 "selected" 时，此项必填',
     )
 
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionExportInputSLZ"
+
     def validate(self, data):
         if data["export_type"] == ExportTypeEnum.SELECTED.value and (
             not data.get("gateway_permission_ids") and not data.get("resource_permission_ids")
@@ -176,6 +188,9 @@ class AppPermissionExportInputSLZ(serializers.Serializer):
 class AppPermissionExportOutputSLZ(AppPermissionOutputSLZ):
     grant_type = serializers.SerializerMethodField(help_text="过期时间")
     grant_dimension = serializers.SerializerMethodField(help_text="过期时间")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionExportOutputSLZ"
 
     def get_grant_type(self, obj):
         # 与前端展示逻辑保持一致, 管理员只知道主动授权和申请审批两种类型, 后续如有变更需与前端一块更改
@@ -202,6 +217,9 @@ class AppPermissionIDsSLZ(serializers.Serializer):
         default=PermissionApplyExpireDaysEnum.FOREVER.value,
     )
 
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionIDsSLZ"
+
 
 class AppPermissionApplyOutputSLZ(serializers.ModelSerializer):
     bk_app_code = serializers.CharField(label="", max_length=32, validators=[BKAppCodeValidator()])
@@ -210,6 +228,7 @@ class AppPermissionApplyOutputSLZ(serializers.ModelSerializer):
     grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度")
 
     class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionApplyOutputSLZ"
         model = AppPermissionApply
         fields = [
             "id",
@@ -240,6 +259,7 @@ class AppPermissionRecordOutputSLZ(serializers.ModelSerializer):
     grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度")
 
     class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionRecordOutputSLZ"
         model = AppPermissionRecord
         fields = [
             "id",
@@ -303,3 +323,6 @@ class AppPermissionApplyApprovalInputSLZ(serializers.Serializer):
         help_text="审批状态",
     )
     comment = serializers.CharField(allow_blank=True, max_length=512, help_text="审批意见")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.permission.serializers.AppPermissionApplyApprovalInputSLZ"

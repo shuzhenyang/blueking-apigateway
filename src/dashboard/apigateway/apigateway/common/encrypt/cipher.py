@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -85,18 +85,3 @@ class AESGCMCipher(AbstractCipher):
         nonce = decoded_encrypted_text[:MODE_GCM_NONCE_SIZE]
         ciphertext = decoded_encrypted_text[MODE_GCM_NONCE_SIZE:]
         return force_text(self._decrypt(ciphertext, nonce))
-
-
-def encrypt_with_random_nonce_to_base64(s: str, key: bytes) -> str:
-    """Shortcut function: encrypt a string with AES GCM mode"""
-    cipher = AESGCMCipher(key)
-    return cipher.encrypt_with_random_nonce_to_base64(s)
-
-
-def decrypt_with_random_nonce_from_base64(s: str, key: bytes) -> str:
-    """Shortcut function: decrypt a string with AES GCM mode"""
-    if not s:
-        return ""
-
-    cipher = AESGCMCipher(key)
-    return cipher.decrypt_with_random_nonce_from_base64(s)

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,15 +27,22 @@ from rest_framework import generics, status
 
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.biz.audit import Auditor
-from apigateway.biz.gateway import GatewayHandler
-from apigateway.biz.gateway_app_binding import GatewayAppBindingHandler
-from apigateway.biz.gateway_related_app import GatewayRelatedAppHandler
+from apigateway.biz.gateway import GatewayAppBindingHandler, GatewayHandler, GatewayRelatedAppHandler
 from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.common.constants import UserAuthTypeEnum
-from apigateway.common.contexts import GatewayAuthContext
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
-from apigateway.components.paas import create_paas_app
+from apigateway.common.tenant.constants import (
+    TENANT_ID_OPERATION,
+    TENANT_MODE_GLOBAL_DEFAULT_TENANT_ID,
+    TENANT_MODE_SINGLE_DEFAULT_TENANT_ID,
+    TenantModeEnum,
+)
+from apigateway.common.tenant.request import get_user_tenant_id
+from apigateway.common.tenant.user_credentials import get_user_credentials_from_request
+from apigateway.components.bkauth import list_all_apps_of_tenant, list_available_apps_for_tenant
+from apigateway.components.bkpaas import create_paas_app, update_app_maintainers
+from apigateway.components.bkuser import list_tenants
 from apigateway.controller.publisher.publish import trigger_gateway_publish
 from apigateway.core.constants import (
     GatewayKindEnum,
@@ -44,17 +51,18 @@ from apigateway.core.constants import (
     PublishSourceEnum,
 )
 from apigateway.core.models import Gateway
+from apigateway.service.contexts import GatewayAuthContext
 from apigateway.utils.django import get_model_dict
+from apigateway.utils.git import check_git_credentials
 from apigateway.utils.responses import OKJsonResponse
-from apigateway.utils.user_credentials import get_user_credentials_from_request
 
 from .serializers import (
     GatewayCreateInputSLZ,
     GatewayDevGuidelineOutputSLZ,
-    GatewayFeatureFlagsOutputSLZ,
     GatewayListInputSLZ,
     GatewayListOutputSLZ,
     GatewayRetrieveOutputSLZ,
+    GatewayTenantAppListOutputSLZ,
     GatewayUpdateInputSLZ,
     GatewayUpdateStatusInputSLZ,
 )
@@ -82,7 +90,10 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
 
     def list(self, request, *args, **kwargs):
         # 获取用户有权限的网关列表，后续切换到 IAM
-        gateways = GatewayHandler.list_gateways_by_user(request.user.username)
+
+        user_tenant_id = get_user_tenant_id(request)
+
+        gateways = GatewayHandler.list_gateways_by_user(request.user.username, user_tenant_id)
         gateway_ids = [gateway.id for gateway in gateways]
 
         slz = GatewayListInputSLZ(data=request.query_params)
@@ -121,12 +132,33 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
         return queryset.order_by(order_by)
 
     @transaction.atomic
-    def create(self, request, *args, **kwargs):
+    def create(self, request, *args, **kwargs):  # noqa
         slz = GatewayCreateInputSLZ(data=request.data, context={"created_by": request.user.username})
         slz.is_valid(raise_exception=True)
+        user_tenant_id = get_user_tenant_id(request)
 
         bk_app_codes = slz.validated_data.pop("bk_app_codes", None)
         language = slz.validated_data.get("extra_info", {}).get("language")
+
+        related_app_code = None
+
+        if settings.ENABLE_MULTI_TENANT_MODE:
+            if slz.validated_data["tenant_mode"] == TenantModeEnum.GLOBAL.value:
+                # 只有运营租户下的用户能创建 全租户网关
+                if user_tenant_id != TENANT_ID_OPERATION:
+                    raise error_codes.NO_PERMISSION.format(_("只有运营租户下的用户才能创建全租户网关。"), replace=True)
+
+                # set the tenant_id to "" if in global mode
+                slz.validated_data["tenant_id"] = TENANT_MODE_GLOBAL_DEFAULT_TENANT_ID
+            elif slz.validated_data["tenant_mode"] == TenantModeEnum.SINGLE.value:
+                if slz.validated_data["tenant_id"] != user_tenant_id:
+                    raise error_codes.NO_PERMISSION.format(
+                        _("普通租户（非运营租户）只能创建当前用户租户下的单租户网关。"), replace=True
+                    )
+        else:
+            # set the tenant_mode/tenant_id if not in multi-tenant mode => the frontend can ignore these fields
+            slz.validated_data["tenant_mode"] = TenantModeEnum.SINGLE.value
+            slz.validated_data["tenant_id"] = TENANT_MODE_SINGLE_DEFAULT_TENANT_ID
 
         # if kind is programmable, create paas app
         if slz.validated_data.get("kind") == GatewayKindEnum.PROGRAMMABLE.value:
@@ -135,15 +167,32 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
                 git_info = slz.validated_data.pop("programmable_gateway_git_info", None)
                 if not git_info:
                     raise error_codes.INVALID_ARGUMENT.format(_("可编程网关 Git 信息不能为空。"), replace=True)
+                # 校验 git_info 合法性
+                if not check_git_credentials(
+                    repo_url=git_info.get("repository"),
+                    username=git_info.get("account"),
+                    token=git_info.get("password"),
+                ):
+                    raise error_codes.INVALID_ARGUMENT.format(_("Git 信息无效。"), replace=True)
 
+            app_code = slz.validated_data["name"]
             ok = create_paas_app(
-                slz.validated_data["name"],
-                language,
-                git_info,
+                app_code=app_code,
+                language=language,
+                git_info=git_info,
                 user_credentials=get_user_credentials_from_request(request),
             )
             if not ok:
                 raise error_codes.INTERNAL.format(_("创建蓝鲸应用失败。"), replace=True)
+
+            update_app_maintainers(
+                app_code,
+                slz.validated_data["maintainers"],
+            )
+
+            # set the related app code, while the programmable gateway is created before the app syncing gateway
+            # the sync api will check the gateway_related_app_code
+            related_app_code = app_code
 
         # 1. save gateway
         slz.save(
@@ -162,6 +211,8 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
             allow_delete_sensitive_params=False,
             username=request.user.username,
             app_codes_to_binding=bk_app_codes,
+            # 网关关联应用
+            related_app_code=related_app_code,
         )
 
         # 3. record audit log
@@ -248,6 +299,12 @@ class GatewayRetrieveUpdateDestroyApi(generics.RetrieveUpdateDestroyAPIView):
         related_app_codes = slz.validated_data.pop("related_app_codes", None)
         if related_app_codes is not None:
             GatewayRelatedAppHandler.update_related_app_codes(request.gateway, related_app_codes)
+
+        if request.gateway.is_programmable:
+            update_app_maintainers(
+                slz.instance.name,
+                slz.instance.maintainers,
+            )
 
         Auditor.record_gateway_op_success(
             op_type=OpTypeEnum.MODIFY,
@@ -339,23 +396,32 @@ class GatewayUpdateStatusApi(generics.UpdateAPIView):
 @method_decorator(
     name="get",
     decorator=swagger_auto_schema(
-        operation_description="获取网关特性开关",
-        responses={status.HTTP_200_OK: GatewayFeatureFlagsOutputSLZ()},
+        operation_description="获取网关可配置的应用列表，用于应用选择器",
+        responses={status.HTTP_200_OK: GatewayTenantAppListOutputSLZ(many=True)},
         tags=["WebAPI.Gateway"],
     ),
 )
-class GatewayFeatureFlagsApi(generics.ListAPIView):
+class GatewayTenantAppListApi(generics.ListAPIView):
     queryset = Gateway.objects.all()
-    serializer_class = GatewayFeatureFlagsOutputSLZ
     lookup_url_kwarg = "gateway_id"
 
-    def list(self, request, *args, **kwargs):
+    def get(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        feature_flags = GatewayHandler.get_feature_flags(instance.pk)
-        slz = self.get_serializer({"feature_flags": feature_flags})
+        # 全租户网关，需要能配置所有的应用 => get tenant list, then get all apps of each tenant
+        if instance.tenant_mode == TenantModeEnum.GLOBAL.value:
+            apps = list_all_apps_of_tenant(TenantModeEnum.GLOBAL.value, "")
 
-        return OKJsonResponse(data=slz.data)
+            tenant_list = list_tenants()
+            tenant_ids = [tenant["id"] for tenant in tenant_list]
+            for tenant_id in tenant_ids:
+                apps.extend(list_all_apps_of_tenant(TenantModeEnum.SINGLE.value, tenant_id))
+
+        # 单租户网关，只能配置 全租户应用 + 本租户应用
+        else:
+            apps = list_available_apps_for_tenant(instance.tenant_mode, instance.tenant_id)
+
+        return OKJsonResponse(data=apps)
 
 
 @method_decorator(

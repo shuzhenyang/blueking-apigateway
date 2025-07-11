@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -38,6 +38,7 @@ class GatewayStatusEnum(StructuredEnum):
     ACTIVE = EnumField(1, "启用中")
 
 
+# FIXME: should be removed
 class MicroGatewayStatusEnum(StructuredEnum):
     """微网关实例状态"""
 
@@ -77,6 +78,7 @@ class ReleaseHistoryStatusEnum(StructuredEnum):
 
 class PublishEventEnum(StructuredEnum):
     # dashboard
+    # NOTE: typo here, but it been stored in database, so keep it
     VALIDATE_CONFIGURATION = EnumField("validata_configuration", _("配置校验"))
     GENERATE_TASK = EnumField("generate_release_task", _("生成发布任务"))
     DISTRIBUTE_CONFIGURATION = EnumField("distribute_configuration", _("下发配置"))

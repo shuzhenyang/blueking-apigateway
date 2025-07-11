@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -28,6 +28,7 @@ from jsonfield import JSONField
 
 from apigateway.common.i18n.field import I18nProperty
 from apigateway.common.mixins.models import ConfigModelMixin, OperatorModelMixin, TimestampedModelMixin
+from apigateway.common.tenant.constants import TenantModeEnum
 from apigateway.core import managers
 from apigateway.core.constants import (
     DEFAULT_STAGE_NAME,
@@ -75,6 +76,15 @@ class Gateway(TimestampedModelMixin, OperatorModelMixin):
 
     _maintainers = models.CharField(db_column="maintainers", max_length=1024, default="")
     _developers = models.CharField(db_column="developers", max_length=1024, blank=True, null=True, default="")
+
+    # tenant
+    tenant_mode = models.CharField(
+        max_length=32,
+        blank=False,
+        null=False,
+        choices=TenantModeEnum.get_choices(),
+    )
+    tenant_id = models.CharField(max_length=32, blank=True, null=False)
     _doc_maintainers = JSONField(
         db_column="doc_maintainers", default=dict, dump_kwargs={"indent": None}, blank=True, null=True
     )
@@ -293,8 +303,8 @@ class Proxy(ConfigModelMixin):
 
     backend = models.ForeignKey("Backend", null=True, default=None, on_delete=models.PROTECT)
 
-    # TODO: 1.14 待删除
-    schema = models.ForeignKey(Schema, on_delete=models.PROTECT)
+    # FIXME: remote it later after 1.16/1.17
+    schema = models.ForeignKey(Schema, on_delete=models.PROTECT, blank=True, null=True)
 
     # config = from ConfigModelMixin
 

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -31,14 +31,17 @@ from django.urls import resolve, reverse
 from rest_framework.test import APIRequestFactory as DRFAPIRequestFactory
 
 from apigateway.apps.api_debug.models import APIDebugHistory
-from apigateway.apps.openapi.models import OpenAPIResourceSchema
+from apigateway.apps.openapi.models import (
+    OpenAPIFileResourceSchemaVersion,
+    OpenAPIResourceSchema,
+    OpenAPIResourceSchemaVersion,
+)
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum, PluginStyleEnum, PluginTypeCodeEnum
 from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm, PluginType
 from apigateway.apps.support.models import GatewaySDK, ReleasedResourceDoc, ResourceDoc, ResourceDocVersion
 from apigateway.biz.resource import ResourceHandler
 from apigateway.biz.resource.models import ResourceAuthConfig, ResourceBackendConfig, ResourceData
-from apigateway.biz.resource_version import ResourceVersionHandler
-from apigateway.common.contexts import GatewayAuthContext
+from apigateway.biz.resource_version import ResourceDocVersionHandler, ResourceVersionHandler
 from apigateway.common.factories import SchemaFactory
 from apigateway.core.constants import (
     ContextScopeTypeEnum,
@@ -66,6 +69,7 @@ from apigateway.core.models import (
 )
 from apigateway.schema import instances
 from apigateway.schema.data.meta_schema import init_meta_schemas
+from apigateway.service.contexts import GatewayAuthContext
 from apigateway.tests.utils.testing import dummy_time, get_response_json
 from apigateway.utils.yaml import yaml_dumps
 
@@ -83,7 +87,7 @@ def pytest_sessionstart(session):
     # Error:
     #   Add 'bkcore' to pytest_django.fixtures._django_db_helper.<locals>.PytestDjangoTestCase.databases
     #   to ensure proper test isolation and silence this failure
-    from django.test import TestCase
+    from django.test import TestCase  # noqa
 
     TestCase.multi_db = True
     TestCase.databases = "__all__"
@@ -127,6 +131,8 @@ def fake_gateway(faker):
         _maintainers=FAKE_USERNAME,
         status=1,
         is_public=True,
+        tenant_mode="single",
+        tenant_id="default",
     )
 
     GatewayAuthContext().save(gateway.pk, {})
@@ -633,7 +639,7 @@ def fake_resource_doc2(fake_resource2):
 @pytest.fixture
 def fake_resource_doc_version(fake_gateway, fake_resource_version, fake_resource_doc1, fake_resource_doc2):
     resource_doc_version = G(ResourceDocVersion, gateway=fake_gateway, resource_version=fake_resource_version)
-    resource_doc_version.data = ResourceDocVersion.objects.make_version(fake_gateway.id)
+    resource_doc_version.data = ResourceDocVersionHandler().make_version(fake_gateway.id)
     resource_doc_version.save()
     return resource_doc_version
 
@@ -648,6 +654,25 @@ def fake_released_resource_doc(fake_gateway, fake_resource_version, fake_resourc
         resource_id=fake_resource1.id,
         language="zh",
         data=resource_id_to_data[fake_resource1.id],
+    )
+
+
+@pytest.fixture
+def fake_openapi_resource_schema_version(fake_resource_version):
+    return G(
+        OpenAPIResourceSchemaVersion,
+        resource_version=fake_resource_version,
+        schema={},
+    )
+
+
+@pytest.fixture
+def fake_openapi_file_resource_schema_version(fake_resource_version):
+    return G(
+        OpenAPIFileResourceSchemaVersion,
+        gateway=fake_resource_version.gateway,
+        resource_version=fake_resource_version,
+        schema={},
     )
 
 

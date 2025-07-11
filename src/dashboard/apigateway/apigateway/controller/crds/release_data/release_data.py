@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -25,9 +25,6 @@ from django.utils.functional import cached_property
 
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.apps.plugin.models import PluginBinding
-from apigateway.biz.gateway_jwt import GatewayJWTHandler
-from apigateway.common.contexts import GatewayAuthContext
-from apigateway.common.plugin.convertor import PluginConvertorFactory
 from apigateway.controller.crds.release_data.base import PluginData
 from apigateway.core.constants import (
     DEFAULT_BACKEND_NAME,
@@ -35,6 +32,9 @@ from apigateway.core.constants import (
     ContextTypeEnum,
 )
 from apigateway.core.models import BackendConfig, Context, Gateway, Release, ResourceVersion, Stage
+from apigateway.service.contexts import GatewayAuthContext
+from apigateway.service.gateway_jwt import GatewayJWTHandler
+from apigateway.service.plugin.convertor import PluginConvertorFactory
 
 logger = logging.getLogger(__name__)
 

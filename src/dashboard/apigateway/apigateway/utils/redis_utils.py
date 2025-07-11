@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -54,6 +54,9 @@ def get_redis_pool(redis_conf):
             ssl_certfile=redis_conf.get("tls_cert_file"),
             ssl_keyfile=redis_conf.get("tls_cert_key_file"),
             ssl_check_hostname=redis_conf.get("tls_check_hostname", False),
+            # redis-py will send SETINFO command, not valid for older version redis
+            lib_name=None,
+            lib_version=None,
         )
 
     return redis.BlockingConnectionPool(
@@ -64,6 +67,9 @@ def get_redis_pool(redis_conf):
         max_connections=redis_conf["max_connections"],
         socket_timeout=REDIS_TIMEOUT,
         timeout=REDIS_TIMEOUT,
+        # redis-py will send SETINFO command, not valid for older version redis
+        lib_name=None,
+        lib_version=None,
     )
 
 
@@ -126,7 +132,7 @@ class Lock(object):
                 time.sleep(1)
         # 获取锁超时，抛出 LockTimeout 异常
         errmsg = "lock[key:%s] timeout|timeout:%s,try_get_times:%s" % (self.key, self.timeout, self.try_get_times)
-        logging.error(errmsg)
+        logger.error(errmsg)
         raise LockTimeout("Timeout while waiting for lock")
 
     def __exit__(self, exc_type, exc_value, traceback):

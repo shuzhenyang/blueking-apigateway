@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -67,9 +67,7 @@ class TestTriggerGatewayPublish:
         source = PublishSourceEnum.BACKEND_UPDATE
         ok, msg = _is_gateway_ok_for_releasing(fake_release, source)
         assert ok is False
-        assert (
-            f"The data structure of version 【{fake_release.resource_version.object_display}】 is incompatible" in msg
-        )
+        assert f"The data structure of version [{fake_release.resource_version.object_display}] is incompatible" in msg
 
     def test__save_release_history(self, fake_release):
         source = PublishSourceEnum.BACKEND_UPDATE

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,7 +23,7 @@ from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
 from apigateway.apps.monitor.models import AlarmRecord, AlarmStrategy
-from apigateway.biz.monitor import ResourceMonitorHandler
+from apigateway.biz.monitor import MonitorHandler
 from apigateway.common.factories import SchemaFactory
 from apigateway.utils.responses import OKJsonResponse
 from apigateway.utils.time import now_datetime
@@ -263,7 +263,7 @@ class AlarmRecordSummaryListApi(generics.ListAPIView):
 
         data = slz.validated_data
 
-        results = ResourceMonitorHandler.statistics_api_alarm_record(
+        results = MonitorHandler.statistics_gateway_alarm_record(
             username=self.request.user.username,
             time_start=data.get("time_start"),
             time_end=data.get("time_end"),

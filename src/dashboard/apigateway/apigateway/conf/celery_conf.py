@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,6 +16,8 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import os
+
 from celery.schedules import crontab
 
 # celery configuration
@@ -28,13 +30,15 @@ CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
-CELERY_IMPORTS = (
+CELERY_IMPORTS = [
     "apigateway.apps.monitor.tasks",
     "apigateway.apps.metrics.tasks",
     "apigateway.apps.permission.tasks",
-    "apigateway.apps.esb.component.tasks",
     "apigateway.controller.tasks",
-)
+]
+
+if os.getenv("ENABLE_MULTI_TENANT_MODE", "False").lower() not in ("true", "on", "ok", "y", "yes", "1"):
+    CELERY_IMPORTS.append("apigateway.apps.esb.component.tasks")
 
 CELERY_BEAT_SCHEDULE = {
     # "add-every-minute": {

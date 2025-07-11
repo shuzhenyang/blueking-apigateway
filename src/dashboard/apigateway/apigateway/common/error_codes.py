@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -128,6 +128,9 @@ error_codes.add_codes(
         ErrorCode("NOT_FOUND", 40000, _("数据不存在"), status_code=status.HTTP_404_NOT_FOUND),
         ErrorCode(
             "METHOD_NOT_ALLOWED", 40005, _("不支持当前的请求方法"), status_code=status.HTTP_405_METHOD_NOT_ALLOWED
+        ),
+        ErrorCode(
+            "REMOTE_REQUEST_ERROR", 40006, _("请求第三方 API 错误"), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
         ),
         ErrorCode("INTERNAL", 50103, _("处理请求时发生内部错误"), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR),
         ErrorCode("UNKNOWN", 40000, _("请求失败"), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR),

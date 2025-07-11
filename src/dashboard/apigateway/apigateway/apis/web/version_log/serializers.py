@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,3 +23,6 @@ class VersionLogSLZ(serializers.Serializer):
     version = serializers.CharField(label="版本号")
     date = serializers.CharField(label="更新日期")
     content = serializers.CharField(label="版本内容", help_text="markdown 文件内容")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.VersionLogSLZ"

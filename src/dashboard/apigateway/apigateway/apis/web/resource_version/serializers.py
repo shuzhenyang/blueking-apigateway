@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,12 +16,13 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-
 from rest_framework import serializers
 
 from apigateway.apis.web.constants import PLUGIN_MERGE_TYPE
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
-from apigateway.biz.constants import SEMVER_PATTERN, OpenAPIFormatEnum
+from apigateway.apps.support.constants import OpenAPIFormatEnum
+from apigateway.biz.constants import SEMVER_PATTERN
+from apigateway.biz.resource import ResourceOpenAPISchemaHandler
 from apigateway.biz.validators import ResourceVersionValidator
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.core.constants import ResourceVersionSchemaEnum, ResourceVersionTypeEnum
@@ -33,6 +34,7 @@ class ResourceVersionCreateInputSLZ(serializers.Serializer):
     comment = serializers.CharField(allow_blank=True, required=False, help_text="版本日志")
 
     class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionCreateInputSLZ"
         validators = [ResourceVersionValidator()]
 
 
@@ -61,6 +63,10 @@ class ResourceInfoSLZ(serializers.Serializer):
     plugins = serializers.SerializerMethodField(help_text="绑定插件")
 
     has_openapi_schema = serializers.SerializerMethodField(help_text="是否配置了 openapi schema")
+    openapi_schema = serializers.SerializerMethodField(help_text="资源openapi schema")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceInfoSLZ"
 
     def get_doc_updated_time(self, obj):
         return self.context["resource_doc_updated_time"].get(obj["id"], "")
@@ -116,7 +122,16 @@ class ResourceInfoSLZ(serializers.Serializer):
         return sorted(plugins, key=lambda x: (-x["priority"], x["binding_type"]))
 
     def get_has_openapi_schema(self, obj) -> bool:
-        return self.context["resource_id_with_schema_dict"].get(obj["id"], False)
+        return self._has_openapi_schema(obj)
+
+    def _has_openapi_schema(self, obj) -> bool:
+        schema = self.context["resource_id_with_schema_dict"].get(obj["id"])
+        return ResourceOpenAPISchemaHandler.has_openapi_schem(schema)
+
+    def get_openapi_schema(self, obj):
+        if self._has_openapi_schema(obj):
+            return self.context["resource_id_with_schema_dict"].get(obj["id"])
+        return {}
 
 
 class ResourceVersionRetrieveOutputSLZ(serializers.Serializer):
@@ -132,9 +147,15 @@ class ResourceVersionRetrieveOutputSLZ(serializers.Serializer):
     created_time = serializers.DateTimeField(help_text="创建时间")
     created_by = serializers.CharField(help_text="创建人")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionRetrieveOutputSLZ"
+
 
 class ResourceVersionListInputSLZ(serializers.Serializer):
     keyword = serializers.CharField(allow_blank=True, required=False, help_text="资源版本筛选条件，支持模糊匹配")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionListInputSLZ"
 
 
 class ResourceVersionListOutputSLZ(serializers.Serializer):
@@ -146,6 +167,9 @@ class ResourceVersionListOutputSLZ(serializers.Serializer):
     comment = serializers.CharField(help_text="版本日志")
     created_time = serializers.DateTimeField(help_text="创建时间")
     created_by = serializers.CharField(help_text="创建人")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionListOutputSLZ"
 
     def get_released_stages(self, obj):
         return self.context["released_stages"].get(obj["id"], [])
@@ -166,10 +190,16 @@ class ResourceVersionListOutputSLZ(serializers.Serializer):
 class NeedNewVersionOutputSLZ(serializers.Serializer):
     need_new_version = serializers.BooleanField(help_text="是否需要生成版本")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.NeedNewVersionOutputSLZ"
+
 
 class ResourceVersionDiffQueryInputSLZ(serializers.Serializer):
     source_resource_version_id = serializers.IntegerField(allow_null=True, help_text="对比源的版本号id")
     target_resource_version_id = serializers.IntegerField(allow_null=True, help_text="对比目标的版本号id")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionDiffQueryInputSLZ"
 
 
 class ResourceVersionResourceSLZ(serializers.Serializer):
@@ -179,11 +209,17 @@ class ResourceVersionResourceSLZ(serializers.Serializer):
     path = serializers.CharField(help_text="请求路径")
     diff = serializers.DictField(help_text="对比差异", allow_null=True)
 
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionResourceSLZ"
+
 
 class ResourceVersionDiffOutputSLZ(serializers.Serializer):
     add = ResourceVersionResourceSLZ()
     delete = ResourceVersionResourceSLZ()
     update = serializers.DictField(child=ResourceVersionResourceSLZ())
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionDiffOutputSLZ"
 
 
 class NextProgrammableDeployVersionGetInputSLZ(serializers.Serializer):
@@ -192,6 +228,9 @@ class NextProgrammableDeployVersionGetInputSLZ(serializers.Serializer):
         choices=ResourceVersionTypeEnum.get_choices(), help_text="版本类型：major/minor/patch"
     )
 
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.NextProgrammableDeployVersionGetInputSLZ"
+
 
 class ResourceVersionExportInputSLZ(serializers.Serializer):
     file_type = serializers.ChoiceField(
@@ -199,3 +238,6 @@ class ResourceVersionExportInputSLZ(serializers.Serializer):
         default=OpenAPIFormatEnum.YAML.value,
         help_text="导出的文件类型，如 yaml/json",
     )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionExportInputSLZ"

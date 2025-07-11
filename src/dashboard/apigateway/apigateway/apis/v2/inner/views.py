@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,17 +18,18 @@
 #
 import logging
 import operator
-from typing import Dict, List
+from typing import Dict
 
 from blue_krill.async_utils.django_utils import apply_async_on_commit
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 
 from apigateway.apis.v2.permissions import OpenAPIV2GatewayNamePermission, OpenAPIV2Permission
-from apigateway.apps.esb.bkcore.models import AppPermissionApplyRecord, ComponentSystem, ESBChannel
 from apigateway.apps.mcp_server.constants import (
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerPermissionActionEnum,
@@ -39,13 +40,15 @@ from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermissionA
 from apigateway.apps.permission.constants import GrantDimensionEnum, GrantTypeEnum, PermissionApplyExpireDaysEnum
 from apigateway.apps.permission.models import AppPermissionRecord, AppResourcePermission
 from apigateway.apps.permission.tasks import send_mail_for_perm_apply
-from apigateway.biz.esb.permissions import ComponentPermissionManager
 from apigateway.biz.mcp_server import MCPServerPermissionHandler
-from apigateway.biz.permission import PermissionDimensionManager
+from apigateway.biz.permission import PermissionDimensionManager, ResourcePermissionHandler
 from apigateway.biz.release import ReleaseHandler
 from apigateway.biz.resource import ResourceHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.error_codes import error_codes
+from apigateway.common.tenant.constants import TenantModeEnum
+from apigateway.common.tenant.query import gateway_filter_by_app_tenant_id
+from apigateway.components.bkauth import get_app_tenant_info
 from apigateway.core.constants import GatewayStatusEnum
 from apigateway.core.models import Gateway
 from apigateway.utils.responses import OKJsonResponse
@@ -90,6 +93,16 @@ class GatewayListApi(generics.ListAPIView):
         fuzzy = slz.validated_data.get("fuzzy")
 
         queryset = Gateway.objects.filter(status=GatewayStatusEnum.ACTIVE.value, is_public=True)
+
+        # 可以看到 全租户网关 + 本租户网关
+        tenant_id = None
+        if settings.ENABLE_MULTI_TENANT_MODE:
+            if not request.tenant_id:
+                raise ValidationError("tenant_id is required in multi-tenant mode")
+            tenant_id = request.tenant_id
+        if tenant_id:
+            queryset = gateway_filter_by_app_tenant_id(queryset, tenant_id)
+
         if name:
             # 模糊匹配，查询名称中包含 name 的网关 or 精确匹配，查询名称为 name 的网关
             queryset = queryset.filter(name__contains=name) if fuzzy else queryset.filter(name=name)
@@ -222,9 +235,20 @@ class GatewayAppPermissionApplyCreateApi(generics.CreateAPIView):
 
         data = slz.validated_data
 
+        app_code = data["target_app_code"]
+        # 全租户网关，谁都可以申请，单租户网关，只能本租户应用/全租户应用申请
+        if settings.ENABLE_MULTI_TENANT_MODE and request.gateway.tenant_mode != TenantModeEnum.GLOBAL.value:
+            gateway_tenant_id = request.gateway.tenant_id
+            app_tenant_mode, app_tenant_id = get_app_tenant_info(app_code)
+            if app_tenant_mode != TenantModeEnum.GLOBAL.value and app_tenant_id != gateway_tenant_id:
+                raise error_codes.NO_PERMISSION.format(
+                    f"app_code={app_code} is belongs to tenant {app_tenant_id}, should not apply the gateway of tenant {gateway_tenant_id}",
+                    replace=True,
+                )
+
         manager = PermissionDimensionManager.get_manager(data["grant_dimension"])
         record = manager.create_apply_record(
-            data["target_app_code"],
+            app_code,
             request.gateway,
             data.get("resource_ids") or [],
             data["grant_dimension"],
@@ -276,7 +300,7 @@ class AppPermissionRenewApi(generics.CreateAPIView):
         for gateway_id, resource_ids in ResourceHandler.group_by_gateway_id(data["resource_ids"]).items():
             gateway = Gateway.objects.get(id=gateway_id)
             # 如果应用 - 资源权限不存在，则将按网关的权限同步到应用 - 资源权限
-            AppResourcePermission.objects.sync_from_gateway_permission(
+            ResourcePermissionHandler.sync_from_gateway_permission(
                 gateway=gateway,
                 bk_app_code=data["target_app_code"],
                 resource_ids=resource_ids,
@@ -388,258 +412,6 @@ class AppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
                 "resource_id_map": ResourceHandler.get_id_to_resource(gateway_id=instance.gateway.id),
             },
         )
-        return OKJsonResponse(data=slz.data)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        query_serializer=serializers.EsbSystemListInputSLZ,
-        responses={status.HTTP_200_OK: serializers.EsbSystemListOutputSLZ(many=True)},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbSystemListApi(generics.ListAPIView):
-    permission_classes = [OpenAPIV2Permission]
-
-    def _filter_active_and_public_systems(self, boards: List[str]):
-        """
-        获取可用的组件系统列表
-        """
-        system_ids = ESBChannel.objects.filter_active_and_public_system_ids(
-            boards=boards,
-            allow_apply_permission=True,
-        )
-
-        return ComponentSystem.objects.filter(board__in=boards, id__in=system_ids)
-
-    def list(self, request, *args, **kwargs):
-        slz = serializers.EsbSystemListInputSLZ(data=request.query_params)
-        slz.is_valid(raise_exception=True)
-
-        queryset = self._filter_active_and_public_systems(boards=slz.validated_data["boards"])
-
-        slz = serializers.EsbSystemListOutputSLZ(queryset.order_by("board", "name"), many=True)
-        return OKJsonResponse(data=slz.data)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        query_serializer=serializers.EsbPermissionComponentListInputSLZ,
-        responses={status.HTTP_200_OK: serializers.EsbPermissionComponentListOutputSLZ(many=True)},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbPermissionComponentListApi(generics.ListAPIView):
-    permission_classes = [OpenAPIV2Permission]
-    serializer_class = serializers.EsbPermissionComponentListOutputSLZ
-
-    def list(self, request, *args, **kwargs):
-        system_id = self.kwargs["system_id"]
-
-        slz = serializers.EsbPermissionComponentListInputSLZ(data=request.query_params)
-        slz.is_valid(raise_exception=True)
-
-        queryset = ESBChannel.objects.filter_active_and_public_components(system_id=system_id)
-        components = ESBChannel.objects.get_components(queryset)
-
-        manager = ComponentPermissionManager.get_manager()
-        component_permissions = manager.list_permissions(slz.validated_data["target_app_code"], system_id, components)
-
-        output_slz = self.get_serializer(
-            sorted(component_permissions, key=operator.itemgetter("permission_level", "name")),
-            many=True,
-        )
-        return OKJsonResponse(data=output_slz.data)
-
-
-@method_decorator(
-    name="post",
-    decorator=swagger_auto_schema(
-        operation_description="创建申请资源权限的申请单据",
-        request_body=serializers.EsbAppPermissionApplyCreateInputSLZ,
-        responses={status.HTTP_201_CREATED: serializers.GatewayAppPermissionApplyCreateOutputSLZ()},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbAppPermissionApplyCreateApi(generics.CreateAPIView):
-    permission_classes = [OpenAPIV2Permission]
-    serializer_class = serializers.EsbAppPermissionApplyCreateInputSLZ
-
-    @transaction.atomic
-    def create(self, request, system_id: int, *args, **kwargs):
-        """创建申请资源权限的申请单据"""
-        try:
-            system = ComponentSystem.objects.get(id=system_id)
-        except ComponentSystem.DoesNotExist:
-            raise error_codes.NOT_FOUND
-
-        slz = self.get_serializer(
-            data=request.data,
-            context={
-                "system_id": system.id,
-            },
-        )
-        slz.is_valid(raise_exception=True)
-
-        data = slz.validated_data
-
-        manager = ComponentPermissionManager.get_manager()
-        record = manager.create_apply_record(
-            data["target_app_code"],
-            system,
-            data["component_ids"],
-            data["reason"],
-            data["expire_days"],
-            request.user.username,
-        )
-
-        return OKJsonResponse(
-            status=status.HTTP_201_CREATED,
-            data={
-                "record_id": record.id,
-            },
-        )
-
-
-@method_decorator(
-    name="post",
-    decorator=swagger_auto_schema(
-        operation_description="权限续期",
-        request_body=serializers.EsbAppPermissionRenewInputSLZ,
-        responses={status.HTTP_204_NO_CONTENT: ""},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbAppPermissionRenewPutApi(generics.CreateAPIView):
-    """
-    权限续期
-    """
-
-    permission_classes = [OpenAPIV2Permission]
-    serializer_class = serializers.EsbAppPermissionRenewInputSLZ
-
-    def post(self, request, *args, **kwargs):
-        slz = self.get_serializer(data=request.data)
-        slz.is_valid(raise_exception=True)
-
-        data = slz.validated_data
-
-        manager = ComponentPermissionManager.get_manager()
-        manager.renew_permission(
-            data["target_app_code"],
-            data["component_ids"],
-            data["expire_days"],
-        )
-
-        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        query_serializer=serializers.EsbAppPermissionListInputSLZ,
-        responses={status.HTTP_200_OK: serializers.EsbAppPermissionOutputSLZ(many=True)},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbAppPermissionListApi(generics.ListAPIView):
-    permission_classes = [OpenAPIV2Permission]
-
-    def list(self, request, *args, **kwargs):
-        """已申请权限列表"""
-        slz = serializers.EsbAppPermissionListInputSLZ(data=request.query_params)
-        slz.is_valid(raise_exception=True)
-
-        data = slz.validated_data
-
-        manager = ComponentPermissionManager.get_manager()
-        component_permissions = manager.list_applied_permissions(
-            data["target_app_code"],
-            data.get("expire_days_range"),
-        )
-
-        slz = serializers.EsbAppPermissionOutputSLZ(component_permissions, many=True)
-        output_data = sorted(slz.data, key=operator.itemgetter("system_name", "name"))
-        return OKJsonResponse(data=output_data)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        query_serializer=serializers.EsbAppPermissionApplyRecordListInputSLZ,
-        responses={status.HTTP_200_OK: serializers.EsbAppPermissionApplyRecordListOutputSLZ(many=True)},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbAppPermissionApplyRecordListApi(generics.ListAPIView):
-    permission_classes = [OpenAPIV2Permission]
-    serializer_class = serializers.EsbAppPermissionApplyRecordListInputSLZ
-
-    def list(self, request, *args, **kwargs):
-        slz = self.get_serializer(data=request.query_params)
-        slz.is_valid(raise_exception=True)
-
-        data = slz.validated_data
-
-        queryset = AppPermissionApplyRecord.objects.all()
-        queryset = AppPermissionApplyRecord.objects.filter_record(
-            queryset=queryset,
-            bk_app_code=data["target_app_code"],
-            applied_by=data.get("applied_by"),
-            applied_time_start=data.get("applied_time_start"),
-            applied_time_end=data.get("applied_time_end"),
-            status=data.get("apply_status"),
-            query=data.get("query"),
-            order_by="-id",
-        )
-
-        page = list(self.paginate_queryset(queryset))
-
-        manager = ComponentPermissionManager.get_manager()
-        manager.patch_permission_apply_records(page)
-
-        slz = serializers.EsbAppPermissionApplyRecordListOutputSLZ(page, many=True)
-        return OKJsonResponse(data=slz.data)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        query_serializer=serializers.EsbAppPermissionApplyRecordRetrieveInputSLZ,
-        responses={status.HTTP_200_OK: serializers.EsbAppPermissionApplyRecordRetrieveOutputSLZ()},
-        tags=["OpenAPI.V2.Inner"],
-    ),
-)
-class EsbAppPermissionApplyRecordRetrieveApi(generics.RetrieveAPIView):
-    permission_classes = [OpenAPIV2Permission]
-    serializer_class = serializers.EsbAppPermissionApplyRecordRetrieveInputSLZ
-
-    lookup_field = "id"
-
-    def get_queryset(self):
-        return Gateway.objects.all()
-
-    def get_object(self):
-        record_id = self.kwargs["record_id"]
-
-        slz = serializers.EsbAppPermissionApplyRecordRetrieveInputSLZ(data=self.request.query_params)
-        slz.is_valid(raise_exception=True)
-        data = slz.validated_data
-
-        try:
-            return AppPermissionApplyRecord.objects.get(bk_app_code=data["target_app_code"], id=record_id)
-        except AppPermissionApplyRecord.DoesNotExist:
-            raise error_codes.NOT_FOUND
-
-    def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
-
-        manager = ComponentPermissionManager.get_manager()
-        manager.patch_permission_apply_records([instance])
-
-        slz = serializers.EsbAppPermissionApplyRecordRetrieveOutputSLZ(instance)
         return OKJsonResponse(data=slz.data)
 
 

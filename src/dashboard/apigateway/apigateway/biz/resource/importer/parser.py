@@ -2,7 +2,7 @@
 #  #
 #  TencentBlueKing is pleased to support the open source community by making
 #  蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-#  Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+#  Copyright (C) 2025 Tencent. All rights reserved.
 #  Licensed under the MIT License (the "License"); you may not use this file except
 #  in compliance with the License. You may obtain a copy of the License at
 #  #
@@ -24,10 +24,10 @@ from urllib.parse import urlparse
 
 from django.utils.translation import gettext as _
 from openapi_spec_validator.versions import OPENAPIV30, OPENAPIV31
-from pydantic import parse_obj_as
+from pydantic import TypeAdapter
 
-from apigateway.biz.constants import OpenAPIFormatEnum
-from apigateway.biz.plugin.plugin_synchronizers import PluginConfigData
+from apigateway.apps.support.constants import OpenAPIFormatEnum
+from apigateway.biz.plugin.synchronizers import PluginConfigData
 from apigateway.biz.resource.importer.constants import VALID_METHOD_IN_SWAGGER_PATHITEM, OpenAPIExtensionEnum
 from apigateway.biz.resource.importer.schema import (
     convert_openapi2_formdata_to_openapi,
@@ -333,12 +333,14 @@ class OpenAPIV3Parser(BaseParser):
         return parsed_url.path
 
     def _get_openapi_schema(self, operation: Dict[str, Any]):
-        openapi_schema = {"version": self._openapi_version}
+        openapi_schema: Dict[str, Any] = {"version": self._openapi_version}
         if "parameters" in operation:
             openapi_schema["parameters"] = operation.get("parameters", [])
+            openapi_schema["none_schema"] = False
 
         if "requestBody" in operation:
             openapi_schema["requestBody"] = operation.get("requestBody", [])
+            openapi_schema["none_schema"] = False
 
         if "responses" in operation:
             openapi_schema["responses"] = operation.get("responses", [])
@@ -419,10 +421,12 @@ class ResourceDataConvertor:
                     enable_websocket=resource.get("enable_websocket", False),
                     is_public=resource.get("is_public", True),
                     allow_apply_permission=resource.get("allow_apply_permission", True),
-                    auth_config=ResourceAuthConfig.parse_obj(resource.get("auth_config", {})),
+                    auth_config=ResourceAuthConfig.model_validate(resource.get("auth_config", {})),
                     backend=backend,
-                    backend_config=ResourceBackendConfig.parse_obj(resource["backend_config"]),
-                    plugin_configs=parse_obj_as(Optional[List[PluginConfigData]], resource.get("plugin_configs")),
+                    backend_config=ResourceBackendConfig.model_validate(resource["backend_config"]),
+                    plugin_configs=TypeAdapter(Optional[List[PluginConfigData]]).validate_python(
+                        resource.get("plugin_configs")
+                    ),
                     # 在导入时，根据 metadata 中的 labels 创建 GatewayLabel，并补全 label_ids 数据
                     label_ids=[],
                     metadata=metadata,
@@ -533,6 +537,10 @@ class BaseExporter:
             # remove openapi version
             if "version" in schema:
                 del schema["version"]
+            # remove none_schema flag, 这个字段属于非openapi标准字段，不移除会导致生成文档有一次以及导出的yaml不合法
+            # todo：后续可以将这个字段添加到网关扩展字段里面才行
+            if "none_schema" in schema:
+                del schema["none_schema"]
 
             operation.update(schema)
 

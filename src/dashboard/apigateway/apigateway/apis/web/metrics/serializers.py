@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -37,6 +37,9 @@ class MetricsQueryRangeInputSLZ(serializers.Serializer):
     time_start = serializers.IntegerField(required=False, min_value=0, help_text="开始时间")
     time_end = serializers.IntegerField(required=False, min_value=0, help_text="结束时间")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.metrics.serializers.MetricsQueryRangeInputSLZ"
+
     def validate(self, data):
         if not (data.get("time_start") and data.get("time_end") or data.get("time_range")):
             raise serializers.ValidationError(_("参数 time_start+time_end, time_range 必须一组有效。"))
@@ -50,6 +53,9 @@ class MetricsQueryInstantInputSLZ(serializers.Serializer):
     time_range = serializers.IntegerField(required=False, min_value=0, help_text="时间范围")
     time_start = serializers.IntegerField(required=False, min_value=0, help_text="开始时间")
     time_end = serializers.IntegerField(required=False, min_value=0, help_text="结束时间")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.metrics.serializers.MetricsQueryInstantInputSLZ"
 
     def validate(self, data):
         if not (data.get("time_start") and data.get("time_end") or data.get("time_range")):
@@ -68,6 +74,9 @@ class MetricsQuerySummaryInputSLZ(serializers.Serializer):
     time_start = serializers.IntegerField(required=False, min_value=0, help_text="开始时间")
     time_end = serializers.IntegerField(required=False, min_value=0, help_text="结束时间")
 
+    class Meta:
+        ref_name = "apigateway.apis.web.metrics.serializers.MetricsQuerySummaryInputSLZ"
+
     def validate(self, data):
         if not (data.get("time_start") and data.get("time_end")):
             raise serializers.ValidationError(_("参数 time_start+time_end 必须同时有效。"))
@@ -82,6 +91,9 @@ class MetricsQuerySummaryCallerListInputSLZ(serializers.Serializer):
     stage_id = serializers.IntegerField(required=True, help_text="环境 id")
     time_start = serializers.IntegerField(required=False, min_value=0, help_text="开始时间")
     time_end = serializers.IntegerField(required=False, min_value=0, help_text="结束时间")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.metrics.serializers.MetricsQuerySummaryCallerListInputSLZ"
 
     def validate(self, data):
         if not (data.get("time_start") and data.get("time_end")):

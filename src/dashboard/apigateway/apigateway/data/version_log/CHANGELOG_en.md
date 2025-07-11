@@ -1,3 +1,37 @@
+<!-- 2025-06-06 -->
+# V1.17.0 Release Log
+
+### Features
+
+- Support multi-tenant
+
+### Bug Fixes
+
+- Fix: Backend service resource query error
+- Fix: Incorrect tooltips content in one-click group
+- Fix: Incorrect number of resource changes displayed when generating versions
+
+---
+
+<!-- 2025-07-04 -->
+# V1.16.1 Release Log
+
+### Features
+
+- Add resource version configuration export
+
+### Enhancements
+
+- Optimize MCP market display
+- MCP market filtering supports labels filtering
+- Optimize resource parameter configuration and comparison
+- Add MCP Server related open api
+- MCP Proxy supports application-side interface
+- Optimize MCP tool documentation display
+- Fix a batch of style issues
+
+---
+
 <!-- 2025-05-29 -->
 # V1.16.0 Release Log
 

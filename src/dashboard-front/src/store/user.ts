@@ -4,6 +4,10 @@ import type {
   IUser,
 } from '@/types/store';
 
+const {
+  BK_USER_WEB_API_URL,
+} = window;
+
 // 定义一个名为useUser的Pinia store
 export const useUser = defineStore('user', {
   // 定义store的状态
@@ -14,12 +18,17 @@ export const useUser = defineStore('user', {
     // 用户信息
     user: {
       username: '',
+      display_name: '',
       avatar_url: '',
+      tenant_id: '',
     },
     // 功能标志
     featureFlags: {},
   }),
   getters: {
+    apiBaseUrl: () => BK_USER_WEB_API_URL,
+    // 是否开启了多租户模式
+    isTenantMode: state => !!state?.featureFlags?.ENABLE_MULTI_TENANT_MODE,
     // 是否启用了 ai 问答功能
     isAIEnabled: state => state.featureFlags?.ENABLE_AI_COMPLETION,
   },

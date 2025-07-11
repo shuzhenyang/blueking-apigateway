@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -436,7 +436,7 @@ class TestAppPermissionApplyViewSet:
 class TestAppPermissionApplyBatchViewSet:
     def test_post(self, mocker, fake_gateway, request_factory):
         mocker.patch(
-            "apigateway.biz.permission.APIPermissionDimensionManager.handle_permission_apply",
+            "apigateway.biz.permission.GatewayPermissionDimensionManager.handle_permission_apply",
             return_value=mock.MagicMock(id=1),
         )
         mocker.patch(

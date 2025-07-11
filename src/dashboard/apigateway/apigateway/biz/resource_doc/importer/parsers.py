@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,9 +22,8 @@ from typing import IO, AnyStr, Dict, List, Optional, Union
 from django.utils.translation import gettext as _
 from openapi_spec_validator.versions import OPENAPIV2
 
-from apigateway.apps.support.constants import DocLanguageEnum
+from apigateway.apps.support.constants import DocLanguageEnum, OpenAPIFormatEnum
 from apigateway.apps.support.models import ResourceDoc
-from apigateway.biz.constants import OpenAPIFormatEnum
 from apigateway.biz.resource.importer.constants import OpenAPIExtensionEnum
 from apigateway.biz.resource.importer.openapi import OpenAPIExportManager, OpenAPIImportManager
 from apigateway.biz.resource.importer.schema import convert_operation_v3_to_v2

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -31,6 +31,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path, re_path
 from django.views.i18n import set_language
@@ -48,8 +49,6 @@ urlpatterns = [
     path("backend/admin42/", admin.site.urls),
     # /userinfo
     path("backend/accounts/", include("apigateway.account.urls")),
-    # esb
-    path("backend/esb/", include("apigateway.apps.esb.urls")),
     # open api
     path("backend/api/v1/", include("apigateway.apis.open.urls")),
     # open api v2
@@ -90,6 +89,13 @@ urlpatterns = [
     # notice
     path("backend/notice/", include(("bk_notice_sdk.urls", "notice"), namespace="notice")),
 ]
+
+# 非多租户模式才会有 esb 相关的接口
+if not settings.ENABLE_MULTI_TENANT_MODE:
+    urlpatterns += [
+        # esb
+        path("backend/esb/", include("apigateway.apps.esb.urls")),
+    ]
 
 # backend/docs/
 urlpatterns += [

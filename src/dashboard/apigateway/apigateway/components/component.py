@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,6 +20,8 @@ import logging
 
 from django.utils.translation import gettext as _
 
+from apigateway.utils.url import url_join
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +32,7 @@ class BaseComponent:
         if not self.HOST:
             return False, _("未配置接口地址。"), None
 
-        url = self._urljoin(self.HOST, path)
+        url = url_join(self.HOST, path)
         http_ok, resp = http_func(url, data, **kwargs)
 
         ok, message, data = self.parse_response(http_ok, resp)
@@ -54,8 +56,3 @@ class BaseComponent:
             message = resp.get("message", "")
             data = resp.get("data", None)
         return ok, message, data
-
-    def _urljoin(self, host: str, path: str) -> str:
-        if path.startswith("/"):
-            host = host.rstrip("/")
-        return f"{host}{path}"

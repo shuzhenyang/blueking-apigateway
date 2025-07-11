@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+ * Copyright (C) 2025 Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -102,6 +102,7 @@ func LoadMCPServer(ctx context.Context, mcpProxy *proxy.MCPProxy) error {
 				logging.GetLogger().Errorf("add mcp server[name:%s] error: %v", server.Name, err)
 				continue
 			}
+			logging.GetLogger().Infof("add  mcp server[%s] success", server.Name)
 			continue
 		}
 		mcpServer := mcpProxy.GetMCPServer(server.Name)
@@ -112,12 +113,13 @@ func LoadMCPServer(ctx context.Context, mcpProxy *proxy.MCPProxy) error {
 				continue
 			}
 		}
-		err = mcpProxy.AddMCPServerFromOpenApiSpec(server.Name, conf.openapiFileData, registeredToolMap)
+		// 更新mcp server
+		err = mcpProxy.UpdateMCPServerFromOpenApiSpec(mcpServer, server.Name, conf.openapiFileData, registeredToolMap)
 		if err != nil {
 			return err
 		}
+		logging.GetLogger().Infof("update mcp server[%s] success", server.Name)
 	}
-
 	// 删除已经不存在的mcp server
 	for _, server := range mcpProxy.GetActiveMCPServerNames() {
 		if _, ok := activeMcpServer[server]; !ok {

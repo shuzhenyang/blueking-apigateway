@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,8 +18,7 @@
 #
 from rest_framework import serializers
 
-from apigateway.biz.gateway import GatewayHandler
-from apigateway.biz.gateway_type import GatewayTypeHandler
+from apigateway.biz.gateway import GatewayHandler, GatewayTypeHandler
 from apigateway.common.i18n.field import SerializerTranslatedField
 
 
@@ -28,11 +27,16 @@ class GatewayQueryInputSLZ(serializers.Serializer):
         allow_blank=True, required=False, help_text="网关筛选条件，支持模糊匹配网关名称、描述"
     )
 
+    class Meta:
+        ref_name = "apigateway.apis.web.docs.gateway.gateway.serializers.GatewayQueryInputSLZ"
+
 
 class GatewayOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(help_text="网关 ID")
     name = serializers.CharField(help_text="网关名称")
     description = SerializerTranslatedField(default_field="description_i18n", allow_blank=True, help_text="网关描述")
+    tenant_mode = serializers.CharField(read_only=True, help_text="租户模式")
+    tenant_id = serializers.CharField(read_only=True, help_text="租户 ID")
     maintainers = serializers.ListField(help_text="网关负责人")
     doc_maintainers = serializers.JSONField(help_text="网关文档维护人员")
     is_official = serializers.SerializerMethodField(help_text="是否为官方网关, true: 是, false: 否")

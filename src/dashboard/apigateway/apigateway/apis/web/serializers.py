@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,6 +19,7 @@
 from rest_framework import serializers
 
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND
+from apigateway.common.security import is_forbidden_host
 from apigateway.core.constants import HOST_WITHOUT_SCHEME_PATTERN, LoadBalanceTypeEnum
 
 from .constants import BackendConfigSchemeEnum, BackendConfigTypeEnum
@@ -30,7 +31,7 @@ class HostSLZ(serializers.Serializer):
     weight = serializers.IntegerField(min_value=1, required=False, help_text="权重")
 
     class Meta:
-        ref_name = "apis.web.HostSLZ"
+        ref_name = "apigateway.apis.web.serializers.HostSLZ"
 
 
 class BaseBackendConfigSLZ(serializers.Serializer):
@@ -53,4 +54,11 @@ class BaseBackendConfigSLZ(serializers.Serializer):
             if scheme_host_combination in unique_combinations:
                 raise serializers.ValidationError("hosts中的scheme和host组合必须唯一。")
             unique_combinations.add(scheme_host_combination)
+
+            if is_forbidden_host(host_data["host"]):
+                raise serializers.ValidationError(f"host: {host_data['host']} 不能使用该端口。")
+
         return value
+
+    class Meta:
+        ref_name = "apigateway.apis.web.serializers.BaseBackendConfigSLZ"

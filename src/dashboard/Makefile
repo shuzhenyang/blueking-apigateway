@@ -3,8 +3,8 @@ FORCE:
 .PHONY: init
 init:
 	pip install -U pip setuptools
-	pip install poetry==1.8.4
-	poetry install
+	pip install uv==0.7.19
+	uv sync
 	pip install pre-commit
 	pre-commit install
 	mypy --install-types
@@ -14,31 +14,26 @@ lint:
 	ruff format --config=pyproject.toml --force-exclude .
 	ruff check --config=pyproject.toml --force-exclude --fix .
 	mypy --config-file=pyproject.toml .
-	cd apigateway && lint-imports --config=./.importlinter && cd ..
+	cd apigateway && lint-imports --config=../pyproject.toml && cd ..
 
 .PHONY: lint-check
 lint-check:
 	ruff check --config=pyproject.toml --force-exclude . || (echo "ruff check fail"; exit 1)
 	mypy --config-file=pyproject.toml . || (echo "mypy check fail"; exit 1)
-	cd apigateway && lint-imports --config=./.importlinter || (echo "importlinter check fail"; exit 1) && cd ..
+	cd apigateway && lint-imports --config=../pyproject.toml || (echo "importlinter check fail"; exit 1) && cd ..
 
 
 
 # ====== dependencies ======
 
-poetry.lock: pyproject.toml
-	poetry lock --no-update
-
-.PHONY: requirements
-requirements: poetry.lock
-	poetry export -f requirements.txt --without-hashes --with dev | grep -v "index-url" > apigateway/requirements_dev.txt
-	poetry export -f requirements.txt --without-hashes | grep -v "index-url" > apigateway/requirements.txt
+uv.lock: pyproject.toml
+	uv lock
 
 VERSION: pyproject.toml
-	poetry version | awk '{print $$2}' > apigateway/VERSION
+	uvx --from=toml-cli toml get --toml-path=pyproject.toml project.version > apigateway/VERSION
 
 .PHONY: update
-update: VERSION requirements
+update: VERSION
 
 # ====== test ======
 
@@ -124,6 +119,8 @@ _build_dir:
 	mkdir build build/bin
 	make clean
 	cp -r apigateway/* ./build/
+	cp uv.lock ./build/
+	cp pyproject.toml ./build/
 	cp -r bin/* ./build/bin/
 	rm -rf ./build/apigateway/editions
 	rm -rf ./build/apigateway/tests
@@ -167,6 +164,8 @@ dev-ee-image:
 		--build-arg PYPI="${pypi}" \
 		.
 	make _clean_build_dir
+	# docker tag apigateway-dashboard:development mirrors.tencent.com/build/blueking/apigateway-dashboard:v1.16.0-alpha.4
+	# kubectl get pods | grep bk-apigateway-dashboard | grep -v 'Completed' | grep -v 'fe' | awk "{print $$1}" | xargs -n 1 kubectl delete pod
 
 
 # ====== plugins ======

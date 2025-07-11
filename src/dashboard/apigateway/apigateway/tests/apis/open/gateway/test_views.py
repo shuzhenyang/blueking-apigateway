@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,8 +23,8 @@ from django_dynamic_fixture import G
 
 from apigateway.apis.open.gateway import views
 from apigateway.biz.gateway import GatewayHandler
-from apigateway.biz.gateway_jwt import GatewayJWTHandler
 from apigateway.core.models import Gateway, GatewayRelatedApp, Release
+from apigateway.service.gateway_jwt import GatewayJWTHandler
 from apigateway.tests.utils.testing import get_response_json
 
 
@@ -131,8 +131,37 @@ class TestGatewaySyncApi:
         assert result["code"] == 0
         assert result["data"]["id"] == gateway.id
 
+        assert gateway.tenant_mode == "single"
+        assert gateway.tenant_id == "default"
+
         auth_config = GatewayHandler.get_gateway_auth_config(gateway.id)
         assert auth_config["allow_delete_sensitive_params"] is False
+
+    def test_post_with_multi_tenant_mode(self, mocker, request_view, unique_gateway_name, disable_app_permission):
+        mocker.patch(
+            "apigateway.apis.open.gateway.views.get_app_tenant_info",
+            return_value=("global", "abc"),
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.gateway.sync",
+            path_params={"gateway_name": unique_gateway_name},
+            data={
+                "description": "desc",
+                "is_public": True,
+                "allow_delete_sensitive_params": False,
+            },
+            app=mocker.MagicMock(app_code="foo"),
+        )
+        result = resp.json()
+
+        gateway = Gateway.objects.get(name=unique_gateway_name)
+        assert resp.status_code == 200
+        assert result["code"] == 0
+        assert result["data"]["id"] == gateway.id
+        assert gateway.tenant_mode == "global"
+        assert gateway.tenant_id == "abc"
 
 
 class TestGatewayUpdateStatusApi:
@@ -154,7 +183,13 @@ class TestGatewayUpdateStatusApi:
 
 
 class TestGatewayRelatedAppAddApi:
-    def test_post(self, request_view, fake_gateway, disable_app_permission):
+    def test_post(self, request_view, fake_gateway, disable_app_permission, mocker):
+        # mock call bkauth api result
+        mocker.patch(
+            "apigateway.apis.open.gateway.views.get_app_tenant_info",
+            return_value=("single", "default"),
+        )
+
         resp = request_view(
             method="POST",
             view_name="openapi.gateway.add_related_apps",

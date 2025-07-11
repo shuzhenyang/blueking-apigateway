@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -137,6 +137,7 @@ class TestResourceVersionRetrieveApi:
                     "contexts": fake_resource_version_v2.data[0]["contexts"],
                     "plugins": [],
                     "has_openapi_schema": False,
+                    "openapi_schema": {},
                 }
             ],
             "created_time": fake_resource_version_v2.created_time,
@@ -291,6 +292,7 @@ class TestResourceVersionDiffApi:
                         "disabled_stages": [],
                         "plugins": [],
                         "doc_updated_time": {},
+                        "openapi_schema": {},
                     }
                 ],
                 "delete": [],

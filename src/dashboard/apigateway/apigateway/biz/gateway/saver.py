@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,7 +18,7 @@
 from typing import Dict, List, Optional
 
 from django.conf import settings
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from apigateway.core.constants import GatewayTypeEnum
 from apigateway.core.models import Gateway
@@ -40,7 +40,10 @@ class GatewayData(BaseModel):
     allow_auth_from_params: Optional[bool] = Field(default=None)
     allow_delete_sensitive_params: Optional[bool] = Field(default=None)
 
-    @validator("gateway_type")
+    tenant_mode: Optional[str] = Field(default=None)
+    tenant_id: Optional[str] = Field(default=None)
+
+    @field_validator("gateway_type")
     def validate_gateway_type(cls, v):  # noqa: N805
         return GatewayTypeEnum(v) if isinstance(v, int) else v
 
@@ -85,6 +88,8 @@ class GatewaySaver:
             maintainers=self._gateway_data.maintainers,
             status=self._gateway_data.status,
             is_public=self._gateway_data.is_public,
+            tenant_mode=self._gateway_data.tenant_mode,
+            tenant_id=self._gateway_data.tenant_id,
             created_by=self.username,
             updated_by=self.username,
         )

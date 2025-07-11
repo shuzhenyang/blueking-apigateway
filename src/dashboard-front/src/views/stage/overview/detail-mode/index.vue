@@ -18,6 +18,7 @@
           <div :class="['stage-name', stageData.release.status === 'unreleased' ? 'no-release' : '']">
             <template v-if="stageData.release.status === 'unreleased'">
               <span class="no-release-label">{{ t('未发布') }}</span>
+              <span class="no-release-label">{{ t('未发布') }}</span>
               <span class="no-release-dot"></span>
               <!-- <span class="no-release-icon apigateway-icon icon-ag-edit-line" @click="handleEditStage">
               </span> -->
@@ -73,7 +74,7 @@
               <div class="apigw-form-item">
                 <div class="label">{{ `${t('发布人')}：` }}</div>
                 <div class="value">
-                  {{ stageData.release.created_by || '--' }}
+                  <bk-user-display-name :user-id="stageData.release.created_by" />
                 </div>
               </div>
               <div class="apigw-form-item">
@@ -480,12 +481,11 @@ const basicInfoData = ref<BasicInfoParams>({
   created_by: '',
   created_time: '',
   public_key: '',
-  publish_validate_msg: '',
   maintainers: [],
   developers: [],
   is_public: true,
   is_official: false,
-  related_app_codes: '',
+  related_app_codes: [],
 });
 
 // 获取网关基本信息

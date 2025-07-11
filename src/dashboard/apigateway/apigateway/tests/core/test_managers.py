@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -31,7 +31,6 @@ from apigateway.core.constants import (
 )
 from apigateway.core.models import (
     Gateway,
-    MicroGateway,
     Release,
     ReleasedResource,
     ReleaseHistory,
@@ -62,7 +61,7 @@ class TestStageManager:
         s1 = G(Stage, gateway=gateway, name="prod")
         s2 = G(Stage, gateway=gateway, name="test")
 
-        result = Stage.objects.get_name_id_map(gateway)
+        result = Stage.objects.get_name_id_map(gateway.id)
         assert result == {"prod": s1.id, "test": s2.id}
 
     def test_create_stage(self):
@@ -95,23 +94,6 @@ class TestStageManager:
         assert Stage.objects.filter(gateway=gateway).count() == 2
         assert Stage.objects.filter(gateway=gateway, name="prod").exists()
         assert Stage.objects.filter(gateway=gateway, name="stag").exists()
-
-    def test_get_micro_gateway_id_to_fields(self):
-        gateway = G(Gateway)
-
-        micro_gateway = G(MicroGateway, gateway=gateway)
-
-        G(Stage, gateway=gateway)
-        s2 = G(Stage, gateway=gateway, micro_gateway=micro_gateway)
-
-        result = Stage.objects.get_micro_gateway_id_to_fields(gateway.id)
-        assert result == {
-            micro_gateway.id: {
-                "id": s2.id,
-                "name": s2.name,
-                "micro_gateway_id": micro_gateway.id,
-            }
-        }
 
     def test_get_gateway_name_to_active_stage_names(self):
         gateway = G(Gateway)

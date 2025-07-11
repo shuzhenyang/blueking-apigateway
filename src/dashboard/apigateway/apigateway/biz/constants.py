@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,14 +17,7 @@
 #
 import re
 
-from blue_krill.data_types.enum import EnumField, StructuredEnum
 from django.conf import settings
-
-
-class OpenAPIFormatEnum(StructuredEnum):
-    YAML = EnumField("yaml", label="YAML")
-    JSON = EnumField("json", label="JSON")
-
 
 # bk app code
 APP_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")

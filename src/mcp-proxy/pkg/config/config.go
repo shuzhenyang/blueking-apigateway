@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+ * Copyright (C) 2025 Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -144,12 +144,13 @@ type Instrument struct {
 // McpServer ...
 type McpServer struct {
 	// the interval of mcp server reload
-	Interval           time.Duration
-	BkApiUrlTmpl       string
-	MessageUrlFormat   string
-	InnerJwtExpireTime time.Duration
-	EncryptKey         string
-	CryptoNonce        string
+	Interval                    time.Duration
+	BkApiUrlTmpl                string
+	MessageUrlFormat            string
+	MessageApplicationUrlFormat string
+	InnerJwtExpireTime          time.Duration
+	EncryptKey                  string
+	CryptoNonce                 string
 }
 
 // Config is the config for the whole project
@@ -188,13 +189,17 @@ func Load(v *viper.Viper) (*Config, error) {
 	}
 
 	if cfg.McpServer.Interval == 0 {
-		cfg.McpServer.Interval = 30 * time.Second
+		cfg.McpServer.Interval = 60 * time.Second
 	}
 	if cfg.McpServer.BkApiUrlTmpl == "" {
 		cfg.McpServer.BkApiUrlTmpl = os.Getenv("BK_API_URL_TMPL")
 	}
 	if cfg.McpServer.MessageUrlFormat == "" {
 		cfg.McpServer.MessageUrlFormat = "/api/bk-apigateway/prod/api/v2/mcp-servers/%s/sse/message"
+	}
+	// mcp 应用态的url消息地址
+	if cfg.McpServer.MessageApplicationUrlFormat == "" {
+		cfg.McpServer.MessageApplicationUrlFormat = "/api/bk-apigateway/prod/api/v2/mcp-servers/%s/application/sse/message"
 	}
 	if cfg.McpServer.InnerJwtExpireTime == 0 {
 		cfg.McpServer.InnerJwtExpireTime = time.Minute * 5

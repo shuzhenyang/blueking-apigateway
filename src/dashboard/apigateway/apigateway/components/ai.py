@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2025 Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,7 @@
 from django.conf import settings
 from openai import OpenAI
 
-from apigateway.components.utils import gen_gateway_headers
+from apigateway.components.utils import gen_ai_request_headers
 
 
 def get_ai_client():
@@ -27,5 +27,5 @@ def get_ai_client():
     return OpenAI(
         api_key=settings.AI_API_KEY,
         base_url=settings.AI_OPEN_API_BASE_URL,
-        default_headers=gen_gateway_headers(),
+        default_headers=gen_ai_request_headers(),
     )
