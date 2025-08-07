@@ -153,7 +153,7 @@
                               <label class="ag-key">{{ t("标签") }}:</label>
                             </BkCol>
                             <BkCol :span="10">
-                              <div class="ag-value">
+                              <div class="ag-value tags">
                                 <template v-if="source.gateway_label_ids?.length">
                                   <BkTag
                                     v-for="tag in labels?.filter((label) => {
@@ -355,7 +355,7 @@
                             />
                             <div
                               v-else
-                              class="pb-24px"
+                              class="pb-24px text-14px"
                             >
                               {{ t('该资源无响应参数') }}
                             </div>
@@ -669,6 +669,12 @@ const handleHidden = () => {
       .ag-value {
         font-size: 14px;
         color: #313238;
+
+        &.tags {
+          display: flex;
+          gap: 4px;
+          flex-wrap: wrap;
+        }
       }
     }
   }

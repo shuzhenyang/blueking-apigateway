@@ -20,22 +20,70 @@
   <div class="py-20px px-24px">
     <!-- 自定义头部 -->
     <TopBar
+      ref="topBarRef"
       v-model:mode="mode"
-      v-model:stage-id="stageId"
-    />
-    <OverviewMode v-if="mode === 'overview'" />
-    <DetailMode
-      v-else-if="mode === 'detail' && stageId"
       :stage-id="stageId"
+      @change-stage="handleStageIdChange"
     />
+    <RouterView v-slot="{ Component }">
+      <component
+        :is="Component"
+        @updated="handleStageUpdated"
+      />
+    </RouterView>
   </div>
 </template>
 
 <script lang="ts" setup>
-import OverviewMode from './components/OverviewMode.vue';
 import TopBar from './components/TopBar.vue';
-import DetailMode from './components/DetailMode.vue';
 
-const mode = ref('overview');
+const route = useRoute();
+const router = useRouter();
+
+const mode = ref('');
 const stageId = ref(0);
+const topBarRef = ref();
+
+watch(
+  [
+    () => route.name,
+    () => route.params,
+  ],
+  () => {
+    if (route.name === 'StageOverviewCardMode') {
+      mode.value = 'card-mode';
+    }
+    else if (route.name === 'StageOverviewDetailMode') {
+      stageId.value = Number(route.params.stageId);
+      mode.value = 'detail-mode';
+    }
+  },
+  { immediate: true },
+);
+
+watch(mode, () => {
+  if (mode.value === 'card-mode') {
+    router.replace({ name: 'StageOverviewCardMode' });
+  }
+  else if (mode.value === 'detail-mode') {
+    router.replace({
+      name: 'StageOverviewDetailMode',
+      params: { stageId: stageId.value },
+    });
+  }
+});
+
+const handleStageIdChange = (id: number) => {
+  stageId.value = id;
+  if (mode.value === 'detail-mode') {
+    router.replace({
+      name: 'StageOverviewDetailMode',
+      params: { stageId: stageId.value },
+    });
+  }
+};
+
+const handleStageUpdated = () => {
+  topBarRef.value.reload();
+};
 </script>

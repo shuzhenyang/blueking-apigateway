@@ -28,46 +28,49 @@
     >
       <!-- 左上角的网关选择器 -->
       <template #side-header>
-        <BkSelect
-          v-model="gatewayId"
-          :clearable="false"
-          class="header-select"
-          filterable
-          @change="() => handleGoPage(activeMenuKey)"
-        >
-          <template #prefix>
-            <div class="gateway-selector-prefix">
-              <AgIcon
-                v-if="gatewayStore.isProgrammableGateway"
-                name="square-program"
-                size="20"
-              />
-            </div>
-          </template>
-          <BkOption
-            v-for="item in gatewayList"
-            :id="item.id"
-            :key="item.id"
-            :name="item.name"
+        <div class="h-34px">
+          <BkSelect
+            v-show="!isMenuCollapsed"
+            v-model="gatewayId"
+            :clearable="false"
+            class="header-select h-full"
+            filterable
+            @change="() => handleGoPage(activeMenuKey)"
           >
-            <div class="gateway-select-option">
-              <AgIcon
-                v-if="item.kind === 1"
-                name="square-program"
-                class="mr-6px color-#3a84ff"
-              />
-              <div
-                v-else
-                class="w-14px mr-6px"
-              />
-              <span>{{ item.name }}</span>
-            </div>
-          </BkOption>
-        </BkSelect>
+            <template #prefix>
+              <div class="gateway-selector-prefix">
+                <AgIcon
+                  v-if="gatewayStore.isProgrammableGateway"
+                  name="square-program"
+                  size="20"
+                />
+              </div>
+            </template>
+            <BkOption
+              v-for="item in gatewayList"
+              :id="item.id"
+              :key="item.id"
+              :name="item.name"
+            >
+              <div class="gateway-select-option">
+                <AgIcon
+                  v-if="item.kind === 1"
+                  name="square-program"
+                  class="mr-6px color-#3a84ff"
+                />
+                <div
+                  v-else
+                  class="w-14px mr-6px"
+                />
+                <span>{{ item.name }}</span>
+              </div>
+            </BkOption>
+          </BkSelect>
+        </div>
       </template>
       <template #menu>
         <BkMenu
-          :collapse="collapse"
+          :collapse="isMenuCollapsed"
           :opened-keys="openedKeys"
           :active-key="activeMenuKey"
           :unique-open="false"
@@ -88,7 +91,7 @@
                       v-if="['PermissionManage'].includes(menu.name) && permissionStore.count > 0"
                       dot
                       theme="danger"
-                      class="m-l-5px"
+                      class="ml-5px"
                     />
                   </template>
                   <template v-for="child in menu.children">
@@ -103,7 +106,7 @@
                         :count="permissionStore.count"
                         :max="99"
                         theme="danger"
-                        class="m-l-5px"
+                        class="ml-5px"
                       />
                     </BkMenuItem>
                   </template>
@@ -162,6 +165,8 @@
         </div>
       </div>
     </BkNavigation>
+    <!-- 1.13 版本升级提示 -->
+    <Version113UpdateNotice ref="version113UpdateNoticeRef" />
   </div>
 </template>
 
@@ -172,8 +177,11 @@ import {
   usePermission,
   useStage,
 } from '@/stores';
-import { getGatewayList } from '@/services/source/gateway.ts';
+import { getGatewayList } from '@/services/source/gateway';
+import { getStageList } from '@/services/source/stage';
 import { getPermissionApplyList } from '@/services/source/permission';
+import Version113UpdateNotice from '@/components/version-113-update-notice/Index.vue';
+
 interface IMenu {
   name: string
   title: string
@@ -195,7 +203,6 @@ const featureFlagStore = useFeatureFlag();
 const permissionStore = usePermission();
 const stageStore = useStage();
 
-const collapse = ref(true);
 // 选中的菜单
 const activeMenuKey = ref('StageOverview');
 const gatewayList = ref<GatewayItemType[]>([]);
@@ -206,6 +213,9 @@ const pageName = ref('');
 const gatewayId = ref(0);
 // 页面header名
 const headerTitle = ref('');
+
+const isMenuCollapsed = ref(false);
+const version113UpdateNoticeRef = ref();
 
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
 
@@ -274,8 +284,7 @@ const menuList = computed<IMenu[]>(() => [
   },
   {
     name: 'apigwOperatingData',
-    // enabled: featureFlagStore.flags.ENABLE_RUN_DATA,
-    enabled: true,
+    enabled: featureFlagStore.flags.ENABLE_RUN_DATA,
     title: t('运行数据'),
     icon: 'keguancexing',
     children: [
@@ -286,14 +295,12 @@ const menuList = computed<IMenu[]>(() => [
       },
       {
         name: 'Dashboard',
-        // enabled: featureFlagStore.flags.ENABLE_RUN_DATA_METRICS,
-        enabled: true,
+        enabled: featureFlagStore.flags.ENABLE_RUN_DATA_METRICS,
         title: t('仪表盘'),
       },
       {
         name: 'Report',
-        // enabled: featureFlagStore.flags.ENABLE_RUN_DATA_METRICS,
-        enabled: true,
+        enabled: featureFlagStore.flags.ENABLE_RUN_DATA_METRICS,
         title: t('统计报表'),
       },
     ],
@@ -345,6 +352,7 @@ const menuList = computed<IMenu[]>(() => [
 // 表格需要兼容的页面模块
 const needBkuiTablePage = computed(() => {
   return [
+    'ResourceSetting',
     'BackendService',
     'PermissionApply',
     'PermissionRecord',
@@ -381,7 +389,7 @@ watch(
     () => route.name,
   ],
   () => {
-    activeMenuKey.value = route.name as string;
+    activeMenuKey.value = (route.meta?.menuKey || route.name) as string;
     gatewayId.value = Number(route.params.id || 0);
     headerTitle.value = route.meta.title as string;
     // 设置全局网关
@@ -398,6 +406,10 @@ watch(
       if (menuItem) {
         openedKeys.value.push(item.name);
       }
+    }
+
+    if (gatewayId.value) {
+      checkStageVersion();
     }
   },
   {
@@ -421,8 +433,16 @@ const getPermissionData = async () => {
   permissionStore.setCount(res.count);
 };
 
-const handleCollapse = (v: boolean) => {
-  collapse.value = !v;
+// 检查网关下的环境 schema 版本
+async function checkStageVersion() {
+  const stageList = await getStageList(gatewayId.value);
+  if (stageList.some(item => item.status === 1 && item.resource_version?.schema_version === '1.0')) {
+    version113UpdateNoticeRef.value?.show();
+  }
+}
+
+const handleCollapse = (collapsed: boolean) => {
+  isMenuCollapsed.value = !collapsed;
 };
 
 const handleGoPage = (routeName: string) => {
@@ -638,7 +658,7 @@ onMounted(() => {
 
       .default-header-view {
         height: calc(100vh - 105px);
-        overflow: auto;
+        overflow: hidden auto;
 
         &.custom-header-view {
           height: 100%;

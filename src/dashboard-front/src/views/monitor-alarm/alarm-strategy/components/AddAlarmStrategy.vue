@@ -19,20 +19,14 @@
   <AgSideSlider
     v-model="sliderConfig.isShow"
     ext-cls="alarm-strategy-slider"
-    :width="750"
+    :width="640"
+    :title="t(strategyId ? '编辑告警策略' : '新建告警策略')"
     :init-data="initData"
     @compare="handleCompare"
     @closed="handleCancel"
   >
-    <template #header>
-      <div class="custom-side-header">
-        <div class="title">
-          {{ t(strategyId ? "编辑告警策略" : "新建告警策略") }}
-        </div>
-      </div>
-    </template>
     <template #default>
-      <div class="strategy-form p-30px p-b-0">
+      <div class="strategy-form">
         <BkForm
           ref="strategyFormRef"
           :label-width="108"
@@ -41,28 +35,29 @@
           <div class="form-content">
             <div class="content-panel single">
               <BkFormItem
-                class="m-b-0!"
+                class="mb-0!"
                 :label="t('告警策略名称')"
                 :property="'name'"
-                required
                 :rules="rules.name"
                 error-display-type="normal"
                 label-position="left"
+                required
               >
                 <BkInput
+                  ref="nameRef"
                   v-model="formData.name"
                   :placeholder="t('请输入')"
                   :maxlength="128"
                 />
               </BkFormItem>
             </div>
-            <div class="content-panel">
+            <div class="content-panel mb-0!">
               <dt class="panel-title">
                 {{ t('触发条件') }}
               </dt>
               <div class="panel-content">
                 <BkFormItem
-                  class="m-b-20px"
+                  class="mb-16px"
                   :label="t('告警规则')"
                   required
                   :rules="rules.alarm_subtype"
@@ -70,6 +65,7 @@
                   :error-display-type="'normal'"
                 >
                   <BkSelect
+                    ref="alarmTypeRef"
                     v-model="formData.alarm_subtype"
                     :clearable="false"
                   >
@@ -86,8 +82,10 @@
                   class="m-b-20px"
                 >
                   <div class="flex-group">
-                    <span class="item label"> {{ t('资源标签包含') }} </span>
-                    <span class="item w-328px flex-none">
+                    <div class="item label">
+                      {{ t('资源标签包含') }}
+                    </div>
+                    <div class="item flex-none">
                       <BkSelect
                         v-model="formData.gateway_label_ids"
                         filterable
@@ -101,16 +99,16 @@
                           :label="option.name"
                         />
                       </BkSelect>
-                    </span>
+                    </div>
                   </div>
                 </BkFormItem>
                 <BkFormItem
                   :label="t('检测算法')"
-                  class="m-b-20px"
+                  class="mb-16px"
                 >
                   <div class="flex-groups">
                     <div class="flex-group flex-2">
-                      <div class="item">
+                      <div class="item w-87px custom-select-class">
                         <BkSelect
                           v-model="formData.config.detect_config.duration"
                           disabled
@@ -124,10 +122,10 @@
                           />
                         </BkSelect>
                       </div>
-                      <div class="item label">
+                      <div class="item label min-w-131px">
                         {{ t('内命中规则次数') }}
                       </div>
-                      <div class="item flex-none w-70px">
+                      <div class="item flex-none w-67px custom-select-class">
                         <BkSelect
                           v-model="formData.config.detect_config.method"
                           disabled
@@ -142,8 +140,8 @@
                         </BkSelect>
                       </div>
                     </div>
-                    <div class="flex-group flex-1!">
-                      <div class="item">
+                    <div class="flex-group">
+                      <div class="item w-95px">
                         <BkInput
                           v-model="formData.config.detect_config.count"
                           disabled
@@ -152,19 +150,21 @@
                           :min="0"
                         />
                       </div>
-                      <span class="item label"> {{ t('时触发') }} </span>
+                      <div class="item label min-w-67px">
+                        {{ t('时触发') }}
+                      </div>
                     </div>
                   </div>
                 </BkFormItem>
                 <BkFormItem
                   :label="t('告警收敛')"
-                  class="m-b-20px"
+                  class="m-b-24px"
                 >
                   <div class="flex-group">
                     <div class="item label">
                       {{ t('告警产生后') }}，
                     </div>
-                    <div class="item flex-none! w-122px">
+                    <div class="item flex-none! w-117px custom-select-class">
                       <BkSelect
                         v-model="formData.config.converge_config.duration"
                         disabled
@@ -186,10 +186,12 @@
                 <BkFormItem
                   :label="t('生效环境')"
                   :rules="rules.effective_stages"
+                  class="mb-0 effective-stages"
                   property="effective_stages"
                 >
                   <BkRadioGroup
                     v-model="effectiveStageType"
+                    class="effective-stages-radio"
                     @change="handleEffectiveStageTypeChange"
                   >
                     <BkRadio label="all">
@@ -199,9 +201,12 @@
                       {{ t('自定义环境') }}
                     </BkRadio>
                   </BkRadioGroup>
-                  <div>
+                  <div
+                    v-if="['custom'].includes(effectiveStageType)"
+                    class="mt-14px"
+                  >
                     <BkSelect
-                      v-if="['custom'].includes(effectiveStageType)"
+                      ref="effectiveRef"
                       v-model="formData.effective_stages"
                       :placeholder="t('请选择环境')"
                       filterable
@@ -214,14 +219,17 @@
                         :value="stage.name"
                       />
                     </BkSelect>
-                    <div class="stage-select-tips">
-                      {{
-                        t( ['all'].includes(effectiveStageType)
-                          ? '选择后，当前所有环境及后续新增环境都将生效'
-                          : '仅对已选择的环境生效'
-                        )
-                      }}
-                    </div>
+                  </div>
+                  <div
+                    class="mb-16px stage-select-tips"
+                    :class="['all'].includes(effectiveStageType) ? 'mt-4px' : 'mt-8px'"
+                  >
+                    {{
+                      t(['all'].includes(effectiveStageType)
+                        ? '选择后，当前所有环境及后续新增环境都将生效'
+                        : '仅对已选择的环境生效'
+                      )
+                    }}
                   </div>
                 </BkFormItem>
               </div>
@@ -230,30 +238,37 @@
               <div class="panel-title">
                 {{ t('通知方式') }}
               </div>
-              <div class="panel-content">
+              <div class="notice-way-form">
                 <BkFormItem
                   :label="t('通知方式')"
+                  :rules="rules.notice_way"
+                  property="config.notice_config.notice_way"
+                  class="mb-10px"
                   required
                 >
                   <BkCheckboxGroup
+                    ref="noticeWayRef"
                     v-model="formData.config.notice_config.notice_way"
                     class="checkbox-group"
                   >
-                    <BkCheckbox :label="'im'">
-                      <span class="icon apigateway-icon icon-ag-qw" />
-                      {{ t('企业微信') }}
-                    </BkCheckbox>
                     <BkCheckbox :label="'wechat'">
-                      <span class="icon apigateway-icon icon-ag-wechat-color" />
+                      <!-- <span class="icon apigateway-icon icon-ag-wechat-color" /> -->
                       {{ t('微信') }}
                     </BkCheckbox>
+                    <BkCheckbox :label="'im'">
+                      <!-- <span class="icon apigateway-icon icon-ag-qw" /> -->
+                      {{ t('企业微信') }}
+                    </BkCheckbox>
                     <BkCheckbox :label="'mail'">
-                      <span class="icon apigateway-icon icon-ag-email-color" />
+                      <!-- <span class="icon apigateway-icon icon-ag-email-color" /> -->
                       {{ t('邮箱') }}
                     </BkCheckbox>
                   </BkCheckboxGroup>
                 </BkFormItem>
-                <BkFormItem :label="t('通知对象')">
+                <BkFormItem
+                  :label="t('通知对象')"
+                  class="mb-14px"
+                >
                   <BkCheckboxGroup
                     v-model="formData.config.notice_config.notice_role"
                     class="checkbox-group"
@@ -274,8 +289,8 @@
                     has-delete-icon
                     collapse-tags
                   />
-                  <p class="notice-tip m-t-5px">
-                    <i class="m-r-5px apigateway-icon icon-ag-info" />
+                  <p class="notice-tip mt-4px">
+                    <i class="m-r-4px apigateway-icon icon-ag-info" />
                     <span>{{ t('通知对象、其他通知对象至少一个有效') }}</span>
                   </p>
                 </BkFormItem>
@@ -286,14 +301,14 @@
       </div>
     </template>
     <template #footer>
-      <div class="pl-30px">
+      <div class="pl-152px pt-16px">
         <BkButton
           :loading="saveLoading"
           class="m-r-8px w-88px"
           theme="primary"
           @click="handleSave"
         >
-          {{ t('保存') }}
+          {{ t('提交') }}
         </BkButton>
         <BkButton
           class="w-88px"
@@ -370,6 +385,10 @@ const accessLogStore = useAccessLog();
 
 const { alarmStrategyOptions } = accessLogStore;
 const saveLoading = ref(false);
+const nameRef = ref<InstanceType<typeof BkInput>>(null);
+const alarmTypeRef = ref<InstanceType<typeof BkSelect>>(null);
+const effectiveRef = ref<InstanceType<typeof BkSelect>>(null);
+const noticeWayRef = ref<InstanceType<typeof BkCheckboxGroup>>(null);
 const strategyFormRef = ref<InstanceType<typeof BkForm> & FormMethod>();
 const rules = reactive({
   name: [
@@ -388,13 +407,19 @@ const rules = reactive({
   ],
   effective_stages: [
     {
-      validator: (values: string[]) => {
-        if (['all'].includes(effectiveStageType.value)) {
-          return true;
-        }
-        return values.length > 0;
+      validator: (value: string[]) => {
+        return ['all'].includes(effectiveStageType.value) || value.length > 0;
       },
       message: t('自定义环境不能为空'),
+      trigger: 'change',
+    },
+  ],
+  notice_way: [
+    {
+      validator: () => {
+        return formData.value.config?.notice_config?.notice_way.length > 0;
+      },
+      message: t('必填项'),
       trigger: 'change',
     },
   ],
@@ -417,8 +442,42 @@ const strategyId = computed(() => formData.value.id);
 const labelOption = computed(() => labelList);
 const stageOption = computed(() => stageList);
 
+const handleScrollView = (el: HTMLInputElement | HTMLElement) => {
+  el.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center',
+  });
+};
+
 const handleSave = async () => {
-  await strategyFormRef?.value?.validate();
+  try {
+    await strategyFormRef?.value?.validate();
+  }
+  catch {
+    const {
+      name,
+      alarm_subtype,
+      effective_stages,
+      config,
+    } = formData.value;
+    if (!name) {
+      nameRef.value?.focus();
+      handleScrollView(nameRef?.value?.$el);
+      return;
+    }
+    if (!alarm_subtype) {
+      handleScrollView(alarmTypeRef?.value?.$el);
+      return;
+    }
+    if (['custom'].includes(effectiveStageType.value) && !effective_stages?.length) {
+      handleScrollView(effectiveRef?.value?.$el);
+      return;
+    }
+    if (!config?.notice_config?.notice_way.length) {
+      handleScrollView(noticeWayRef?.value?.$el);
+      return;
+    }
+  }
   // 如果内容一致无需调用编辑接口
   if (Boolean(strategyId?.value) && isEqual(initData.form, formData.value)) {
     handleCancel();
@@ -468,29 +527,48 @@ const handleCancel = () => {
 <style lang="scss" setup>
 .alarm-strategy-slider {
   .strategy-form {
+    padding: 24px 24px 0 40px;
+
     .form-content {
       .content-panel {
-        overflow: hidden;
         margin-bottom: 16px;
 
+        .bk-form-label {
+          color: #4d4f56;
+        }
+
         .bk-form-content {
-          line-height: 30px;
+           line-height: 22px;
+        }
+
+        .bk-form-item.is-required .bk-form-label:after {
+           top: 3px;
+        }
+
+        .panel-title {
+          font-size: 14px;
+          font-weight: 500;
+          color: #4d4f56;
+          margin-bottom: 12px;
+        }
+
+        .stage-select-tips {
+          font-size: 12px;
+          color: #979ba5;
+          line-height: 17px;
         }
 
         &.single {
           border: none;
+          margin-bottom: 24px;
 
           .bk-form-item {
             .bk-form-label {
-              height: 40px;
-              line-height: 40px;
               font-size: 14px;
-              font-weight: 700;
+              font-weight: 500;
             }
 
             .bk-input {
-              height: 40px;
-              line-height: 40px;
               border-bottom-left-radius: unset;
               border-top-left-radius: unset;
             }
@@ -501,19 +579,31 @@ const handleCancel = () => {
           }
         }
 
-        .panel-title {
-          height: 40px;
-          line-height: 40px;
-          font-size: 14px;
-          font-weight: 700;
-          color: #63656e;
-          margin-bottom: 12px;
+        .effective-stages {
+          .bk-form-label {
+            &::after {
+              position: absolute;
+              top: 3px;
+              width: 14px;
+              color: #ea3636;
+              text-align: center;
+              content: "*";
+            }
+          }
+
+          .effective-stages-radio {
+            line-height: 22px;
+            margin-top: 5px;
+          }
         }
 
-        .stage-select-tips {
-          font-weight: 400;
-          font-size: 12px;
-          color: #979ba5;
+        .notice-way-form {
+          .bk-form-label {
+            line-height: 22px;
+          }
+          .bk-form-content {
+            line-height: 22px;
+          }
         }
 
         &.last-child {
@@ -525,6 +615,8 @@ const handleCancel = () => {
 
   .flex-group {
     display: flex;
+    height: 32px;
+    color: #4d4f56;
 
     .item {
       flex: 1;
@@ -532,14 +624,27 @@ const handleCancel = () => {
       &.label {
         flex: none;
         font-size: 14px;
-        color: #313238;
-        padding: 0 12px;
+        color: #4d4f56;
+        padding-left: 7px;
+        padding-right: 7px;
+        padding-top: 4px;
+        padding-bottom: 6px;
         border: 1px solid #c4c6cc;
         background-color: #fafbfd;
+        border-radius: 2px 0 0 2px;
+        line-height: 22px;
+        text-align: center;
       }
 
       & + .item {
         margin-left: -1px;
+      }
+
+      &.custom-select-class {
+        .bk-select.is-disabled .bk-input--text {
+          font-size: 14px;
+          background-color: #ffffff;
+        }
       }
     }
 
@@ -550,6 +655,7 @@ const handleCancel = () => {
 
   .flex-groups {
     display: flex;
+    height: 32px;
 
     .flex-group {
       & + .flex-group {
@@ -557,22 +663,11 @@ const handleCancel = () => {
       }
     }
   }
-
-  .checkbox-group {
-    .bk-checkbox {
-      min-width: 122px;
-
-      .apigateway-icon {
-        margin-right: 4px;
-      }
-    }
-  }
-
 }
 
 .notice-tip {
-  color: #63656e;
-  line-height: 16px;
+  color: #979ba5;
   font-size: 12px;
+  line-height: 17px;
 }
 </style>

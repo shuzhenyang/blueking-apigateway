@@ -33,7 +33,7 @@
         <BkTable
           :key="tableDataKey"
           class="table-layout"
-          :data="curPageData"
+          :data="tableData"
           :pagination="pagination"
           remote-pagination
           :empty-text="emptyText"
@@ -112,22 +112,12 @@
               filterFn: handleMethodFilter,
               btnSave: false,
             }"
+            :show-overflow-tooltip="false"
           >
             <template #default="{ row }">
-              <template v-if="row?.gateway_label_ids?.length">
-                <BkTag
-                  v-for="tag in labels?.filter((label) => {
-                    if (row.gateway_label_ids?.includes(label.id))
-                      return true;
-                  })"
-                  :key="tag.id"
-                >
-                  {{ tag.name }}
-                </BkTag>
-              </template>
-              <template v-else>
-                --
-              </template>
+              <RenderTagOverflow
+                :data="labels?.filter((label) => row.gateway_label_ids?.includes(label.id)).map((label) => label.name)"
+              />
             </template>
           </BkTableColumn>
           <BkTableColumn
@@ -209,30 +199,34 @@
     </template>
   </BkLoading>
 
-  <!-- TODO 补回资源详情抽屉 -->
   <!-- 资源详情 -->
-  <!--  <resource-details -->
-  <!--    ref="resourceDetailsRef" -->
-  <!--    :info="info" -->
-  <!--    @hidden="clearHighlight" -->
-  <!--  /> -->
+  <ResourceDetails
+    ref="resourceDetailsRef"
+    :info="info"
+    @hidden="clearHighlight"
+  />
 
   <!-- 环境编辑 -->
   <CreateStage
     ref="stageSidesliderRef"
+    :stage-id="stageId"
     @hidden="clearHighlight"
   />
 </template>
 
 <script setup lang="ts">
 import { getGatewayLabels } from '@/services/source/gateway';
-import { getStageList } from '@/services/source/stage';
+import {
+  type IStageListItem,
+  getStageList,
+} from '@/services/source/stage';
 import { getVersionDetail } from '@/services/source/resource';
-// import resourceDetails from './resource-details.vue';
+import ResourceDetails from './ResourceDetails.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
-import CreateStage from './CreateStage.vue';
+import CreateStage from '../../components/CreateStage.vue';
 import { copy } from '@/utils';
 import { useRouteParams } from '@vueuse/router';
+import RenderTagOverflow from '@/components/render-tag-overflow/Index.vue';
 
 interface IProps {
   stageAddress: string
@@ -242,17 +236,16 @@ interface IProps {
 
 const {
   stageAddress,
-  // stageId,
+  stageId,
   // versionId,
 } = defineProps<IProps>();
 
 const { t } = useI18n();
-const route = useRoute();
 const gatewayId = useRouteParams('id', 0, { transform: Number });
 
 const searchValue = ref('');
 const info = ref<any>({});
-// const resourceDetailsRef = ref();
+const resourceDetailsRef = ref();
 const stageSidesliderRef = ref();
 const isReload = ref(false);
 const emptyText = ref('暂无数据');
@@ -266,6 +259,8 @@ const isLoading = ref(true);
 
 // 资源信息
 const resourceVersionList = ref([]);
+const tableData = ref<any[]>([]);
+const stageList = ref<IStageListItem[]>([]);
 
 const pagination = ref({
   current: 1,
@@ -363,9 +358,8 @@ const labelsList = computed(() => {
   });
 });
 
-// 当前页数据
-const curPageData = computed(() => {
-  return getPageData();
+watch(resourceVersionList, () => {
+  getPageData();
 });
 
 watch(
@@ -373,17 +367,29 @@ watch(
   () => {
     pagination.value.current = 1;
     pagination.value.limit = 10;
+    getPageData();
   },
 );
 
+watch(
+  () => stageId,
+  async () => {
+    if (stageId) {
+      await init();
+      getPageData();
+    }
+  },
+  { immediate: true },
+);
+
 const getLabels = async () => {
-  labels.value = await getGatewayLabels(gatewayId.value); ;
+  labels.value = await getGatewayLabels(gatewayId.value);
 };
 
 const showDetails = (row: any) => {
   setHighlight(row.name);
   info.value = row;
-  // resourceDetailsRef.value?.showSideslider();
+  resourceDetailsRef.value?.showSideslider();
 };
 
 const copyPath = (row: any) => {
@@ -437,18 +443,13 @@ const isHighlight = (v: any) => {
 };
 
 const setHighlight = (name: string) => {
-  curPageData.value?.forEach((item: any) => {
-    if (item.name === name) {
-      item.highlight = true;
-    }
-    else {
-      item.highlight = false;
-    }
+  tableData.value?.forEach((item: any) => {
+    item.highlight = item.name === name;
   });
 };
 
 const clearHighlight = () => {
-  curPageData.value?.forEach((item: any) => {
+  tableData.value?.forEach((item: any) => {
     item.highlight = false;
   });
 };
@@ -463,7 +464,7 @@ const handleCheckStage = ({ resourceName, backendName }: {
   stageSidesliderRef.value?.handleShowSideslider('check', { backendName });
 };
 
-const getPageData = () => {
+function getPageData() {
   if (!resourceVersionList.value?.length) {
     pagination.value.count = 0;
     return [];
@@ -473,25 +474,16 @@ const getPageData = () => {
   let curAllData = resourceVersionList.value;
   if (searchValue.value) {
     curAllData = curAllData?.filter((row: any) => {
-      if (
-        row?.proxy?.backend?.name?.toLowerCase()?.includes(searchValue.value)
+      return !!(row?.proxy?.backend?.name?.toLowerCase()?.includes(searchValue.value)
         || row?.name?.toLowerCase()?.includes(searchValue.value)
-        || row?.path?.toLowerCase()?.includes(searchValue.value)
-      ) {
-        return true;
-      }
-      return false;
+        || row?.path?.toLowerCase()?.includes(searchValue.value));
     });
-
     updateTableEmptyConfig();
-  };
+  }
 
   if (chooseMethod.value?.length) {
     curAllData = curAllData?.filter((row: any) => {
-      if (chooseMethod.value?.includes(row?.method)) {
-        return true;
-      }
-      return false;
+      return !!chooseMethod.value?.includes(row?.method);
     });
 
     updateTableEmptyConfig();
@@ -500,10 +492,7 @@ const getPageData = () => {
   if (chooseLabels.value?.length) {
     curAllData = curAllData?.filter((row: any) => {
       const flag = chooseLabels.value?.some((item: any) => row?.gateway_label_names?.includes(item));
-      if (flag) {
-        return true;
-      }
-      return false;
+      return !!flag;
     });
 
     updateTableEmptyConfig();
@@ -523,8 +512,8 @@ const getPageData = () => {
   pagination.value.count = curAllData.length;
 
   isLoading.value = false;
-  return curAllData?.slice(startIndex, endIndex);
-};
+  tableData.value = curAllData?.slice(startIndex, endIndex);
+}
 
 const handleMethodFilter = () => true;
 
@@ -543,7 +532,7 @@ const handlePageSizeChange = (limit: number) => {
 
 const updateTableEmptyConfig = () => {
   tableEmptyConf.value.isAbnormal = pagination.value.abnormal;
-  if (searchValue.value || chooseMethod.value?.length || chooseLabels.value?.length || !curPageData.value.length) {
+  if (searchValue.value || chooseMethod.value?.length || chooseLabels.value?.length || !tableData.value.length) {
     tableEmptyConf.value.keyword = 'placeholder';
     return;
   }
@@ -567,22 +556,17 @@ const handleClearFilterKey = () => {
   getPageData();
 };
 
-const init = async () => {
-  const data = await getStageList(gatewayId.value);
-  const paramsStage = route.query.stage || 'prod';
-
-  const curStageData = data.find((item: { name: string }) => item.name === paramsStage);
+async function init() {
+  stageList.value = await getStageList(gatewayId.value);
+  const curStageData = stageList.value.find((item: { id: number }) => item.id === Number(stageId));
   if (curStageData) {
     await getLabels();
     // 依赖 getLabels() 获取的标签列表，需在这之后请求
     await getResourceVersionsData(curStageData);
   }
-};
+}
 
-// 切换环境重新执行
-onMounted(() => {
-  init();
-});
+defineExpose({ reload: init });
 </script>
 
 <style lang="scss" scoped>

@@ -399,7 +399,6 @@ const fetchApigwStages = async () => {
 
 const fetchApiList = async () => {
   try {
-    console.log(curTargetName.value);
     let res: (IResource & IComponent)[] = [];
     navList.value = [];
     if (curTab.value === 'gateway') {
@@ -447,7 +446,7 @@ const handleApiClick = (resId: number, apiName: string) => {
   if (curApi.value.id === resId) return;
 
   router.replace({
-    name: 'apiDocDetail',
+    name: 'ApiDocDetail',
     params: { ...route.params },
     query: {
       ...route.query,
@@ -524,7 +523,7 @@ const getApigwResourceDoc = async () => {
 
 const handleStageChange = () => {
   router.replace({
-    name: 'apiDocDetail',
+    name: 'ApiDocDetail',
     params: { ...route.params },
     query: {
       ...route.query,
@@ -556,6 +555,10 @@ const handleSystemChange = async (system: ISystem) => {
   if (system.name === curTargetName.value) return;
   curTargetName.value = system.name;
   curComponentApiName.value = '';
+  router.replace({
+    path: curTargetName.value,
+    params: { ...route.params },
+  });
   await init();
 };
 
@@ -575,7 +578,7 @@ const init = async () => {
 
 const handleGoBack = () => {
   router.push({
-    name: 'apiDocs',
+    name: 'ApiDocs',
     params: { curTab: curTab.value },
   });
 };

@@ -17,7 +17,7 @@
  */
 
 <template>
-  <div class="release-sideslider">
+  <div>
     <BkSideslider
       v-model:is-show="isShow"
       :width="960"
@@ -75,7 +75,7 @@
                     property="version"
                     :label="t('版本号')"
                     :description="t('版本号须符合 Semver 规范，例如：1.1.1，1.1.1-alpha.1')"
-                    class="form-item-version mt-20 mb-15px"
+                    class="form-item-version mt-20px mb-15px"
                     required
                   >
                     <!-- <BkPopover
@@ -89,7 +89,7 @@
                     />
                   </BkFormItem>
                   <BkFormItem>
-                    <section class="text-12px">
+                    <section class="text-12px color-#63656e">
                       <span>
                         {{ t("新增") }}
                         <strong class="font-bold color-#2dcb56">{{ diffData.add.length }}</strong>
@@ -133,21 +133,21 @@
               <template v-else-if="stepsConfig.curStep === 2">
                 <BkButton
                   theme="primary"
-                  class="w-100px"
+                  class="min-w-88px"
                   :loading="loading"
                   @click="handleBuildVersion"
                 >
                   {{ t('确定') }}
                 </BkButton>
                 <BkButton
-                  class="ml-10px w-100px"
+                  class="ml-10px min-w-88px"
                   @click="handleBack"
                 >
                   {{ t('上一步') }}
                 </BkButton>
               </template>
               <BkButton
-                class="ml-10px w-100px"
+                class="ml-10px min-w-88px"
                 @click="handleCancel"
               >
                 {{ t('取消') }}
@@ -262,8 +262,8 @@ import {
   getNextVersion,
   getVersionDiff,
   getVersionList,
-} from '@/services/source/resource';
-import { getStageList } from '@/services/source/stage';
+} from '@/services/source/resource.ts';
+import { getStageList } from '@/services/source/stage.ts';
 import { useGetStageList } from '@/hooks';
 import VersionDiff from '@/components/version-diff/Index.vue';
 
@@ -461,7 +461,7 @@ const handleCancel = () => {
 const handleSkip = () => {
   handleCancel();
   setTimeout(() => {
-    router.push({ name: 'apigwResourceVersion' });
+    router.push({ name: 'ResourceVersion' });
   }, 300);
 };
 

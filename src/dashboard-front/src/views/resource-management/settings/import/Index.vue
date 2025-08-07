@@ -131,7 +131,8 @@
           :border="false"
           :max="resizeLayoutAsideMax"
           :min="resizeLayoutAsideMin"
-          style="height: 100%"
+          class="h-full!"
+          :is-collapsed="isErrorConsoleCollapsed"
           @collapse-change="updateIsEditorMsgCollapsed"
         >
           <template #main>
@@ -543,7 +544,7 @@
         </div>
         <div class="dialog-main">
           <header class="apigateway-name">
-            {{ t('网关：') }}<span class="text">{{ common.apigwName }}</span>
+            {{ t('网关：') }}<span class="text">{{ gatewayStore.currentGateway!.name }}</span>
           </header>
           <main class="import-tips">
             {{ t('将新增') }}
@@ -761,7 +762,10 @@ import {
 import TableResToAction from './components/TableResToAction.vue';
 import TableResToUncheck from './components/TableResToUncheck.vue';
 import { useParentElement } from '@vueuse/core';
-import { useEnv } from '@/stores';
+import {
+  useEnv,
+  useGateway,
+} from '@/stores';
 
 type CodeErrorResponse = {
   code: string
@@ -783,9 +787,10 @@ interface IProps { gatewayId?: number }
 const { gatewayId = 0 } = defineProps<IProps>();
 
 // const { useRouter, onBeforeRouteLeave } = useTsxRouter();
-const router = useRouter();
 const { t } = useI18n();
+const router = useRouter();
 const envStore = useEnv();
+const gatewayStore = useGateway();
 
 const editorText = ref<string>(RESOURCE_IMPORT_EXAMPLE.content);
 const resourceEditorRef = ref<InstanceType<typeof editorMonaco>>(); // 实例化
@@ -842,6 +847,8 @@ const isPluginsSliderShow = ref(false);
 
 // 编辑器所在的 resize-layout
 const resizeLayoutRef = ref<InstanceType<typeof ResizeLayout> | null>(null);
+// 错误内容信息面板是否折叠
+const isErrorConsoleCollapsed = ref(true);
 // resizeLayout 拉伸区高度范围
 const resizeLayoutAsideMax = ref(100);
 const resizeLayoutAsideMin = ref(50);
@@ -913,7 +920,7 @@ watch(editorText, () => {
 watch(curView, async (newCurView, oldCurView) => {
   if (newCurView === 'import' && oldCurView === 'resources') {
     await nextTick(() => {
-      resizeLayoutRef.value?.setCollapse(true);
+      isErrorConsoleCollapsed.value = true;
       isEditorMsgCollapsed = true;
     });
   }
@@ -946,7 +953,6 @@ watch(filterInputUpdateClone, () => {
 
 // 进入页面默认折叠编辑器错误消息栏
 onMounted(() => {
-  resizeLayoutRef.value?.setCollapse(true);
   // 设置拉伸区高度范围
   const editorViewportHeight = resizeLayoutRef.value?.$el.clientHeight - 92;
   resizeLayoutAsideMax.value = Math.floor(editorViewportHeight * 0.8);
@@ -1036,7 +1042,7 @@ const handleCheckData = async ({ changeView }: { changeView: boolean }) => {
       params.doc_language = docConfig.value.language;
     }
     // 配置是否显示错误 Message，只校验代码时不显示，改为展示在编辑器的错误消息栏中
-    const interceptorConfig = _changeView ? {} : { globalError: false };
+    const interceptorConfig = _changeView ? {} : { catchError: true };
     const res = await checkResourceImport(gatewayId, params, interceptorConfig) as IImportedResource[];
     tableData.value = res.map((data, index: number) => ({
       ...data,
@@ -1048,7 +1054,7 @@ const handleCheckData = async ({ changeView }: { changeView: boolean }) => {
     // 折叠错误消息栏
     if (!isEditorMsgCollapsed) {
       await nextTick(() => {
-        resizeLayoutRef?.value?.setCollapse(true);
+        isErrorConsoleCollapsed.value = true;
       });
     }
     // 判断是否跳转，默认为是
@@ -1145,9 +1151,9 @@ const handleCheckData = async ({ changeView }: { changeView: boolean }) => {
     updateEditorDecorations();
     updateEditorMarkers();
     // 展开错误消息栏
-    if (isEditorMsgCollapsed) {
+    if (isErrorConsoleCollapsed.value) {
       await nextTick(() => {
-        resizeLayoutRef?.value?.setCollapse(false);
+        isErrorConsoleCollapsed.value = false;
       });
     }
   }
@@ -1384,12 +1390,7 @@ const handleErrorCountClick = (type: CodeErrorMsgType) => {
   // 如果有错误消息，点击后可以展开/收起错误消息栏
   if (visibleErrorReasons.value.length > 0) {
     nextTick(() => {
-      if (isEditorMsgCollapsed) {
-        resizeLayoutRef.value?.setCollapse(false);
-      }
-      else {
-        resizeLayoutRef.value?.setCollapse(true);
-      }
+      isErrorConsoleCollapsed.value = !isEditorMsgCollapsed;
     });
   }
 };

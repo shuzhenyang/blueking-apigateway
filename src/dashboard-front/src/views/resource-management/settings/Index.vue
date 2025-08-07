@@ -26,7 +26,7 @@
     />
     <div
       id="resourceId"
-      class="resource-container page-wrapper-padding"
+      class="resource-container page-wrapper-padding pb-0!"
       :class="[
         isDragging ? 'dragging' : '',
         isDetail && !isShowLeft ? 'welt' : ''
@@ -211,20 +211,22 @@
 
         <div
           v-show="isShowLeft"
-          class="left-wraper"
+          class="left-wrapper"
         >
           <BkLoading :loading="isLoading">
             <BkTable
-              :key="tableDataKey"
               :data="tableData"
               :pagination="pagination"
               :row-class="handleRowClass"
               :settings="settings"
+              :max-height="tableConfig.clientHeight"
               show-overflow-tooltip
               border="outer"
               class="table-layout"
               remote-pagination
               row-key="id"
+              :size="settings.size"
+              :row-height="settings.height"
               @page-limit-change="handlePageSizeChange"
               @page-value-change="handlePageChange"
               @select-all="handleSelectAllChange"
@@ -232,17 +234,18 @@
               @row-mouse-enter="handleMouseEnter"
               @row-mouse-leave="handleMouseLeave"
               @column-sort="handleSortChange"
+              @setting-change="handleSettingChange"
             >
               <BkTableColumn
                 v-if="showBatch"
                 align="center"
-                fixed
+                fixed="left"
                 type="selection"
                 width="80"
               />
               <BkTableColumn
                 :label="t('资源名称')"
-                fixed
+                fixed="left"
                 prop="name"
                 width="170"
               >
@@ -537,6 +540,7 @@
                   }"
                   @deleted-success="handleDeleteSuccess"
                   @on-jump="(id: number | any) => handleShowInfo(id)"
+                  @on-update-plugin="handleUpdatePlugin"
                 />
               </BkLoading>
             </BkTabPanel>
@@ -630,16 +634,17 @@
       />
 
       <!-- 生成版本 -->
-      <VersionSlider
-        ref="versionSidesliderRef"
+      <CreateResourceVersion
+        ref="createResourceVersionRef"
+        @done="handleVersionCreated"
       />
 
       <!-- 版本对比 -->
       <BkSideslider
-        v-model:is-show="diffSidesliderConf.isShow"
+        v-model:is-show="diffSliderConf.isShow"
         quick-close
-        :title="diffSidesliderConf.title"
-        :width="diffSidesliderConf.width"
+        :title="diffSliderConf.title"
+        :width="diffSliderConf.width"
       >
         <template #default>
           <div class="p-20px pure-diff">
@@ -663,8 +668,11 @@ import {
 } from 'lodash-es';
 import { Message } from 'bkui-vue';
 import {
+  type ITableSettings,
+  useMaxTableLimit,
   useQueryList,
   useSelection,
+  useTableSetting,
 } from '@/hooks';
 import {
   exportDocs,
@@ -680,7 +688,7 @@ import {
   getVersionList,
 } from '@/services/source/resource';
 import ResourceDetail from './components/ResourceDetail.vue';
-import VersionSlider from './components/VersionSlider.vue';
+import CreateResourceVersion from '@/components/create-resource-version/Index.vue';
 import VersionDiff from '@/components/version-diff/Index.vue';
 import SelectCheckBox from './components/SelectCheckBox.vue';
 import AgDropdown from '@/components/ag-dropdown/Index.vue';
@@ -704,7 +712,6 @@ import {
 } from '@/stores';
 import ResourceDocSlider from '../components/ResourceDocSlider.vue';
 import ExportResourceDialog from '../components/ExportResourceDialog.vue';
-import { useMaxTableLimit } from '@/hooks/use-max-table-limit';
 import { HTTP_METHODS } from '@/constants';
 import { METHOD_THEMES } from '@/enums';
 
@@ -753,9 +760,10 @@ const exportDropData = ref<ApigwIDropList[]>([
 
 const route = useRoute();
 const router = useRouter();
+
 const tableDataKey = ref(uniqueId());
 const chooseMethod = ref<string[]>([]);
-const filterData = ref<any>({
+const filterData = ref({
   keyword: '',
   order_by: '',
 });
@@ -765,8 +773,7 @@ const tableEmptyConf = ref<TableEmptyConfType>({
   isAbnormal: false,
 });
 
-// ref
-const versionSidesliderRef = ref(null);
+const createResourceVersionRef = ref();
 const selectCheckBoxParentRef = ref(null);
 // 导出参数
 const exportParams: IExportParams = reactive({
@@ -849,7 +856,7 @@ const dialogData: IDialog = reactive({
 });
 
 // 导出dialog
-const exportDialogConfig: IExportDialog = reactive({
+const exportDialogConfig = reactive<IExportDialog>({
   isShow: false,
   title: t('请选择导出的格式'),
   loading: false,
@@ -870,7 +877,7 @@ const batchEditData = ref({
 });
 
 // 版本对比抽屉
-const diffSidesliderConf = reactive({
+const diffSliderConf = reactive({
   isShow: false,
   width: 1040,
   title: t('版本资源对比'),
@@ -882,6 +889,11 @@ const isDragging = ref(false);
 // const showEdit = ref(false);
 // const optionName = ref('');
 // const inputRef = ref(null);
+const initLimitList = ref([10, 20, 50, 100]);
+const tableConfig = ref({
+  clientHeight: 0,
+  maxTableLimit: 0,
+});
 
 // tab 选项卡
 const panels = [
@@ -983,7 +995,13 @@ const labelsList = computed(() => {
 });
 
 // 当前视口高度能展示最多多少条表格数据
-const { maxTableLimit } = useMaxTableLimit();
+const getMaxTableLimit = () => {
+  tableConfig.value = useMaxTableLimit({
+    allocatedHeight: 256,
+    className: route.name,
+  });
+};
+getMaxTableLimit();
 
 // 列表hooks
 const {
@@ -1000,13 +1018,10 @@ const {
   filterNoResetPage: false,
   initialPagination: {
     limitList: [
-      maxTableLimit,
-      10,
-      20,
-      50,
-      100,
+      tableConfig.value.maxTableLimit,
+      ...initLimitList.value,
     ],
-    limit: maxTableLimit,
+    limit: tableConfig.value.maxTableLimit,
   },
 });
 
@@ -1116,7 +1131,7 @@ const dragTwoColDiv = (contentId: string, leftBoxId: string, resizeId: string/* 
   // const rightBox = document.getElementById(rightBoxId);
   const box = document.getElementById(contentId);
 
-  resize.onmousedown = function (e: any) {
+  resize.onmousedown = function (e: MouseEvent) {
     const startX = e.clientX;
     resize.left = resize.offsetLeft;
     isDragging.value = true;
@@ -1165,6 +1180,35 @@ const handleSortChange = ({ column, type }: Record<string, any>) => {
   return typeMap[type]();
 };
 
+const handleSettingChange = (resourceSetting: ITableSettings) => {
+  const {
+    checked,
+    size,
+    height,
+  } = resourceSetting;
+  const isExistDiff = isDiffSize(resourceSetting);
+  changeTableSetting(resourceSetting);
+  if (!isExistDiff) {
+    return;
+  }
+  settings.value = Object.assign(settings.value, {
+    checked,
+    size,
+    height,
+  });
+  getResizeTable();
+};
+
+const getResizeTable = async () => {
+  await getMaxTableLimit();
+  pagination.value = Object.assign(pagination.value, {
+    current: 1,
+    offset: 0,
+    limit: tableConfig.value.maxTableLimit,
+    limitList: [...initLimitList.value, tableConfig.value.maxTableLimit],
+  });
+};
+
 // 展示右边内容
 const handleShowInfo = (id: number, curActive = 'resourceInfo') => {
   resourceId.value = id;
@@ -1190,6 +1234,15 @@ const handleShowInfo = (id: number, curActive = 'resourceInfo') => {
     document.getElementById('resourceLf').style.width = leftWidth.value;
     active.value = curActive;
   }
+};
+
+const handleUpdatePlugin = () => {
+  pagination.value = Object.assign(pagination.value, {
+    current: 0,
+    limit: tableConfig.value.maxTableLimit,
+  });
+  getList();
+  handleShowVersion();
 };
 
 // 显示列表
@@ -1251,8 +1304,8 @@ const handleShowDiff = async () => {
     else {
       diffSourceId.value = response.results[0]?.id || '';
     }
-    diffSidesliderConf.width = window.innerWidth <= 1280 ? 1040 : 1280;
-    diffSidesliderConf.isShow = true;
+    diffSliderConf.width = window.innerWidth <= 1280 ? 1040 : 1280;
+    diffSliderConf.isShow = true;
   }
   catch {
     Message({
@@ -1313,23 +1366,35 @@ const handleExportDownload = async () => {
   const params = exportParams;
   const fetchMethod = exportDialogConfig.exportFileDocType === 'resource' ? exportResources : exportDocs;
   try {
-    const res = await fetchMethod(gatewayId, params);
-    if (res.success) {
-      Message({
-        message: t('导出成功'),
-        theme: 'success',
-        width: 'auto',
-      });
-    }
+    await fetchMethod(gatewayId, params);
+    Message({
+      message: t('导出成功'),
+      theme: 'success',
+      width: 'auto',
+    });
     exportDialogConfig.isShow = false;
   }
   catch (e) {
-    const error = e as Error;
-    Message({
-      message: error?.message || t('导出失败'),
-      theme: 'error',
-      width: 'auto',
-    });
+    if (exportDialogConfig.exportFileDocType === 'docs') {
+      const fileReader = new FileReader();
+      fileReader.readAsText(e as Blob, 'utf-8');
+      fileReader.onload = function () {
+        const blobError = JSON.parse(fileReader.result as string);
+        Message({
+          message: blobError?.error?.message || t('导出失败'),
+          theme: 'error',
+          width: 'auto',
+        });
+      };
+    }
+    else {
+      const error = e as Error;
+      Message({
+        message: error?.message || t('导出失败'),
+        theme: 'error',
+        width: 'auto',
+      });
+    }
   }
 };
 // 批量编辑确认
@@ -1448,7 +1513,7 @@ const handleCreateResourceVersion = async () => {
   else {
     diffSourceId.value = response.results[0]?.id || '';
   }
-  versionSidesliderRef.value.showReleaseSideslider();
+  createResourceVersionRef.value.showReleaseSideslider();
 };
 
 // 获取标签数据
@@ -1512,7 +1577,7 @@ const tipsContent = (data: any[]) => {
   ]);
 };
 
-const settings = {
+const settings = shallowRef({
   trigger: 'click',
   fields: [
     {
@@ -1554,8 +1619,12 @@ const settings = {
       disabled: true,
     },
   ],
+  size: 'small',
+  height: 42,
   checked: ['name', 'backend_name', 'method', 'path', 'plugin_count', 'docs', 'labels', 'updated_time', 'act'],
-};
+});
+
+const { changeTableSetting, isDiffSize } = useTableSetting(settings, route.name);
 
 watch(
   isDetail,
@@ -1651,7 +1720,7 @@ watch(
     };
 
     if (route.query?.backend_id) {
-      const { backend_id } = route?.query;
+      const { backend_id } = route.query;
       filterData.value.backend_id = backend_id;
     }
     else {
@@ -1710,9 +1779,10 @@ watch(
 );
 
 watch(
-  () => route, () => {
-    if (route?.query?.backend_id) {
-      const { backend_id } = route?.query;
+  () => route.query,
+  () => {
+    if (route.query?.backend_id) {
+      const { backend_id } = route.query;
       filterData.value.backend_id = backend_id;
     }
     if (resourceSettingStore.previousPagination) {
@@ -1721,10 +1791,12 @@ watch(
         pagination.value.offset = resourceSettingStore.previousPagination.offset;
       });
     }
-  }, {
+  },
+  {
     immediate: true,
     deep: true,
-  });
+  },
+);
 
 watch(
   () => [isDetail.value, isShowLeft.value],
@@ -1808,6 +1880,11 @@ const recoverPageStatus = () => {
   }
 };
 
+const handleVersionCreated = () => {
+  getList();
+  handleShowVersion();
+};
+
 onBeforeRouteLeave((to) => {
   if (to.name === 'ResourceEdit') {
     const { current, offset } = pagination.value;
@@ -1824,25 +1901,17 @@ onBeforeRouteLeave((to) => {
 onMounted(() => {
   // setTimeout(() => {
   init();
-  dragTwoColDiv('resourceId', 'resourceLf', 'resourceLine'/* , 'resourceRg' */);
-  // 监听其他组件是否触发了资源更新，获取最新的列表数据
-  // mitt.on('on-update-plugin', () => {
-  //   pagination.value = Object.assign(pagination.value, {
-  //     current: 0,
-  //     limit: maxTableLimit,
-  //   });
-  //   getList();
-  //   handleShowVersion();
-  // });
+  dragTwoColDiv(
+    'resourceId',
+    'resourceLf',
+    'resourceLine',
+    // 'resourceRg',
+  );
   if (route.meta.pageStatus) {
     recoverPageStatus();
   }
   // });
 });
-
-// onBeforeMount(() => {
-//   mitt.off('on-update-plugin');
-// });
 
 </script>
 
@@ -1923,7 +1992,7 @@ onMounted(() => {
     }
   }
 
-  .left-wraper{
+  .left-wrapper {
     position: relative;
     background: #fff;
 
@@ -1989,8 +2058,8 @@ onMounted(() => {
 
         .dot {
           display: inline-block;
-          width: 8px;
           height: 8px;
+          min-width: 8px;
           margin-left: 4px;
           vertical-align: middle;
           cursor: pointer;
@@ -2030,7 +2099,7 @@ onMounted(() => {
     }
   }
 
-  .toggle-button{
+  .toggle-button {
     position: absolute;
     z-index: 99;
     display: flex;

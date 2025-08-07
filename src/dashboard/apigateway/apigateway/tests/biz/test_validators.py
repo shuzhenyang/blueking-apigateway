@@ -32,9 +32,10 @@ from apigateway.biz.validators import (
     ReleaseValidationError,
     ResourceIDValidator,
     ResourceVersionValidator,
-    SchemeInputValidator,
+    SchemeHostInputValidator,
     StageVarsValidator,
 )
+from apigateway.common.constants import CallSourceTypeEnum
 from apigateway.common.factories import SchemaFactory
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.core.constants import BackendTypeEnum, GatewayStatusEnum, ProxyTypeEnum
@@ -344,7 +345,7 @@ class TestPublishValidator:
             Backend,
             gateway=fake_gateway,
             type="http",
-            name="test_name",
+            name="default",
             description="test",
         )
 
@@ -411,10 +412,11 @@ class TestPublishValidator:
         测试编辑区资源没有绑定default backend（host为空）的情况
         """
         publish_validator = PublishValidator(fake_gateway, fake_stage, None)
-        assert publish_validator._validate_stage_backends() is None
+        with pytest.raises(Exception):
+            publish_validator._validate_stage_backends()
 
 
-class TestSchemeInputValidator:
+class TestSchemeHostInputValidator:
     @pytest.mark.parametrize(
         "data, expected, will_error",
         [
@@ -422,6 +424,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.HTTP.value,
                     "hosts": [{"scheme": "http"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -430,6 +433,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.HTTP.value,
                     "hosts": [{"scheme": "https"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -438,6 +442,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.HTTP.value,
                     "hosts": [{"scheme": "http"}, {"scheme": "http"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -446,6 +451,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.HTTP.value,
                     "hosts": [{"scheme": "https"}, {"scheme": "https"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -454,6 +460,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.HTTP.value,
                     "hosts": [{"scheme": "http"}, {"scheme": "https"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 {
                     "error_message": "[ErrorDetail(string='后端服务【Test Backend】的配置 scheme 同时存在 http 和 https， 需要保持一致。', code='invalid')]",
@@ -464,6 +471,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.GRPC.value,
                     "hosts": [{"scheme": "grpc"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -472,6 +480,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.GRPC.value,
                     "hosts": [{"scheme": "grpcs"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -480,6 +489,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.GRPC.value,
                     "hosts": [{"scheme": "grpc"}, {"scheme": "grpc"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -488,6 +498,7 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.GRPC.value,
                     "hosts": [{"scheme": "grpcs"}, {"scheme": "grpcs"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 None,
                 False,
@@ -496,28 +507,70 @@ class TestSchemeInputValidator:
                 {
                     "backend_type": BackendTypeEnum.GRPC.value,
                     "hosts": [{"scheme": "grpc"}, {"scheme": "grpcs"}],
+                    "source": CallSourceTypeEnum.Web.value,
                 },
                 {
                     "error_message": "[ErrorDetail(string='后端服务【Test Backend】的配置 scheme 同时存在 grpc 和 grpcs， 需要保持一致。', code='invalid')]",
                 },
                 True,
             ),
+            (
+                {
+                    "backend_type": BackendTypeEnum.HTTP.value,
+                    "hosts": [{"host": "http://example.com"}],
+                    "source": CallSourceTypeEnum.OpenAPI.value,
+                },
+                None,
+                False,
+            ),
+            (
+                {
+                    "backend_type": BackendTypeEnum.HTTP.value,
+                    "hosts": [{"host": "http://localhost"}],
+                    "source": CallSourceTypeEnum.OpenAPI.value,
+                },
+                {
+                    "error_message": "[ErrorDetail(string='后端服务【Test Backend】的配置，host: localhost 不能使用该地址。', code='invalid')]",
+                },
+                True,
+            ),
+            (
+                {
+                    "backend_type": BackendTypeEnum.HTTP.value,
+                    "hosts": [{"host": "http://127.0.0.1"}],
+                    "source": CallSourceTypeEnum.OpenAPI.value,
+                },
+                {
+                    "error_message": "[ErrorDetail(string='后端服务【Test Backend】的配置，host: 127.0.0.1 不能使用该地址。', code='invalid')]",
+                },
+                True,
+            ),
+            (
+                {
+                    "backend_type": BackendTypeEnum.HTTP.value,
+                    "hosts": [{"host": "http://0.0.0.0"}],
+                    "source": CallSourceTypeEnum.OpenAPI.value,
+                },
+                {
+                    "error_message": "[ErrorDetail(string='后端服务【Test Backend】的配置，host: 0.0.0.0 不能使用该地址。', code='invalid')]",
+                },
+                True,
+            ),
         ],
     )
     def test_validate_scheme(self, fake_backend, fake_grpc_backend, data, expected, will_error):
-        backend_name = ""
         if data["backend_type"] == BackendTypeEnum.HTTP.value:
             backend_name = fake_backend.name
-            validator = SchemeInputValidator(fake_backend, data["hosts"])
+            validator = SchemeHostInputValidator(fake_backend, data["hosts"])
         else:
             backend_name = fake_grpc_backend.name
-            validator = SchemeInputValidator(fake_grpc_backend, data["hosts"])
+            validator = SchemeHostInputValidator(fake_grpc_backend, data["hosts"])
         # 捕获可能的异常
         # 假设这个方法在某些条件下会抛出异常
         if will_error:
             # 验证异常消息是否符合预期
             with pytest.raises(Exception) as exc_info:
-                validator.validate_scheme()
+                validator.validate_scheme(data["source"])
             expected_msg = expected["error_message"].replace("Test Backend", backend_name)
             assert str(exc_info.value) == expected_msg
 

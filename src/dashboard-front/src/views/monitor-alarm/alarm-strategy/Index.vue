@@ -70,10 +70,10 @@
     <AddAlarmStrategy
       v-model:slider-params="sliderConfig"
       v-model:detail-data="formData"
+      v-model:effective-stage="effectiveStage"
       :init-data="initData"
       :label-list="labelList"
       :stage-list="stageList"
-      :effective-stage="initData.effectiveStage"
       @done="getList"
     />
   </div>
@@ -150,7 +150,9 @@ const tableColumns = ref([
     field: 'effective_stages',
     render: ({ row }: { row?: Partial<IAlarmStrategy> }) => {
       if (Array.isArray(row?.effective_stages)) {
-        <div>{ row.effective_stages.length > 0 ? row.effective_stages.join() : t('所有环境')}</div>;
+        return (
+          <span>{ row.effective_stages.length > 0 ? row.effective_stages.join() : t('所有环境')}</span>
+        );
       }
       return '--';
     },
@@ -227,6 +229,7 @@ const tableEmptyConf = ref<{
 const filterData = ref({ keyword: '' });
 const statusSwitcherDisabled = ref(false);
 const labelList = ref([]);
+const effectiveStage = ref('');
 // 新建初始数据
 const formData = ref({
   name: '',
@@ -332,7 +335,7 @@ const handleAdd = () => {
     form: formData.value,
     effectiveStage: 'all',
   });
-  console.log(formData.value, initData, 555);
+  effectiveStage.value = 'all';
 };
 
 // 是否启用
@@ -357,17 +360,22 @@ const handleIsEnable = async (item: IAlarmStrategy) => {
 };
 
 const handleEdit = async ({ id }: { id: number }) => {
-  sliderConfig.value = Object.assign({}, {
-    isShow: true,
-    title: t('编辑告警策略'),
-  });
-  const res = await getStrategyDetail(apigwId.value, id);
-  formData.value = { ...res };
-  // 当生效环境为空时，应该把生效环境初始化为 ‘全部环境’
-  initData = cloneDeep({
-    form: formData.value,
-    effectiveStage: res?.effective_stages?.length > 0 ? 'custom' : 'all',
-  });
+  try {
+    const res = await getStrategyDetail(apigwId.value, id);
+    formData.value = { ...res };
+    // 当生效环境为空时，应该把生效环境初始化为 ‘全部环境’
+    effectiveStage.value = res?.effective_stages?.length > 0 ? 'custom' : 'all';
+    initData = cloneDeep({
+      form: formData.value,
+      effectiveStage: effectiveStage.value,
+    });
+  }
+  finally {
+    sliderConfig.value = Object.assign({}, {
+      isShow: true,
+      title: t('编辑告警策略'),
+    });
+  }
 };
 
 const handleDelete = (

@@ -132,10 +132,8 @@ export const checkResourceImport = (apigwId: number, data: any, config: any = {}
  * @param apigwId 网关id
  * @param data 导出参数
  */
-export const exportResources = async (apigwId: number, data: any) => {
-  const res = await http.post(`${path}/${apigwId}/resources/export/`, data, { responseType: 'blob' });
-  return blobDownLoad(res);
-};
+export const exportResources = async (apigwId: number, data: any) =>
+  http.post(`${path}/${apigwId}/resources/export/`, data, { responseType: 'blob' });
 
 /**
  * 导入资源文档
@@ -185,7 +183,7 @@ export const getVersionDetail = (apigwId: number, id: number, params?: any) =>
  * @param apigwId 网关id
  */
 export const checkNeedNewVersion = (apigwId: number) =>
-  http.get(`${path}/${apigwId}/resource-versions/need-new-version/`);
+  http.get(`${path}/${apigwId}/resource-versions/need-new-version/`, undefined, { catchError: true });
 
 export const getVersionDiff = (apigwId: number, data: {
   source_resource_version_id: number
@@ -200,7 +198,10 @@ export const exportVersion = async (apigwId: number, data: {
 }) => {
   const { id } = data;
   delete data.id;
-  const res = await http.post(`${path}/${apigwId}/resource-versions/${id}/export/`, data, { responseType: 'blob' });
+  const res = await http.post(`${path}/${apigwId}/resource-versions/${id}/export/`, data, {
+    responseType: 'blob',
+    catchError: true,
+  });
   return blobDownLoad(res);
 };
 

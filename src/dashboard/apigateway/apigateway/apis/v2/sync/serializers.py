@@ -25,25 +25,30 @@ from pydantic import TypeAdapter
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
+from apigateway.apps.mcp_server.constants import MCPServerAppPermissionGrantTypeEnum, MCPServerStatusEnum
+from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission
 from apigateway.apps.permission.constants import FormattedGrantDimensionEnum, GrantDimensionEnum
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.apps.plugin.models import PluginType
 from apigateway.apps.support.constants import DocLanguageEnum, ProgrammingLanguageEnum
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND, SEMVER_PATTERN
+from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.biz.plugin import PluginConfigData, PluginSynchronizer
 from apigateway.biz.stage import StageHandler
 from apigateway.biz.validators import (
     BKAppCodeListValidator,
     GatewayAPIDocMaintainerValidator,
     MaxCountPerGatewayValidator,
+    MCPServerValidator,
     ResourceVersionValidator,
-    SchemeInputValidator,
+    SchemeHostInputValidator,
     StageVarsValidator,
 )
 from apigateway.common.constants import (
     DOMAIN_PATTERN,
     GATEWAY_NAME_PATTERN,
     HEADER_KEY_PATTERN,
+    CallSourceTypeEnum,
     GatewayAPIDocMaintainerTypeEnum,
 )
 from apigateway.common.django.validators import NameValidator
@@ -332,7 +337,7 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
 
     def validate(self, data):
         self._validate_plugin_configs(data.get("plugin_configs"))
-        self._validate_scheme(data.get("backends"))
+        self._validate_scheme_host(data.get("backends"))
         # validate stage backend
         if data.get("proxy_http") is None and data.get("backends") is None:
             raise serializers.ValidationError(_("proxy_http or backends 必须要选择一种方式配置后端服务"))
@@ -552,12 +557,12 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
                     )
                 )
 
-    def _validate_scheme(self, backends):
+    def _validate_scheme_host(self, backends):
         if backends is None:
             return
         for backend in backends:
-            validator = SchemeInputValidator(hosts=backend["config"]["hosts"], backend=backend)
-            validator.validate_scheme()
+            validator = SchemeHostInputValidator(hosts=backend["config"]["hosts"], backend=backend)
+            validator.validate_scheme(CallSourceTypeEnum.OpenAPI.value)
 
     def _sync_plugins(self, gateway_id: int, stage_id: int, plugin_configs: Optional[Dict[str, Any]] = None):
         # plugin_configs 为 None 则，plugin_config_datas 设置 [] 则清空对应配置
@@ -765,3 +770,76 @@ class ReleaseOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.ReleaseOutputSLZ"
+
+
+class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
+    stage_id = serializers.IntegerField(required=False, help_text="MCPServer 所属环境 ID")
+    labels = serializers.ListField(child=serializers.CharField(), required=False, help_text="MCPServer 标签列表")
+    resource_names = serializers.ListField(
+        child=serializers.CharField(), required=True, help_text="MCPServer 资源名称列表"
+    )
+    name = serializers.CharField(required=True, help_text="MCPServer 名称", max_length=64)
+    status = serializers.ChoiceField(help_text="MCPServer 状态", choices=MCPServerStatusEnum.get_choices())
+    target_app_codes = serializers.ListSerializer(
+        help_text="主动授权的app_code", child=serializers.CharField(), allow_empty=True, default=list, required=False
+    )
+
+    class Meta:
+        model = MCPServer
+        fields = (
+            "name",
+            "description",
+            "is_public",
+            "stage_id",
+            "labels",
+            "resource_names",
+            "status",
+            "target_app_codes",
+        )
+        lookup_field = "id"
+        non_model_fields = ["target_app_codes"]
+        validators = [MCPServerValidator()]
+
+    def _fill_data(self, data):
+        data["gateway_id"] = self.context["gateway"].id
+        data["stage_id"] = self.context["stage"].id
+
+    def _sync_permission(self, mcp_server_id: int, app_codes: List[str]):
+        # sync permission
+        for app_code in app_codes:
+            MCPServerAppPermission.objects.save_permission(
+                mcp_server_id=mcp_server_id,
+                bk_app_code=app_code,
+                grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+                expire_days=None,
+            )
+        MCPServerHandler.sync_permissions(mcp_server_id)
+
+    def create(self, validated_data):
+        self._fill_data(validated_data)
+        instance = super().create(validated_data)
+        self._sync_permission(instance.id, validated_data.get("target_app_codes", []))
+        return instance
+
+    def update(self, instance, validated_data):
+        self._fill_data(validated_data)
+        instance = super().update(instance, validated_data)
+        self._sync_permission(instance.id, validated_data.get("target_app_codes", []))
+        return instance
+
+
+class StageMcpServersSyncInputSLZ(serializers.Serializer):
+    gateway = serializers.HiddenField(default=CurrentGatewayDefault())
+    mcp_servers = serializers.ListField(child=MCPServerSLZ(), required=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.MCPServerSyncInputSLZ"
+
+
+class StageMcpServersSyncOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True, help_text="mcp server id")
+    name = serializers.CharField(read_only=True, help_text="mcp server name")
+    action = serializers.CharField(read_only=True, help_text="mcp server action: create, update")
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.StageMcpServersSyncOutputSLZ"

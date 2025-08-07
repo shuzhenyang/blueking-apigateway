@@ -39,7 +39,6 @@
       <div class="flex grow-1 justify-end">
         <BkInput
           v-model="filterData.keyword"
-          class="mx-10px"
           :placeholder="t('请输入版本号')"
         />
       </div>
@@ -48,7 +47,7 @@
       <div class="w-full">
         <BkLoading :loading="isLoading">
           <BkTable
-            ref="bkTableRef"
+            ref="tableRef"
             class="edition-table table-layout"
             :data="tableData"
             remote-pagination
@@ -60,7 +59,7 @@
             @page-limit-change="handlePageSizeChange"
             @page-value-change="handlePageChange"
             @selection-change="handleSelectionChange"
-            @select-all="handleSelecAllChange"
+            @select-all="handleSelectAllChange"
           >
             <BkTableColumn
               width="80"
@@ -195,9 +194,9 @@
 
     <!-- 版本对比 -->
     <BkSideslider
-      v-model:is-show="diffSidesliderConf.isShow"
-      :title="diffSidesliderConf.title"
-      :width="diffSidesliderConf.width"
+      v-model:is-show="diffSliderConf.isShow"
+      :title="diffSliderConf.title"
+      :width="diffSliderConf.width"
       quick-close
     >
       <template #default>
@@ -268,6 +267,7 @@ const featureFlagStore = useFeatureFlag();
 
 const filterData = ref({ keyword: version });
 const diffDisabled = ref(true);
+
 // 导出配置
 const exportDialogConfig = reactive<IExportDialog>({
   isShow: false,
@@ -278,6 +278,7 @@ const exportDialogConfig = reactive<IExportDialog>({
   hiddenResourceTip: true,
   hiddenExportTypeLabel: true,
 });
+
 // 导出参数
 const exportParams = reactive<IExportParams & { id?: number }>({
   export_type: 'all',
@@ -301,9 +302,8 @@ const {
 // 列表多选
 const {
   selections,
-  bkTableRef,
   handleSelectionChange,
-  handleSelecAllChange,
+  handleSelectAllChange,
   resetSelections,
 } = useSelection();
 
@@ -317,7 +317,7 @@ const stageList = ref<any>([]);
 // 选择发布的环境
 const stageData = ref();
 const versionData = ref();
-const releaseSidesliderRef = ref(null);
+const releaseSidesliderRef = ref();
 const tableEmptyConf = ref<{
   keyword: string
   isAbnormal: boolean
@@ -327,11 +327,13 @@ const tableEmptyConf = ref<{
 });
 
 // 版本对比抽屉
-const diffSidesliderConf = reactive({
+const diffSliderConf = reactive({
   isShow: false,
   width: 1040,
   title: t('版本资源对比'),
 });
+
+const tableRef = ref();
 const diffSourceId = ref();
 const diffTargetId = ref();
 const resourceDetailShow = ref(false);
@@ -350,8 +352,8 @@ watch(
 
 watch(
   selections,
-  (sel) => {
-    if (sel?.length === 1 || sel?.length === 2) {
+  () => {
+    if (selections.value?.length === 1 || selections.value?.length === 2) {
       diffDisabled.value = false;
     }
     else {
@@ -369,7 +371,7 @@ const openCreateSdk = (id: number) => {
 
 // 版本对比
 const handleShowDiff = () => {
-  diffSidesliderConf.width = window.innerWidth <= 1280 ? 1040 : 1280;
+  diffSliderConf.width = window.innerWidth <= 1280 ? 1040 : 1280;
 
   // 调整展示顺序，旧的版本(id 较小的那个)放左边，新的版本放右边
   const selectedResources = orderBy(selections.value, 'id');
@@ -378,8 +380,8 @@ const handleShowDiff = () => {
   diffSourceId.value = diffSource?.id;
   diffTargetId.value = diffTarget?.id || '';
 
-  diffSidesliderConf.isShow = true;
-  resetSelections();
+  diffSliderConf.isShow = true;
+  resetSelections(tableRef.value);
 };
 
 // 版本导出
@@ -394,26 +396,29 @@ const handleExportDownload = async () => {
   delete params.export_type;
   exportDialogConfig.loading = true;
   try {
-    const res = await exportVersion(apigwId.value, params);
-    if (res.success) {
-      Message({
-        message: t('导出成功'),
-        theme: 'success',
-        width: 'auto',
-      });
-    }
+    await exportVersion(apigwId.value, params);
+    Message({
+      message: t('导出成功'),
+      theme: 'success',
+      width: 'auto',
+    });
     exportDialogConfig.isShow = false;
   }
   catch (e) {
-    const error = e as Error;
-    Message({
-      message: error?.message || t('导出失败'),
-      theme: 'error',
-      width: 'auto',
-    });
+    const fileReader = new FileReader();
+    fileReader.readAsText(e as Blob, 'utf-8');
+    fileReader.onload = function () {
+      const blobError = JSON.parse(fileReader.result as string);
+      Message({
+        message: blobError?.error?.message || t('导出失败'),
+        theme: 'error',
+        width: 'auto',
+      });
+    };
   }
   finally {
     exportDialogConfig.loading = false;
+    exportDialogConfig.isShow = false;
   }
 };
 
@@ -512,7 +517,7 @@ onMounted(() => {
     await getList(getVersionList, false);
     tableData.value.forEach((item: Record<string, any>) => {
       if (selections.value.find(sel => sel.id === item.id)) {
-        bkTableRef.value?.toggleRowSelection(item, true);
+        tableRef.value?.toggleRowSelection(item, true);
       }
     });
   }, 1000 * 30);

@@ -68,8 +68,8 @@
               <BkInput
                 v-model.trim="formData.name"
                 :disabled="isEdit"
-                :maxlength="30"
-                :placeholder="t('请输入小写字母、数字、连字符(-)，以小写字母开头')"
+                :maxlength="formData.kind === 1 ? 16 : 30"
+                :placeholder="nameInputPlaceholder"
                 autofocus
                 clearable
                 show-word-limit
@@ -308,7 +308,7 @@
           :loading="submitLoading"
           @click="handleConfirmCreate"
         >
-          {{ t(isEdit ? '保存' : '提交') }}
+          {{ isEdit ? t('保存') : t('提交') }}
         </BkButton>
         <BkButton
           class="ml-12px"
@@ -463,10 +463,12 @@ const rules = {
     },
     {
       validator: (value: string) => {
-        const reg = /^[a-z][a-z0-9-]*$/;
+        const reg = formData.value.kind === 0 ? /^[a-z][a-z0-9-]*$/ : /^[a-z0-9-]{3,16}$/;
         return reg.test(value);
       },
-      message: t('由小写字母、数字、连接符（-）组成，首字符必须是小写字母，长度大于3小于30个字符'),
+      message: () => formData.value.kind === 0
+        ? t('由小写字母、数字、连接符（-）组成，首字符必须是小写字母，长度大于3小于30个字符')
+        : t('只能包含小写字母(a-z)、数字(0-9)和半角连接符(-)，长度在 3-16 之间'),
       trigger: 'change',
     },
   ],
@@ -501,6 +503,12 @@ const languageList = [
 const isEdit = computed(() => {
   return !!formData.value.id;
 });
+
+const nameInputPlaceholder = computed(() =>
+  formData.value.kind === 0
+    ? t('请输入小写字母、数字、连字符(-)，以小写字母开头')
+    : t('只能包含小写字母(a-z)、数字(0-9)和半角连接符(-)，长度在 3-16 之间'),
+);
 
 const progressList = computed(() => {
   if (formData.value.kind === 0) {
@@ -568,6 +576,36 @@ const md = new MarkdownIt({
     return str;
   },
 });
+
+watch(
+  () => featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE,
+  () => {
+    if (featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE) {
+      formData.value.tenant_id = userStore.info.tenant_id || 'system';
+      if (userStore.info.tenant_id === 'system') {
+        formData.value.tenant_mode = 'global';
+      }
+      else {
+        formData.value.tenant_mode = 'single';
+      }
+    }
+    else {
+      formData.value.tenant_id = 'default';
+      formData.value.tenant_mode = 'single';
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => userStore.info.username,
+  () => {
+    if (userStore.info.username && !formData.value.maintainers?.length) {
+      formData.value.maintainers = [userStore.info.username];
+    }
+  },
+  { immediate: true },
+);
 
 watch(
   () => formData.value.name,

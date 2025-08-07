@@ -274,7 +274,7 @@
             {{ t('API文档') }}
             <div
               class="area-edit"
-              @click.stop="showApiDocEdit()"
+              @click.stop="showApiDocEdit"
             >
               <AgIcon name="edit-line" />
               <BkButton
@@ -304,7 +304,7 @@
                 {{ `${t('联系人')}：` }}
               </div>
               <div class="value contact">
-                <span class="link">{{ basicInfoData.doc_maintainers?.contacts?.join(',') || '--' }}</span>
+                <span class="link">{{ basicInfoData.doc_maintainers?.contacts?.join(', ') || '--' }}</span>
                 <div class="sub-explain">
                   {{ t('文档页面上展示出来的文档咨询接口人') }}
                 </div>
@@ -533,11 +533,25 @@
         </BkButton>
       </template>
     </BkDialog>
+    <EditAPIDoc
+      v-model="isShowApiDoc"
+      :data="basicInfoData"
+      @done="getBasicInfo"
+    />
     <CreateGateway
       v-model="createGatewayShow"
       :init-data="basicInfoDetailData"
       @done="getBasicInfo"
     />
+    <AgSideslider
+      v-model="isShowMarkdown"
+      :title="t('查看开发指引')"
+      :width="960"
+    >
+      <section class="markdown-box">
+        <Guide :markdown-html="markdownHtml" />
+      </section>
+    </AgSideslider>
   </div>
 </template>
 
@@ -561,12 +575,15 @@ import hljs from 'highlight.js';
 import ProgramProcess from '@/images/program-process.png';
 import EditMember from './components/EditMember.vue';
 import CreateGateway from '@/components/create-gateway/Index.vue';
+import AgSideslider from '@/components/ag-sideslider/Index.vue';
+import Guide from '@/components/guide/Index.vue';
 import { TENANT_MODE_TEXT_MAP } from '@/enums';
 import {
   useEnv,
   useFeatureFlag,
 } from '@/stores';
 import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
+import EditAPIDoc from '@/views/basic-info/components/EditAPIDoc.vue';
 
 type BasicInfoType = Awaited<ReturnType<typeof getGatewayDetail>>;
 
@@ -1017,7 +1034,7 @@ const handleMaintainerChange = async (payload: { maintainers?: string[] }) => {
             color: #63656E;
             text-align: right;
 
-            &.w0 {
+            &.w-0px {
               min-width: 0;
             }
           }

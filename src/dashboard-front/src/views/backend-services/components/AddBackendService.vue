@@ -91,6 +91,7 @@
                       :rules="baseInfoRules.name"
                     >
                       <BkInput
+                        ref="nameRef"
                         v-model="baseInfo.name"
                         :disabled="Boolean(editId) || disabled"
                         :placeholder="
@@ -146,7 +147,7 @@
                     </template>
                     <template #content="slotProps">
                       <BkForm
-                        :ref="getStageConfigRef"
+                        :ref="(el:HTMLElement) => getStageConfigRef(el, slotProps.$index)"
                         class="stage-config-form"
                         :model="slotProps"
                         form-type="vertical"
@@ -154,6 +155,7 @@
                         <BkFormItem
                           :label="t('负载均衡类型')"
                           property="configs.loadbalance"
+                          class="mt-20px"
                           required
                           :rules="configRules.loadbalance"
                         >
@@ -358,11 +360,12 @@ import { Message } from 'bkui-vue';
 import { cloneDeep, isEqual } from 'lodash-es';
 import { useGateway } from '@/stores';
 import {
+  type IBackendServicesConfig,
   createBackendService,
   getBackendServiceDetail,
   updateBackendService,
 } from '@/services/source/backendServices';
-import { getStageList } from '@/services/source/stage';
+import { type IStageListItem, getStageList } from '@/services/source/stage';
 import { AngleUpFill, Success } from 'bkui-lib/icon';
 import AgSideslider from '@/components/ag-sideslider/Index.vue';
 
@@ -381,6 +384,7 @@ const router = useRouter();
 const gatewayStore = useGateway();
 const { t, locale } = useI18n();
 
+const hostReg = /^(?=^.{3,255}$)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})*(:\d+)?$|^\[([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\](:\d+)?$/;
 const activeKey = ref(['base-info', 'stage-config']);
 // 基础信息
 const baseInfo = ref({
@@ -401,6 +405,7 @@ const stageConfigRef = ref([]);
 const isPublish = ref(false);
 const isSaveLoading = ref(false);
 const finaConfigs = ref([]);
+const nameRef = ref<InstanceType<typeof BkInput>>(null);
 const baseInfoEl = useTemplateRef<InstanceType<typeof BkForm> & { validate: () => void }>(
   'baseInfoRef',
 );
@@ -460,9 +465,7 @@ const configRules = {
     },
     {
       validator(value: string) {
-        const reg
-          = /^(?=^.{3,255}$)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})*(:\d+)?$|^\[([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\](:\d+)?$/;
-        return reg.test(value);
+        return hostReg.test(value);
       },
       message: t('请输入合法Host，如：example.com'),
       trigger: 'blur',
@@ -505,10 +508,15 @@ watch(
 );
 
 // 获取所有stage服务配置的ref
-const getStageConfigRef = (el) => {
-  if (el) {
-    stageConfigRef.value.push(el);
-  }
+const getStageConfigRef = (el: HTMLElement, index: number) => {
+  if (el) stageConfigRef.value[index] = el;
+};
+
+const handleScrollView = (el: HTMLInputElement | HTMLElement) => {
+  el.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center',
+  });
 };
 
 // 增加服务地址
@@ -528,7 +536,7 @@ const handleAddServiceAddress = (name: string) => {
 // 删除服务地址
 const handleDeleteServiceAddress = (name: string, index: number) => {
   const isDeleteItem = stageConfig.value;
-  isDeleteItem.forEach((item: Record<string, any>) => {
+  isDeleteItem.forEach((item: IBackendServicesConfig) => {
     if (item.name === name && item.configs.hosts.length !== 1) {
       item.configs.hosts.splice(index, 1);
     }
@@ -541,12 +549,31 @@ const handleCancel = () => {
 };
 
 const handleConfirm = async () => {
+  let emptyHostIndex = -1;
   // 基础信息校验
-  await baseInfoEl.value?.validate();
-  // 逐个stage服务配置的校验
-  for (const item of stageConfigRef.value) {
-    if (!item) break;
-    await item.validate();
+  try {
+    await baseInfoEl.value?.validate();
+    // 逐个stage服务配置的校验
+    for (const item of stageConfigRef.value) {
+      if (!item) break;
+      const { hosts, timeout } = item.model.configs;
+      const isEmpty = hosts.some(config => !config.host || !hostReg.test(config.host)) || !String(timeout);
+      if (isEmpty) {
+        emptyHostIndex = item.model.$index;
+      }
+      await item.validate();
+    }
+  }
+  catch {
+    if (!baseInfo.value.name) {
+      nameRef.value?.focus();
+      handleScrollView(nameRef?.value?.$el);
+      return;
+    }
+    if (emptyHostIndex > -1) {
+      handleScrollView(stageConfigRef.value[emptyHostIndex]?.$el);
+      return;
+    }
   }
   finaConfigs.value = stageConfig.value.map((item) => {
     const id = !editId ? item.id : item.configs.stage.id;
@@ -666,40 +693,30 @@ const handleCompare = (callback) => {
 };
 
 const getStageListData = async () => {
-  try {
-    const res = await getStageList(apigwId.value);
-    res?.forEach((item: Record<string, any>, index: number) => {
-      activeIndex.value.push(index);
-    });
-    isPublish.value = res?.some(item => item.publish_id !== 0);
-    stageList.value = [...res];
-  }
-  catch (error) {
-    console.log('error', error);
-  }
+  const res = await getStageList(apigwId.value);
+  res?.forEach((item: IStageListItem, index: number) => {
+    activeIndex.value.push(index);
+  });
+  isPublish.value = res?.some(item => item.publish_id !== 0);
+  stageList.value = [...res];
 };
 
 const getInfo = async () => {
-  try {
-    const res = await getBackendServiceDetail(apigwId.value, editId);
-    curServiceDetail.value = cloneDeep(res);
-    stageConfig.value = res.configs.map((item) => {
-      return {
-        configs: item,
-        name: item?.stage?.name,
-        id: item?.stage?.id,
-      };
-    });
-    const sliderParams = {
-      curServiceDetail: curServiceDetail.value,
-      stageConfig: stageConfig.value,
-      baseInfo: baseInfo.value,
+  const res = await getBackendServiceDetail(apigwId.value, editId);
+  curServiceDetail.value = cloneDeep(res);
+  stageConfig.value = res.configs.map((item) => {
+    return {
+      configs: item,
+      name: item?.stage?.name,
+      id: item?.stage?.id,
     };
-    initData.value = cloneDeep(sliderParams);
-  }
-  catch (error) {
-    console.log('error', error);
-  }
+  });
+  const sliderParams = {
+    curServiceDetail: curServiceDetail.value,
+    stageConfig: stageConfig.value,
+    baseInfo: baseInfo.value,
+  };
+  initData.value = cloneDeep(sliderParams);
 };
 
 const show = async () => {
@@ -721,6 +738,7 @@ defineExpose({ show });
 
   :deep(.bk-modal-content) {
     overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 
   :deep(.bk-sideslider-footer) {
@@ -728,29 +746,29 @@ defineExpose({ show });
   }
 
   .title {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: #323237;
+    margin-left: 8px;
 
     .icon {
-      margin-right: 10px;
       font-size: 18px;
-      color: #62666b;
-    }
-  }
-
-  .base-info {
-
-    .base-info-form {
-
-      .alert-text {
-        color: #a5a4a7;
-      }
+      color: #4d4f56;
     }
   }
 
   .slider-content {
-    padding: 20px 40px 30px;
+    padding: 20px 34px 32px 40px;
+
+    .bk-form-label {
+      line-height: 22px;
+    }
+
+    .alert-text {
+      font-size: 12px;
+      color: #979ba5;
+      line-height: 22px;
+    }
   }
 
   .service-tips {
@@ -758,11 +776,14 @@ defineExpose({ show });
   }
 
   .host-item {
-
     i {
       margin-left: 10px;
       font-size: 14px;
       color: #979ba5;
+
+      &.add-host-btn {
+        margin-left: 13px;
+      }
 
       &:hover {
         color: #63656e;
@@ -876,7 +897,7 @@ defineExpose({ show });
 .bk-collapse-service {
 
   .panel-header {
-    padding: 12px 0;
+    margin-bottom: 16px;
     cursor: pointer;
 
     .title {
@@ -886,14 +907,15 @@ defineExpose({ show });
       color: #313238;
     }
 
-    .panel-header-show {
+    .panel-header-show,
+    .panel-header-hide {
+      color: #4d4f56;
       transform: rotate(0deg);
       transition: 0.2s;
     }
 
     .panel-header-hide {
       transform: rotate(-90deg);
-      transition: 0.2s;
     }
   }
 
@@ -917,19 +939,17 @@ defineExpose({ show });
     }
 
     :deep(.bk-collapse-item) {
-      margin-bottom: 25px;
+      margin-bottom: 24px;
       background-color: #f5f7fb;
 
       .bk-collapse-header {
-        background-color: #f5f7fb;
-
-        &:hover {
-          background-color: #f0f1f5;
-        }
+        background-color: #f0f1f5;
+        height: 40px;
+        line-height: 40px;
       }
 
       .bk-collapse-content {
-        padding: 5px 32px;
+        padding: 0 32px;
       }
 
       &:last-child {
@@ -938,7 +958,6 @@ defineExpose({ show });
     }
 
     :deep(.bk-collapse-icon) {
-      top: 17px;
       left: 17px;
       color: #979aa2;
 

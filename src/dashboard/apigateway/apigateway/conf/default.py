@@ -562,6 +562,7 @@ COMPONENT_DOC_URL_TMPL = env.str("COMPONENT_DOC_URL_TMPL", "")
 BK_COMPONENT_API_URL = env.str("BK_COMPONENT_API_URL", "")
 BK_COMPONENT_API_INNER_URL = env.str("BK_COMPONENT_API_INNER_URL", "") or BK_COMPONENT_API_URL
 BK_PAAS3_API_URL = BK_API_INNER_URL_TMPL.format(api_name="bkpaas3")
+BK_PAAS3_API_TIMEOUT = env.int("BK_PAAS3_API_TIMEOUT", 30)
 BK_APIGATEWAY_API_URL = env.str("BK_APIGATEWAY_API_URL", "")
 
 BK_AUTH_API_URL = env.str("BK_AUTH_API_URL", "")
@@ -574,6 +575,7 @@ AI_MODEL = env.str("AI_MODEL", "")
 AI_API_KEY = env.str("AI_API_KEY", "")
 AI_APP_CODE = env.str("AI_APP_CODE", BK_APP_CODE)
 AI_APP_SECRET = env.str("AI_APP_SECRET", BK_APP_SECRET)
+AI_BKAUTH_ENABLED = env.bool("AI_BKAUTH_ENABLED", False)
 
 # ==============================================================================
 # 网关全局配置
@@ -957,7 +959,7 @@ ENV_VARS_FOR_FRONTEND = {
     "EDITION": EDITION,
     "BK_APP_CODE": BK_APP_CODE,
     "BK_DEFAULT_TEST_APP_CODE": DEFAULT_TEST_APP["bk_app_code"],
-    "BK_API_RESOURCE_URL_TMPL": RESOURCE_DOC_URL_TMPL,
+    "BK_API_RESOURCE_URL_TMPL": BK_API_URL_TMPL + "/{stage_name}/{resource_path}",
     "BK_COMPONENT_API_URL": BK_COMPONENT_API_URL,
     "BK_PAAS_APP_REPO_URL_TMPL": env.str(
         "BK_PAAS_APP_REPO_URL_TMPL", "https://example.com/groups/blueking-plugins/apigw/{{gateway_name}}.git"
@@ -978,6 +980,7 @@ ENV_VARS_FOR_FRONTEND = {
         "name": env.str("HELPER_NAME", default=""),
         "href": env.str("HELPER_HREF", default=""),
     },
+    "BK_SHARED_RES_URL": env.str("BK_SHARED_RES_URL", default=""),
 }
 
 
@@ -1097,4 +1100,5 @@ USER_AUTH_TYPE = {
 # ==============================================================================
 # 安全相关
 # ==============================================================================
+FORBIDDEN_HOSTS = env.list("FORBIDDEN_HOSTS", default=["localhost", "127.0.0.1", "0.0.0.0"])
 FORBIDDEN_PORTS = env.list("FORBIDDEN_PORTS", default=[])

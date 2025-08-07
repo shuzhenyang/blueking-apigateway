@@ -21,7 +21,7 @@
     <BkSideslider
       v-model:is-show="isShow"
       quick-close
-      width="960"
+      :width="960"
       ext-cls="stage-sideslider-cls"
       transfer
       @animation-end="handleAnimationEnd"
@@ -81,10 +81,7 @@
                           :placeholder="t('请输入 2-20 字符的字母、数字、连字符(-)、下划线(_)，以字母开头')"
                           :disabled="!isAdd"
                         />
-                        <p
-                          class="color-#63656e line-height-16px text-12px mt-5px"
-                        >
-                          <AgIcon name="info" />
+                        <p class="color-#979ba5 line-height-20px text-12px mt-2px">
                           {{ t('环境唯一标识，创建后不可修改。创建网关成功后可新增环境') }}
                         </p>
                       </BkFormItem>
@@ -118,7 +115,7 @@
                       :class="[activeKey?.includes('stage-config') ? 'panel-header-show' : 'panel-header-hide']"
                     />
                     <div class="title">
-                      {{ t('后端服务配置') }}
+                      {{ t('环境的后端服务配置') }}
                     </div>
                   </div>
                 </template>
@@ -144,6 +141,7 @@
                           <BkFormItem
                             required
                             :label="t('负载均衡类型')"
+                            class="mt-20px"
                           >
                             <BkSelect
                               v-model="backend.config.loadbalance"
@@ -217,7 +215,7 @@
 
                               <AgIcon
                                 name="plus-circle-shape"
-                                class="ml-10px"
+                                class="ml-13px"
                                 @click="() => handleAddServiceAddress(backend.name)"
                               />
                               <AgIcon
@@ -398,13 +396,13 @@
           >
             <BkButton
               theme="primary"
-              class="w-90px"
+              class="w-88px"
               @click="handleConfirm"
             >
               {{ t('确定') }}
             </BkButton>
             <BkButton
-              class="w-90px ml-8px"
+              class="w-88px ml-8px"
               @click="handleCancel"
             >
               {{ t('取消') }}
@@ -430,19 +428,20 @@ import {
   useEnv,
   useGateway,
 } from '@/stores';
-import { useRouteParams } from '@vueuse/router';
 
 interface IProps { stageId?: number }
 
 const { stageId = 0 } = defineProps<IProps>();
 
-const emit = defineEmits<{ hidden: [void] }>();
+const emit = defineEmits<{
+  hidden: [void]
+  done: [void]
+}>();
 
 const { t, locale } = useI18n();
 const route = useRoute();
 const envStore = useEnv();
 const gatewayStore = useGateway();
-const gatewayId = useRouteParams('id', 0, { transform: Number });
 
 const isShow = ref(false);
 const isAdsorb = ref(false);
@@ -564,7 +563,7 @@ const rules = {
 const backendConfigFormRefs: InstanceType<typeof Form>[] = [];
 
 // 网关id
-const apigwId = +route.params.id;
+const gatewayId = computed(() => Number(route.params.id));
 
 const title = computed(() => {
   return titleTextMap[actionType.value] ?? t('环境');
@@ -627,7 +626,7 @@ const setBackendConfigRef = (el: InstanceType<typeof Form>) => {
 const addInit = async () => {
   isDialogLoading.value = true;
   // 获取当前网关下的backends(获取后端服务列表)
-  const res = await getBackendServiceList(apigwId);
+  const res = await getBackendServiceList(gatewayId.value);
   // console.log('获取all后端服务列表', res);
   activeIndex.value = [];
   curStageData.value.backends = res.results.map((item: any, index: number) => {
@@ -647,7 +646,7 @@ const addInit = async () => {
 const checkInit = async () => {
   isDialogLoading.value = true;
   try {
-    const data = await getStageDetail(apigwId, stageId!);
+    const data = await getStageDetail(gatewayId.value, stageId!);
     curStageData.value.name = data.name;
     curStageData.value.backends = await getStageBackends(gatewayId.value, stageId!);
   }
@@ -658,7 +657,7 @@ const checkInit = async () => {
 
 // 获取环境详情（编辑）
 const getStageDetailFun = async () => {
-  const data = await getStageDetail(apigwId, stageId!);
+  const data = await getStageDetail(gatewayId.value, stageId!);
   curStageData.value.name = data.name;
   curStageData.value.description = data.description;
 };
@@ -728,10 +727,10 @@ const handleConfirm = async () => {
     item?.validate();
   }
   if (isAdd.value) {
-    handleConfirmCreate();
+    await handleConfirmCreate();
   }
   else {
-    handleConfirmEdit();
+    await handleConfirmEdit();
   }
 };
 
@@ -742,13 +741,12 @@ const handleConfirmCreate = async () => {
   params.backends.forEach((v: any) => {
     delete v.name;
   });
-  await createStage(apigwId, params);
+  await createStage(gatewayId.value, params);
   Message({
     message: t('创建成功'),
     theme: 'success',
   });
-  // 重新获取环境列表(全局事件总线实现)
-  // mitt.emit('rerun-init', true);
+  emit('done');
   // 数据重置
   handleCloseSideSlider();
   // 关闭dialog
@@ -762,13 +760,12 @@ const handleConfirmEdit = async () => {
   params.backends.forEach((v: any) => {
     delete v.name;
   });
-  await putStage(apigwId, stageId!, params);
+  await putStage(gatewayId.value, stageId!, params);
   Message({
     message: t('更新成功'),
     theme: 'success',
   });
-  // 重新获取环境列表(全局事件总线实现)
-  // mitt.emit('rerun-init', true);
+  emit('done');
   // 关闭dialog
   isShow.value = false;
 };
@@ -859,11 +856,16 @@ defineExpose({ handleShowSideslider });
 
   :deep(.bk-modal-content) {
     overflow-y: auto;
+    scrollbar-gutter: stable;
+
+    .bk-form-label {
+      line-height: 22px;
+    }
   }
 }
 
 .sideslider-content {
-  padding: 20px 40px 32px;
+  padding: 20px 34px 32px 40px;
 
   .host-item {
     display: flex;
@@ -911,7 +913,7 @@ defineExpose({ handleShowSideslider });
 
     i {
       padding: 3px;
-      margin-left: 5px;
+      margin-left: 4px;
       color: #3a84ff;
       cursor: pointer;
     }
@@ -1017,7 +1019,6 @@ defineExpose({ handleShowSideslider });
 .timeout-item-cls {
   position: relative;
   width: 240px;
-  margin-top: 14px;
 
   :deep(.bk-form-content) {
 
@@ -1059,20 +1060,21 @@ defineExpose({ handleShowSideslider });
 
 .footer-btn-wrapper {
   bottom: 0;
-  height: 52px;
+  height: 48px;
   padding-left: 40px;
 }
 
 .fixed-footer-btn-wrapper {
+  width: 100%;
+  max-width: 960px;
   position: fixed;
   right: 0;
   bottom: 0;
-  left: 0;
   z-index: 9;
   padding: 10px 0 10px 40px;
-  background: #fff;
-  box-shadow: 0 -2px 4px 0 #0000000f;
-  transition: .3s;
+  background-color: #ffffff;
+  box-shadow: 0 -1px 0 0 #dcdee5;
+  transition: .2s;
 }
 
 .is-pinned {
@@ -1084,7 +1086,8 @@ defineExpose({ handleShowSideslider });
   .panel-header {
     display: flex;
     align-items: center;
-    padding: 12px 0;
+    margin-bottom: 16px;
+    line-height: 22px;
     cursor: pointer;
 
     .title {
@@ -1094,14 +1097,15 @@ defineExpose({ handleShowSideslider });
       color: #313238;
     }
 
-    .panel-header-show {
-      transform: rotate(0deg);
+    .panel-header-show,
+    .panel-header-hide {
+      color: #63656e;
       transition: .2s;
+      transform: rotate(0deg);
     }
 
     .panel-header-hide {
       transform: rotate(-90deg);
-      transition: .2s;
     }
   }
 
@@ -1112,21 +1116,29 @@ defineExpose({ handleShowSideslider });
   .stage {
 
     :deep(.bk-collapse-title) {
-      margin-left: 23px;
+      margin-left: 24px;
       font-size: 14px;
       font-weight: 700;
-      color: #63656E;
+      color: #63656e;
     }
 
     :deep(.bk-collapse-item) {
-      background-color: #F5F7FB;
+      background-color: #f5f7fb;
+      margin-bottom: 16px;
 
-      &:not(:nth-last-child(1)) {
-        margin-bottom: 25px;
+      .bk-collapse-header {
+        height: 40px;
+        line-height: 40px;
+        background-color: #f0f1f5;
+        border-radius: 2px;
       }
 
       .bk-collapse-content {
-        padding: 5px 32px;
+        padding: 0 32px;
+      }
+
+      &:last-child {
+        margin-bottom: 0;
       }
     }
 
@@ -1137,9 +1149,8 @@ defineExpose({ handleShowSideslider });
     }
 
     :deep(.bk-collapse-icon) {
-      top: 17px;
       left: 17px;
-      color: #979AA2;
+      color: #979aa2;
 
       svg {
         font-size: 13px;
@@ -1148,7 +1159,7 @@ defineExpose({ handleShowSideslider });
   }
 
   .last-form-item {
-    margin-bottom: 12px;
+    margin-bottom: 32px;
   }
 }
 </style>

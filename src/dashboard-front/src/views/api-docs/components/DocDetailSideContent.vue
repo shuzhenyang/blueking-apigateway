@@ -33,7 +33,7 @@
         {{ t('组件详情') }}
       </article>
       <aside v-if="basics?.doc_maintainers?.type === 'user'">
-        <chat
+        <Chat
           v-if="featureFlagStore.flags.ALLOW_CREATE_APPCHAT"
           :default-user-list="userList"
           :owner="curUser.username"
@@ -80,22 +80,24 @@
             />
           </main>
         </article>
-        <article>
-          <header class="content-title">
-            {{ t('租户模式') }}
-          </header>
-          <main class="content-main">
-            {{ TENANT_MODE_TEXT_MAP[basics.tenant_mode] || '--' }}
-          </main>
-        </article>
-        <article>
-          <header class="content-title">
-            {{ t('租户 ID') }}
-          </header>
-          <main class="content-main">
-            {{ basics.tenant_id || '--' }}
-          </main>
-        </article>
+        <template v-if="featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE">
+          <article>
+            <header class="content-title">
+              {{ t('租户模式') }}
+            </header>
+            <main class="content-main">
+              {{ TENANT_MODE_TEXT_MAP[basics.tenant_mode] || '--' }}
+            </main>
+          </article>
+          <article>
+            <header class="content-title">
+              {{ t('租户 ID') }}
+            </header>
+            <main class="content-main">
+              {{ basics.tenant_id || '--' }}
+            </main>
+          </article>
+        </template>
         <article>
           <header class="content-title">
             {{ t('文档联系人') }}
@@ -127,7 +129,7 @@
               :margin-bottom="12"
             />
             <main class="content-main">
-              <SdkDetail
+              <SDKDetail
                 v-if="curSdk"
                 :sdk="curSdk"
                 is-apigw
@@ -151,7 +153,7 @@
       <div class="ag-markdown-view">
         <article>
           <header class="content-title">
-            {{ t('网关描述') }}
+            {{ t('组件描述') }}
           </header>
           <main class="content-main">
             {{ basics.comment }}
@@ -159,7 +161,7 @@
         </article>
         <article>
           <header class="content-title">
-            {{ t('网关负责人') }}
+            {{ t('组件负责人') }}
           </header>
           <main class="content-main">
             {{ basics.maintainers.join(', ') }}
@@ -169,14 +171,14 @@
           <header class="content-title">
             {{ t('组件 API SDK') }}
             <BkTag
-              class="ml-20px fw-normal"
+              class="ml-20px"
               theme="info"
             >
               Python
             </BkTag>
           </header>
           <main class="content-main">
-            <SdkDetail
+            <SDKDetail
               v-if="sdks[0]"
               :sdk="sdks[0]"
             />
@@ -188,8 +190,8 @@
 </template>
 
 <script lang="ts" setup>
-import chat from '@/components/chat/Index.vue';
-import SdkDetail from './SDKDetail.vue';
+import Chat from '@/components/chat/Index.vue';
+import SDKDetail from './SDKDetail.vue';
 import type {
   IApiGatewayBasics,
   IApiGatewaySdkDoc,

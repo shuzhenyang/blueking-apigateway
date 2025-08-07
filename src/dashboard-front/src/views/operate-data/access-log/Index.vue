@@ -31,7 +31,7 @@
             :key="dateKey"
             ref="datePickerRef"
             v-model="dateTimeRange"
-            style="width: 312px;"
+            style="max-width: 310px;"
             :clearable="false"
             :placeholder="t('选择日期时间范围')"
             shortcut-close
@@ -66,7 +66,7 @@
             :list="resourceList"
             :need-prefix="false"
             :placeholder="t('请输入资源名称或资源URL链接')"
-            style="min-width: 296.5px;"
+            style="min-width: 250px;"
             @change="handleResourceChange"
           />
         </BkFormItem>
@@ -76,7 +76,7 @@
         >
           <SearchInput
             v-model:mode-value="keyword"
-            style="width: 466px;"
+            style="max-width: 466px; min-width: 340px;"
             @choose="handleChoose"
             @search="handleSearch"
           />
@@ -129,7 +129,7 @@
         </div>
         <BkCollapsePanel
           :name="2"
-          class="collapse-panel mb32"
+          class="collapse-panel mb24"
           @change="handlePanelChange"
         >
           <template #header>
@@ -269,16 +269,18 @@
                         >
                           <CopyShape
                             v-bk-tooltips="t('复制')"
-                            class="opt-copy"
+                            class="opt-copy opt-icon"
                             @click="() => handleRowCopy(field, row)"
                           />
                           <template v-if="showOpts(field)">
                             <EnlargeLine
                               v-bk-tooltips="t('添加到本次检索')"
+                              class="opt-icon"
                               @click="() => handleInclude(field, row)"
                             />
                             <NarrowLine
                               v-bk-tooltips="t('从本次检索中排除')"
+                              class="opt-icon"
                               @click="() => handleExclude(field, row)"
                             />
                           </template>
@@ -645,7 +647,9 @@ const renderChart = (data: Record<string, any>) => {
   };
   const timeDuration = timeline[timeline.length - 1] - timeline[0];
   const intervalOption = getChartIntervalOption(timeDuration, 'time', 'xAxis');
-  chartInstance.value.setOption(merge(options, intervalOption));
+  nextTick(() => {
+    chartInstance.value.setOption(merge(options, intervalOption));
+  });
   chartInstance.value?.dispatchAction({
     type: 'takeGlobalCursor',
     key: 'dataZoomSelect',
@@ -1186,7 +1190,6 @@ onBeforeUnmount(() => {
   .collapse-panel {
     background-color: #fff;
     padding: 24px;
-    padding-bottom: 8px;
     .collapse-panel-header {
       display: flex;
       align-items: center;
@@ -1255,8 +1258,8 @@ onBeforeUnmount(() => {
     margin-bottom: 16px;
   }
 
-  .mb32 {
-    margin-bottom: 32px;
+  .mb24 {
+    margin-bottom: 24px;
   }
 
   .ag-top-header {
@@ -1382,9 +1385,9 @@ onBeforeUnmount(() => {
             .opt-copy {
               font-size: 14px;
             }
-            span {
+            .opt-icon {
               cursor: pointer;
-              margin-right: -4px;
+              margin-right: 4px;
             }
           }
         }
@@ -1415,6 +1418,8 @@ onBeforeUnmount(() => {
   }
   td {
     background: #f9edec !important;
+    border: none !important;
+    border-bottom: 1px solid var(--table-border-color) !important;
     &:nth-child(5),
     &:last-child {
       .cell {

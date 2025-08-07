@@ -519,11 +519,12 @@ onMounted(() => {
     transform: translate(-50%, 4px);
   }
 
-  .bk-table-body-content {
+  .bk-table-body {
 
     .custom-table-cell {
 
       .cell {
+        height: 42px;
         padding: 0;
 
         &:hover {
@@ -584,6 +585,11 @@ onMounted(() => {
   :deep(.bk-table-body) {
     scrollbar-color: transparent transparent;
     overflow: visible;
+  }
+
+  :deep(.bk-scrollbar .bk__rail-x) {
+    display: none;
+    opacity: 0
   }
 }
 </style>
