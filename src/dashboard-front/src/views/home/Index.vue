@@ -32,7 +32,7 @@
       <div class="flex flex-grow-1">
         <BkSelect
           v-model="filterNameData.kind"
-          class="gateway-kind-sel"
+          class="min-w-150px"
           :clearable="false"
           :filterable="false"
         >
@@ -162,10 +162,11 @@
               </div>
             </template>
             <div class="flex-grow-1 of1">
-              <span>{{ item.created_by }}</span>
+              <span v-if="!featureFlagStore.isEnableDisplayName">{{ item.created_by }}</span>
+              <span v-else><bk-user-display-name :user-id="item.created_by" /></span>
             </div>
             <div
-              :class="featureFlagStore.isTenantMode ? 'of2' : 'of3'"
+              :class="featureFlagStore.isEnableDisplayName ? 'of2' : 'of3'"
               class="env flex-grow-1"
             >
               <div class="flex">
@@ -672,7 +673,6 @@ onMounted(() => {
 
         .env {
           overflow: hidden;
-          // flex-grow: 1;
         }
 
         .environment-tag {

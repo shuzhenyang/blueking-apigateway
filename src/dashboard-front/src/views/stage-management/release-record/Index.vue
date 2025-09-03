@@ -25,14 +25,17 @@
           v-model="dateValue"
           use-shortcut-text
           format="yyyy-MM-dd HH:mm:ss"
-          :shortcuts="shortcutsRange"
           clearable
           class="w-500px!"
           type="datetimerange"
+          :placeholder="t('选择日期时间范围')"
+          :shortcuts="shortcutsRange"
           :shortcut-selected-index="shortcutSelectedIndex"
           @change="handleChange"
+          @shortcut-change="handleShortcutChange"
           @clear="handleClear"
           @pick-success="handlePickSuccess"
+          @selection-mode-change="handleSelectionModeChange"
         />
       </div>
       <div class="flex justify-end">
@@ -58,9 +61,9 @@
       >
         <template #empty>
           <TableEmpty
-            :keyword="tableEmptyConf.keyword"
+            :empty-type="tableEmptyConf.emptyType"
             :abnormal="tableEmptyConf.isAbnormal"
-            @reacquire="getList"
+            @refresh="getList"
             @clear-filter="handleClearFilterKey"
           />
         </template>
@@ -94,15 +97,18 @@ import {
   type IEventResponse,
   getDeployHistories,
 } from '@/services/source/programmable';
-import { useGateway } from '@/stores';
+import { useFeatureFlag, useGateway } from '@/stores';
 import ReleaseStageEvent from '@/components/release-stage-event/Index.vue';
 import ReleaseProgrammableEvent from '../components/ReleaseProgrammableEvent.vue';
+import EditMember from '@/views/basic-info/components/EditMember.vue';
+import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
 import { t } from '@/locales';
 
 type Enums = typeof publishSourceEnum | typeof publishStatusEnum;
 
 const router = useRouter();
 const gatewayStore = useGateway();
+const featureFlagStore = useFeatureFlag();
 
 const filterData = ref({
   keyword: '',
@@ -129,18 +135,20 @@ const {
 
 // datepicker 时间选择器 hooks 适用于列表筛选
 const {
-  shortcutsRange,
   dateValue,
+  shortcutsRange,
+  shortcutSelectedIndex,
   handleChange,
   handleClear,
-  handleComfirm,
+  handleConfirm,
+  handleShortcutChange,
+  handleSelectionModeChange,
 } = useDatePicker(filterData);
 
-const shortcutSelectedIndex = ref(-1);
 const dateKey = ref('dateKey');
 
 const tableEmptyConf = ref({
-  keyword: '',
+  emptyType: '',
   isAbnormal: false,
 });
 
@@ -157,9 +165,9 @@ const publishSourceEnum = {
   backend_update: t('服务更新'),
 };
 const publishStatusEnum = {
-  success: '执行成功',
-  failure: '执行失败',
-  doing: '执行中',
+  success: t('执行成功'),
+  failure: t('执行失败'),
+  doing: t('执行中'),
 };
 
 const historyId = ref<number>();
@@ -214,7 +222,29 @@ const columns = computed(() =>
       },
       {
         label: t('操作人'),
-        field: 'created_by',
+        render: ({ row }: any) => (
+          <div>
+            {
+              !featureFlagStore.isEnableDisplayName
+                ? (
+                  <EditMember
+                    mode="detail"
+                    width="600px"
+                    field="created_by"
+                    content={[row?.created_by]}
+                  />
+                )
+                : (
+                  <TenantUserSelector
+                    mode="detail"
+                    width="600px"
+                    field="created_by"
+                    content={[row?.created_by]}
+                  />
+                )
+            }
+          </div>
+        ),
       },
       {
         label: t('操作'),
@@ -265,7 +295,29 @@ const columns = computed(() =>
       },
       {
         label: t('操作人'),
-        field: 'created_by',
+        render: ({ row }: any) => (
+          <div>
+            {
+              !featureFlagStore.isEnableDisplayName
+                ? (
+                  <EditMember
+                    mode="detail"
+                    width="600px"
+                    field="created_by"
+                    content={[row?.created_by]}
+                  />
+                )
+                : (
+                  <TenantUserSelector
+                    mode="detail"
+                    width="600px"
+                    field="created_by"
+                    content={[row?.created_by]}
+                  />
+                )
+            }
+          </div>
+        ),
       },
       {
         label: t('耗时'),
@@ -282,7 +334,7 @@ const columns = computed(() =>
     ],
 );
 
-watch(() => filterData.value, () => {
+watch(tableData, () => {
   updateTableEmptyConfig();
 }, { deep: true });
 
@@ -330,15 +382,15 @@ const handleClearFilterKey = () => {
 const updateTableEmptyConfig = () => {
   tableEmptyConf.value.isAbnormal = pagination.value.abnormal;
   const isSearch = dateValue.value.length > 0 || filterData.value.keyword;
-  if (isSearch || !tableData.value.length) {
-    tableEmptyConf.value.keyword = 'placeholder';
+  if (isSearch && !tableData.value.length) {
+    tableEmptyConf.value.emptyType = 'searchEmpty';
     return;
   }
   if (isSearch) {
-    tableEmptyConf.value.keyword = '$CONSTANT';
+    tableEmptyConf.value.emptyType = 'empty';
     return;
   }
-  tableEmptyConf.value.keyword = '';
+  tableEmptyConf.value.emptyType = '';
 };
 
 const goVersionList = (data: any) => {
@@ -355,7 +407,7 @@ const getTextFromEnum = (e: Enums, key?: unknown) => {
 };
 
 const handlePickSuccess = () => {
-  handleComfirm();
+  handleConfirm();
 };
 
 onUnmounted(() => {

@@ -499,7 +499,7 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
         )
         page = self.paginate_queryset(versions)
         slz = ResourceVersionListOutputSLZ(page, many=True)
-        return OKJsonResponse(data=self.paginator.get_paginated_data(slz.data))
+        return OKJsonResponse(data=slz.data)
 
     @transaction.atomic
     def create(self, request, gateway_name: str, *args, **kwargs):
@@ -533,13 +533,12 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
     decorator=swagger_auto_schema(
         operation_description="获取网关最新资源版本",
         responses={status.HTTP_200_OK: serializers.GatewayResourceVersionLatestRetrieveOutputSLZ()},
-        tags=["OpenAPI.V2.Open"],
+        tags=["OpenAPI.V2.Sync"],
     ),
 )
 class ResourceVersionLatestRetrieveApi(generics.RetrieveAPIView):
     permission_classes = [OpenAPIV2GatewayRelatedAppPermission]
 
-    @swagger_auto_schema(tags=["OpenAPI.V1"])
     def get(self, request, *args, **kwargs):
         resource_version = ResourceVersion.objects.get_latest_version(request.gateway.id)
 
@@ -563,7 +562,6 @@ class ResourceVersionReleaseApi(generics.CreateAPIView):
     permission_classes = [OpenAPIV2GatewayRelatedAppPermission]
     serializer_class = ReleaseInputSLZ
 
-    @swagger_auto_schema(tags=["OpenAPI.V1"])
     @transaction.atomic
     def post(self, request, gateway_name: str, *args, **kwargs):
         slz = self.get_serializer(data=request.data, context={"request": request})
@@ -680,7 +678,7 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
         stage_name = kwargs.get("stage_name")
         if not stage_name:
             raise error_codes.INTERNAL.format(_("stage_name is required"), replace=True)
-        stage = get_object_or_None(Stage, name=stage_name)
+        stage = get_object_or_None(Stage, gateway=request.gateway, name=stage_name)
         if not stage:
             raise error_codes.NOT_FOUND.format(
                 _("stage: {stage_name} not found").format(stage_name=stage_name), replace=True

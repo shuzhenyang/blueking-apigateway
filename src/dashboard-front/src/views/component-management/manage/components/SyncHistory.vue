@@ -28,17 +28,18 @@
         >
           <BkDatePicker
             :key="dateKey"
-            v-model="dateTimeRange"
+            v-model="dateValue"
             style="width: 320px;"
             :placeholder="t('选择日期时间范围')"
             type="datetimerange"
-            :shortcuts="datepickerShortcuts"
-            shortcut-close
             use-shortcut-text
+            :shortcuts="shortcutsRange"
             :shortcut-selected-index="shortcutSelectedIndex"
+            @change="handleChange"
             @shortcut-change="handleShortcutChange"
-            @clear="handleTimeClear"
-            @pick-success="handleTimeChange"
+            @clear="handlePickClear"
+            @pick-success="handlePickSuccess"
+            @selection-mode-change="handleSelectionModeChange"
           />
         </BkFormItem>
       </BkForm>
@@ -73,9 +74,8 @@
 </template>
 
 <script lang="tsx" setup>
-import { Loading } from 'bkui-vue';
-import { useAccessLog } from '@/stores';
-import { useMaxTableLimit, useQueryList } from '@/hooks';
+import { Button, Loading } from 'bkui-vue';
+import { useDatePicker, useMaxTableLimit, useQueryList } from '@/hooks';
 import { OPERATE_STATUS_MAP } from '@/enums';
 import { type ISyncHistoryItem, getSyncHistory } from '@/services/source/componentManagement';
 import TableEmpty from '@/components/table-empty/Index.vue';
@@ -83,26 +83,22 @@ import TableEmpty from '@/components/table-empty/Index.vue';
 const router = useRouter();
 const { t, locale } = useI18n();
 const { maxTableLimit, clientHeight } = useMaxTableLimit({ allocatedHeight: 195 });
-const accessLogStore = useAccessLog();
-
-const datepickerShortcuts = shallowRef(accessLogStore.datepickerShortcuts);
 
 const dateKey = ref('dateKey');
-const shortcutSelectedIndex = ref(-1);
 const tableColumns = ref([
   {
     label: 'ID',
     field: 'resource_version_title',
     render: ({ row }: { row?: Partial<ISyncHistoryItem> }) => {
       return (
-        <BkButton
+        <Button
           theme="primary"
           class="m-rr-10px"
           text
           onClick={() => handleVersion(row?.id)}
         >
           { row?.id || '--' }
-        </BkButton>
+        </Button>
       );
     },
   },
@@ -169,7 +165,6 @@ const tableColumns = ref([
     },
   },
 ]);
-const dateTimeRange = ref([]);
 const searchParams = ref({
   time_start: '',
   time_end: '',
@@ -202,37 +197,19 @@ const {
   needApigwId: false,
 });
 
-const formatDatetime = (timeRange: number[]) => {
-  if (!timeRange[0] || !timeRange[1]) {
-    return [];
-  }
-  return [
-    (+new Date(`${timeRange[0]}`)) / 1000,
-    (+new Date(`${timeRange[1]}`)) / 1000,
-  ];
-};
-
-const setSearchTimeRange = () => {
-  let timeRange = dateTimeRange.value;
-  // 选择的是时间快捷项，需要实时计算时间值
-  if (shortcutSelectedIndex.value !== -1) {
-    timeRange = datepickerShortcuts.value[shortcutSelectedIndex.value].value();
-  }
-  if (timeRange?.length) {
-    const formatTimeRange = formatDatetime(timeRange);
-    searchParams.value = Object.assign(searchParams.value, {
-      time_start: formatTimeRange?.[0] || '',
-      time_end: formatTimeRange?.[1] || '',
-    });
-  }
-  else {
-    searchParams.value = {};
-  }
-};
-setSearchTimeRange();
+const {
+  dateValue,
+  shortcutsRange,
+  shortcutSelectedIndex,
+  handleChange,
+  handleClear,
+  handleConfirm,
+  handleShortcutChange,
+  handleSelectionModeChange,
+} = useDatePicker(searchParams);
 
 const updateTableEmptyConfig = () => {
-  const isEmpty = dateTimeRange.value?.some(Boolean);
+  const isEmpty = dateValue.value?.some(Boolean);
   if (isEmpty) {
     tableEmptyConf.value.emptyType = 'searchEmpty';
     return;
@@ -240,13 +217,23 @@ const updateTableEmptyConfig = () => {
   tableEmptyConf.value.emptyType = '';
 };
 
+const handlePickClear = () => {
+  handleClear();
+  handleTimeClear();
+};
+
+const handlePickSuccess = () => {
+  handleConfirm();
+  updateTableEmptyConfig();
+};
+
 const handleClearFilterKey = () => {
+  handlePickClear();
+  dateKey.value = String(+new Date());
   pagination.value = Object.assign(pagination.value, {
     current: 1,
     limit: 10,
   });
-  handleTimeClear();
-  dateKey.value = String(+new Date());
 };
 
 const handleVersion = (id: string) => {
@@ -256,22 +243,8 @@ const handleVersion = (id: string) => {
   });
 };
 
-const handleShortcutChange = (value: string, index: number) => {
-  shortcutSelectedIndex.value = index;
-  updateTableEmptyConfig();
-};
-
 const handleTimeClear = () => {
   pagination.value.current = 1;
-  shortcutSelectedIndex.value = -1;
-  dateTimeRange.value = [];
-  setSearchTimeRange();
-  updateTableEmptyConfig();
-};
-
-const handleTimeChange = () => {
-  pagination.value.current = 1;
-  setSearchTimeRange();
   updateTableEmptyConfig();
 };
 </script>

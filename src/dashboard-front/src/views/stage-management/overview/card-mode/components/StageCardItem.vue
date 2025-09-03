@@ -23,12 +23,14 @@
         <div
           v-if="!loading"
           class="status-indicator"
+          :style="{ top: !['doing'].includes(status) ? '9px' : '4px' }"
         >
           <Spinner
             v-if="status === 'doing'"
             style="font-size: 16px;color:#3a84f6;"
           />
           <div
+            v-else
             v-bk-tooltips="{
               content: getStatusText(status),
               disabled: !getStatusText(status),
@@ -76,7 +78,9 @@
             >
               <BkBadge
                 v-if="!gatewayStore.isProgrammableGateway && stage.new_resource_version"
-                v-bk-tooltips="{ content: `有新版本 ${stage.new_resource_version || '--'} 可以发布` }"
+                v-bk-tooltips="{
+                  content: t('有新版本 {version} 可以发布', { version: stage.new_resource_version || '--'}),
+                }"
                 :count="999"
                 dot
                 position="top-right"
@@ -90,9 +94,9 @@
                 v-if="status === 'failure'"
                 class="suffix"
                 :class="[status]"
-              >（{{
-                stage.paasInfo?.latest_deployment?.version || stage.paasInfo?.version || '--'
-              }} 版本发布失败，<span><BkButton
+              >{{ t('（{version} 版本发布失败，', {
+                version: stage.paasInfo?.latest_deployment?.version || stage.paasInfo?.version || '--'
+              }) }}<span><BkButton
                 text
                 theme="primary"
                 @click.stop="handleCheckLog"
@@ -107,7 +111,7 @@
                 class="font-bold"
               >{{
                 stage.paasInfo?.latest_deployment?.version || stage.publish_version || '--'
-              }}</span> 版本正在发布中，<span><BkButton
+              }}</span>{{ t('版本正在发布中，') }}<span><BkButton
                 text
                 theme="primary"
                 @click.stop="handleCheckLog"
@@ -117,11 +121,13 @@
               <!-- 发布成功 -->
               <span
                 v-else
-                v-bk-tooltips="`于 ${stage.release.created_time || '--'} 发布成功`"
+                v-bk-tooltips="{
+                  content: t('于 {time} 发布成功', { time: stage.release.created_time || '--' }),
+                }"
                 class="suffix"
-              >（于 {{
-                stage.release.created_time || '--'
-              }} 发布成功）</span>
+              >{{ t('（于 {time} 发布成功）', {
+                time: stage.release.created_time || '--'
+              }) }}</span>
             </div>
           </div>
         </div>
@@ -169,7 +175,7 @@
             <StageCardLineChart
               v-if="stage.status === 1"
               :data="data"
-              :mount-id="uniqueId()"
+              :mount-id="uniqueId('stage-chart')"
             />
           </div>
         </div>
@@ -189,7 +195,7 @@ import {
   useFeatureFlag,
   useGateway,
 } from '@/stores';
-import { uniqueId } from 'lodash-es';
+import { debounce, uniqueId } from 'lodash-es';
 import CardContainer from '@/components/card-container/Index.vue';
 
 interface IRelease {
@@ -333,6 +339,15 @@ const actionTooltipConfig = computed(() => {
   return { disabled: true };
 });
 
+const fetchMetrics = debounce(() => {
+  if (stage.status === 1 && ['StageOverviewCardMode'].includes(route.name)) {
+    Promise.all([
+      getRequestCount(),
+      getRequestTrend(),
+    ]);
+  }
+}, 300);
+
 watch(
   () => stage,
   () => {
@@ -341,10 +356,13 @@ watch(
     }
     fetchMetrics();
   },
-  { deep: true },
+  {
+    immediate: true,
+    deep: true,
+  },
 );
 
-const getRequestCount = async () => {
+async function getRequestCount() {
   const now = dayjs().unix();
   const sixHoursAgo = now - 6 * 60 * 60;
   const { instant } = await getGatewayMetricsInstant(gatewayId.value, {
@@ -356,7 +374,7 @@ const getRequestCount = async () => {
   requestCount.value = instant;
 };
 
-const getRequestTrend = async () => {
+async function getRequestTrend() {
   if (!featureFlagStore.flags.ENABLE_RUN_DATA_METRICS) {
     return;
   }
@@ -427,19 +445,6 @@ const handleChartClick = () => {
     },
   });
 };
-
-const fetchMetrics = async () => {
-  if (stage.status === 1) {
-    await Promise.all([
-      getRequestCount(),
-      getRequestTrend(),
-    ]);
-  }
-};
-
-onBeforeMount(() => {
-  fetchMetrics();
-});
 
 </script>
 
@@ -580,6 +585,7 @@ onBeforeMount(() => {
       flex-direction: column;
       align-items: center;
       gap: 16px;
+      flex-shrink: 0;
 
       .label {
         line-height: 16px;

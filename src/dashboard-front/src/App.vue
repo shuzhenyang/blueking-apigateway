@@ -19,11 +19,15 @@
   <BkConfigProvider :locale="bkuiLocale">
     <div
       id="app"
-      :class="[systemCls]"
+      :class="[
+        systemCls,
+        { 'show-notice-wrapper': enableShowNotice && showNoticeAlert}
+      ]"
     >
       <NoticeComponent
-        v-if="enableShowNotice && showNoticeAlert"
+        v-if="enableShowNotice"
         :api-url="noticeApi"
+        @show-alert-change="handleShowAlertChange"
       />
       <BkNavigation
         class="navigation-content"
@@ -67,7 +71,7 @@
             <div class="header-aside-wrap">
               <LanguageToggle />
               <ProductInfo />
-              <UserInfo v-if="userInfoStore.info?.display_name || userInfoStore.info?.username" />
+              <UserInfo />
             </div>
           </div>
         </template>
@@ -90,6 +94,7 @@ import En from '../node_modules/bkui-vue/dist/locale/en.esm.js';
 import ZhCn from '../node_modules/bkui-vue/dist/locale/zh-cn.esm.js';
 // @ts-expect-error missing module type
 import NoticeComponent from '@blueking/notice-component';
+
 import {
   useEnv,
   useFeatureFlag,
@@ -98,9 +103,9 @@ import {
 } from '@/stores';
 import { useBkUserDisplayName } from '@/hooks';
 import type { IHeaderNav } from '@/types/common';
-import { useScriptTag } from '@vueuse/core';
+import { useScriptTag, useTitle } from '@vueuse/core';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const userInfoStore = useUserInfo();
@@ -119,7 +124,6 @@ if (envStore.env.BK_ANALYSIS_SCRIPT_SRC) {
         // script loaded 后的回调
         () => {
           window.BKANALYSIS?.init({ siteName: 'custom:bk-apigateway:default:default' });
-          console.log('BKANALYSIS init success');
         },
         // script 标签的 attrs
         { attrs: { charset: 'utf-8' } },
@@ -134,14 +138,24 @@ if (envStore.env.BK_ANALYSIS_SCRIPT_SRC) {
   }
 }
 
-const locale = ref('zh-cn');
 const systemCls = ref('mac');
 const activeIndex = ref(0);
 const userLoaded = ref(false);
-const showNoticeAlert = ref(true);
+const showNoticeAlert = ref(false);
 const enableShowNotice = ref(false);
-const noticeApi = ref(`${window.BK_DASHBOARD_URL}/notice/announcements/`);
+const noticeApi = ref(`${envStore.env.BK_DASHBOARD_URL}/backend/notice/announcements/`);
 const curLeavePageData = ref({});
+
+const bkuiLocale = computed(() => {
+  if (locale.value === 'zh-cn') {
+    return ZhCn;
+  }
+  return En;
+});
+
+const apigwId = computed(() => {
+  return route.params.id;
+});
 
 const menuList: IHeaderNav[] = [
   {
@@ -155,7 +169,7 @@ const menuList: IHeaderNav[] = [
     name: t('组件管理'),
     id: 2,
     url: 'ComponentsMain',
-    enabled: true,
+    enabled: false,
     link: '',
   },
   {
@@ -181,20 +195,10 @@ const menuList: IHeaderNav[] = [
   },
 ];
 
-const bkuiLocale = computed(() => {
-  if (locale.value === 'zh-cn') {
-    return ZhCn;
-  }
-  return En;
-});
-
-const apigwId = computed(() => {
-  return route.params.id;
-});
-
-const isShowNoticeAlert = computed(() => showNoticeAlert.value && enableShowNotice.value);
-
-configureDisplayName();
+const fetchInitData = async () => {
+  await getUserInfo();
+  await getFlagList();
+};
 
 watch(
   () => route.path,
@@ -212,8 +216,8 @@ watch(
       systemCls.value = 'win';
     }
     gateway.setApigwId(apigwId.value);
-    featureFlagStore.setNoticeAlert(isShowNoticeAlert.value);
-    userLoaded.value = true;
+    // 需要在不同页面实时查询以下接口最新状态
+    fetchInitData();
   },
   {
     immediate: true,
@@ -221,14 +225,49 @@ watch(
   },
 );
 
-const init = async () => {
-  await userInfoStore.fetchUserInfo();
-  await envStore.fetchEnv();
-  await featureFlagStore.fetchFlags();
-  enableShowNotice.value = featureFlagStore.flags.ENABLE_BK_NOTICE;
-  featureFlagStore.setNoticeAlert(showNoticeAlert.value && enableShowNotice.value);
+watch(locale, () => {
+  const docTitle = useTitle();
+  docTitle.value = t('API Gateway | 腾讯蓝鲸智云');
+}, { immediate: true });
+
+// flag需要是实时的，确保不同页面组件执行顺序需要监听下
+async function getFlagList() {
+  try {
+    await featureFlagStore.fetchFlags();
+    enableShowNotice.value = featureFlagStore.flags.ENABLE_BK_NOTICE;
+    const isEnabledComManagement = featureFlagStore.flags?.MENU_ITEM_ESB_API
+      && !featureFlagStore.flags?.ENABLE_MULTI_TENANT_MODE;
+
+    featureFlagStore.setNoticeAlert(enableShowNotice.value && showNoticeAlert.value);
+    featureFlagStore.setDisplayComManagement(isEnabledComManagement);
+
+    const comNav = menuList.find(item => ['ComponentsMain'].includes(item.url));
+    if (comNav) {
+      comNav.enabled = isEnabledComManagement;
+    }
+  }
+  finally {
+    userLoaded.value = true;
+  }
+}
+
+// 这里需要取user和env的接口数据处理多租户配置信息
+async function getUserInfo() {
+  try {
+    const userData = await userInfoStore.fetchUserInfo();
+    const envData = await envStore.fetchEnv();
+    const tenantId = userData?.tenant_id ?? '';
+    const apiBaseUrl = envData?.env?.BK_USER_WEB_API_URL ?? '';
+
+    configureDisplayName({
+      tenantId,
+      apiBaseUrl,
+    });
+  }
+  catch (error) {
+    console.error('getUserInfo 执行失败：', error);
+  }
 };
-init();
 
 const goPage = (routeName: string): void => {
   const id = ['Home', 'ApiDocs'].includes(routeName) ? '' : apigwId.value;
@@ -263,6 +302,11 @@ const handleNavClick = (url: string, index: number, link: string = '') => {
 
 const handleLogoClick = () => {
   router.replace({ name: 'Home' });
+};
+
+const handleShowAlertChange = (isShowNotice: boolean) => {
+  showNoticeAlert.value = isShowNotice;
+  featureFlagStore.setNoticeAlert(enableShowNotice.value && showNoticeAlert.value);
 };
 
 </script>
@@ -344,6 +388,29 @@ const handleLogoClick = () => {
 
         .container-content {
           overflow: hidden;
+        }
+      }
+    }
+
+    &.PlatformToolsToolbox-navigation-content {
+      :deep(.bk-navigation-wrapper) {
+
+        .container-content,
+        .default-header-view {
+          overflow: hidden;
+        }
+      }
+    }
+  }
+
+  &.show-notice-wrapper {
+
+    .Home-navigation-content {
+
+      :deep(.bk-navigation-wrapper) {
+
+        .container-content {
+          max-height: calc(100vh - 92px) !important;
         }
       }
     }

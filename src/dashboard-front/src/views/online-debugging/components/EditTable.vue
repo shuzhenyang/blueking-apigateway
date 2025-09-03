@@ -54,15 +54,17 @@
               v-model="row.name"
               :clearable="false"
               class="edit-input"
-              @blur="() => handleCellBlur(index)"
             />
             <BkSelect
               v-else
               :ref="(el: HTMLElement | null) => setInputRefs(el, `name-input-`, index, column?.index)"
+              :key="componentKey"
               v-model="row.name"
               class="edit-select"
               allow-create
+              filterable
               @change="() => handleNameChange(index, row.name)"
+              @input="() => handleHeaderKeySelectBlur(row, `name-input-`, index, column?.index)"
               @blur="() => handleHeaderKeySelectBlur(row, `name-input-`, index, column?.index)"
               @select="(value: string) => handleHeaderKeySelect(row, value)"
             >
@@ -99,7 +101,6 @@
               v-model="row.value"
               class="edit-select"
               :clearable="false"
-              @change="() => handleCellBlur(index)"
             >
               <BkOption
                 v-for="item in row.options"
@@ -114,7 +115,6 @@
               v-model="row.value"
               :clearable="false"
               class="edit-input"
-              @blur="() => handleCellBlur(index)"
             />
           </BkFormItem>
         </BkForm>
@@ -142,7 +142,6 @@
               class="edit-select"
               :clearable="false"
               :filterable="false"
-              @change="() => handleCellBlur(index)"
             >
               <BkOption
                 v-for="item in typeList"
@@ -176,7 +175,6 @@
               v-model="row.instructions"
               :clearable="false"
               class="edit-input"
-              @blur="() => handleCellBlur(index)"
             />
           </BkFormItem>
         </BkForm>
@@ -216,7 +214,6 @@ interface IRowType {
   value: string
   type: string
   instructions: string
-  isEdit?: boolean
   required?: boolean
   options?: unknown
   default?: string
@@ -244,7 +241,6 @@ const getDefaultTbRow = () => {
     value: '',
     type: 'string',
     instructions: '',
-    isEdit: true,
   };
 };
 const tableData = ref<IRowType[]>(list?.length ? list : [getDefaultTbRow()]);
@@ -266,6 +262,8 @@ const typeList = ref<{
     value: 'boolean',
   },
 ]);
+
+const componentKey = ref(0);
 
 const formRefs = ref(new Map());
 const setRefs = (el: HTMLElement | null, prefix: string, index: number) => {
@@ -293,10 +291,6 @@ const getCellClass = (payload: { index: number }) => {
   return '';
 };
 
-const handleCellBlur = async (index: number) => {
-  tableData.value[index].isEdit = false;
-};
-
 const handleNameChange = (index: number, name: string) => {
   if (['Accept', 'Content-Type'].includes(name)) {
     tableData.value[index].options = headersValues;
@@ -306,7 +300,6 @@ const handleNameChange = (index: number, name: string) => {
   }
 
   tableData.value[index].value = '';
-  handleCellBlur(index);
 };
 
 const addRow = (index: number) => {
@@ -386,7 +379,6 @@ watch(
     const list: IRowType[] = [];
     v?.forEach((item: any) => {
       list.push({
-        isEdit: false,
         id: +new Date(),
         name: item.name,
         value: item.schema?.default || item.value || '',
@@ -429,21 +421,27 @@ watch(
 
 // Headers 选择器失焦后，去获取用户手动输入的值
 const handleHeaderKeySelectBlur = (row: IRowType, inputRefNamePrefix: string, index: number, columnIndex: number) => {
-  if (inputRefNamePrefix && index !== undefined && columnIndex !== undefined) {
-    const selectRef = formInputRef.value.get(`${inputRefNamePrefix}${index}-${columnIndex}`);
-    if (!selectRef?.curSearchValue) {
-      selectRef?.handleClear();
-      row.name = '';
+  try {
+    if (inputRefNamePrefix && index !== undefined && columnIndex !== undefined) {
+      const selectRef = formInputRef.value.get(`${inputRefNamePrefix}${index}-${columnIndex}`);
+      if (!selectRef?.curSearchValue) {
+        row.name = '';
+        selectRef?.handleClear();
+      }
+      else {
+        row.name = selectRef?.curSearchValue || '';
+      }
     }
-    else {
-      row.name = selectRef?.curSearchValue || '';
-    }
+  }
+  catch (error) {
+    console.log(error);
   }
 };
 
 const handleHeaderKeySelect = (row: IRowType, value: string) => {
   setTimeout(() => {
     row.name = value;
+    componentKey.value += 1;
   });
 };
 

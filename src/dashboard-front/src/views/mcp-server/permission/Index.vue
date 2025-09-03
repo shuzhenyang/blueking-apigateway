@@ -81,6 +81,7 @@
               </BkSelect>
             </BkFormItem>
             <BkFormItem
+              v-if="!featureFlagStore.isTenantMode"
               :label="t('申请人')"
               class="mb-20px flex-grow-1"
               label-width="100"
@@ -127,7 +128,24 @@
             <BkTableColumn
               :label="t('申请人')"
               prop="applied_by"
-            />
+            >
+              <template #default="{ row }">
+                <TenantUserSelector
+                  v-if="featureFlagStore.isEnableDisplayName"
+                  :content="row?.applied_by"
+                  field="applied_by"
+                  mode="detail"
+                  width="600px"
+                />
+                <EditMember
+                  v-else
+                  mode="detail"
+                  width="600px"
+                  field="applied_by"
+                  :content="row?.applied_by"
+                />
+              </template>
+            </BkTableColumn>
             <BkTableColumn
               :label="t('申请时间')"
               prop="applied_time"
@@ -189,9 +207,9 @@
             </BkTableColumn>
             <template #empty>
               <TableEmpty
-                :keyword="tableEmptyConf.keyword"
+                :empty-type="tableEmptyConf.emptyType"
                 :abnormal="tableEmptyConf.isAbnormal"
-                @reacquire="refreshTableData"
+                @refresh="refreshTableData"
                 @clear-filter="handleClearFilterKey"
               />
             </template>
@@ -247,10 +265,13 @@ import {
 import { getServers } from '@/services/source/mcp-server';
 import TableEmpty from '@/components/table-empty/Index.vue';
 import RenderCustomColumn from '@/components/custom-table-header-filter';
-import { useGateway } from '@/stores';
+import EditMember from '@/views/basic-info/components/EditMember.vue';
+import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
+import { useFeatureFlag, useGateway } from '@/stores';
 
 const { t } = useI18n();
 const gatewayStore = useGateway();
+const featureFlagStore = useFeatureFlag();
 const route = useRoute();
 
 const columnKey = ref(-1);
@@ -276,16 +297,18 @@ const {
 });
 
 const lastCount = ref(0);
+
 const panels = ref([
   {
     name: 'unprocessed',
-    label: '待审批',
+    label: t('待审批'),
   },
   {
     name: 'processed',
-    label: '已审批',
+    label: t('已审批'),
   },
 ]);
+
 const statusMap = reactive({
   approved: t('通过'),
   rejected: t('驳回'),
@@ -305,10 +328,10 @@ const curAction = ref({
   comment: '',
 });
 const tableEmptyConf = ref<{
-  keyword: string
+  emptyType: string
   isAbnormal: boolean
 }>({
-  keyword: '',
+  emptyType: '',
   isAbnormal: false,
 });
 
@@ -346,10 +369,10 @@ const updateTableEmptyConfig = () => {
   tableEmptyConf.value.isAbnormal = pagination.value.abnormal;
   const { bk_app_code, applied_by, mcp_server_id } = filterData.value;
   if (bk_app_code || applied_by || mcp_server_id !== defaultMcpId.value) {
-    tableEmptyConf.value.keyword = 'placeholder';
+    tableEmptyConf.value.emptyType = 'searchEmpty';
     return;
   }
-  tableEmptyConf.value.keyword = '';
+  tableEmptyConf.value.emptyType = '';
 };
 
 const resetSearch = () => {
@@ -476,7 +499,7 @@ watch(
 watch(
   () => filterData.value.mcp_server_id,
   (val) => {
-    if (val) {
+    if (val && !featureFlagStore.isTenantMode) {
       getApplicant();
     }
   },

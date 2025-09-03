@@ -17,6 +17,8 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import random
+import re
+from typing import Dict, List
 
 from faker import Faker
 from openapi_schema_to_json_schema import to_json_schema
@@ -46,6 +48,8 @@ def generate_example(schema):
 
 
 def handle_object(schema):
+    if "properties" not in schema:
+        return {}
     example = {}
     for key, value in schema["properties"].items():
         example[key] = generate_example(value)
@@ -53,6 +57,8 @@ def handle_object(schema):
 
 
 def handle_array(schema):
+    if "items" not in schema:
+        return []
     return [generate_example(schema["items"])]
 
 
@@ -103,3 +109,24 @@ def get_openapi_example(schema):
     example["query_params"] = query
     example["headers"] = headers
     return example
+
+
+def extract_openapi_parameters_from_path(path: str) -> List[Dict]:
+    """
+    从URL路径中提取OpenAPI 3.0格式的路径参数
+
+    :param path: 包含参数的URL路径，例如"/api/{param}/resource"
+    :return: OpenAPI 3.0 parameters列表
+    """
+    # 提取所有参数名（保持顺序且去重）
+    param_names = []
+    seen = set()
+    for match in re.finditer(r"{(.+?)}", path):
+        param_name = match.group(1)
+        if param_name not in seen:
+            seen.add(param_name)
+            param_names.append(param_name)
+    return [
+        {"name": name, "in": "path", "required": True, "description": "", "schema": {"type": "string"}}
+        for name in param_names
+    ]

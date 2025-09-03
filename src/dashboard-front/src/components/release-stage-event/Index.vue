@@ -82,6 +82,7 @@ import dayjs from 'dayjs';
 import { getReleaseEvents } from '@/services/source/release';
 import AgEditor from '@/components/ag-editor/Index.vue';
 import { Spinner } from 'bkui-vue/lib/icon';
+import { useStage } from '@/stores';
 
 interface IStep {
   name?: string
@@ -107,8 +108,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-
 const route = useRoute();
+const stageStore = useStage();
+
 const apigwId = computed(() => +route.params?.id);
 
 const isShow = ref(false);
@@ -153,9 +155,15 @@ watch(
 const getLogsList = async () => {
   try {
     const response = await getReleaseEvents(apigwId.value, historyId);
+    stageStore.setDoing(true);
     if (response.status !== 'doing') {
+      stageStore.setDoing(false);
+      if (['success'].includes(response.status)) {
+        emit('release-success');
+      }
       clearInterval(timeId);
     }
+
     logDetails.value = response;
 
     // 整理步骤

@@ -24,6 +24,7 @@ type FlagType = Awaited<ReturnType<typeof getFeatureFlags>>;
 interface IState {
   flags: FlagType
   showNoticeAlert: boolean
+  showComManagement: boolean
 }
 
 export const useFeatureFlag = defineStore('useFeatureFlag', {
@@ -38,21 +39,27 @@ export const useFeatureFlag = defineStore('useFeatureFlag', {
       ENABLE_RUN_DATA: false,
       ENABLE_RUN_DATA_METRICS: false,
       ENABLE_SDK: false,
+      ENABLE_DISPLAY_NAME_RENDER: false,
       GATEWAY_APP_BINDING_ENABLED: false,
       MENU_ITEM_ESB_API: false,
       MENU_ITEM_ESB_API_DOC: false,
       SYNC_ESB_TO_APIGW_ENABLED: false,
     },
     showNoticeAlert: false,
+    showComManagement: false,
   }),
   getters: {
     apiBaseUrl: () => import.meta.env.VITE_BK_USER_WEB_API_URL || '',
     // 是否开启了多租户模式
     isTenantMode: state => !!state.flags?.ENABLE_MULTI_TENANT_MODE,
+    // 是否需要展示display_name
+    isEnableDisplayName: state => !!state.flags?.ENABLE_DISPLAY_NAME_RENDER,
     // 是否启用了 ai 问答功能
     isAIEnabled: state => state.flags?.ENABLE_AI_COMPLETION,
     // 是否开启了通知组件展示
     isEnabledNotice: state => state.showNoticeAlert,
+    // 是否显示组件管理
+    isEnableComManagement: state => state.showComManagement,
   },
   actions: {
     async fetchFlags() {
@@ -63,6 +70,9 @@ export const useFeatureFlag = defineStore('useFeatureFlag', {
     },
     setNoticeAlert(isShow: boolean) {
       this.showNoticeAlert = isShow;
+    },
+    setDisplayComManagement(isShow: boolean) {
+      this.showComManagement = isShow;
     },
   },
 });

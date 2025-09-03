@@ -18,7 +18,11 @@
 import pytest
 
 from apigateway.utils import openapi
-from apigateway.utils.openapi import generate_parameters_example, get_openapi_example
+from apigateway.utils.openapi import (
+    extract_openapi_parameters_from_path,
+    generate_parameters_example,
+    get_openapi_example,
+)
 
 
 class TestOpenAPI:
@@ -96,6 +100,7 @@ class TestOpenAPI:
                                     "properties": {
                                         "id": {"type": "integer", "example": 1},
                                         "name": {"type": "string", "example": "test"},
+                                        "info": {"type": "object"},
                                     },
                                 }
                             }
@@ -108,7 +113,7 @@ class TestOpenAPI:
                     ],
                 },
                 {
-                    "body_example": {"id": 1, "name": "test"},
+                    "body_example": {"id": 1, "name": "test", "info": {}},
                     "path_params": {"userId": "123"},
                     "query_params": {"search": "test"},
                     "headers": {"Authorization": "Bearer token"},
@@ -119,3 +124,67 @@ class TestOpenAPI:
     def test_get_openapi_example(self, schema, expected_example):
         example = get_openapi_example(schema)
         assert example == expected_example
+
+    # 测试用例与期望结果的参数化配置
+    @pytest.mark.parametrize(
+        "input_path, expected_params",
+        [
+            # 无参数的场景
+            ("/api/resource", []),
+            # 单个参数
+            (
+                "/api/{param}/resource",
+                [{"name": "param", "in": "path", "description": "", "required": True, "schema": {"type": "string"}}],
+            ),
+            # 多个参数且保持顺序
+            (
+                "/api/{param1}/resource/{param2}",
+                [
+                    {
+                        "name": "param1",
+                        "in": "path",
+                        "description": "",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "param2",
+                        "in": "path",
+                        "description": "",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                ],
+            ),
+            # 重复参数的去重验证
+            (
+                "/api/{param}/resource/{param}/detail",
+                [{"name": "param", "in": "path", "required": True, "description": "", "schema": {"type": "string"}}],
+            ),
+            # 特殊字符参数名 (测试名称合法性)
+            (
+                "/api/{param_123}/resource/{param-456}",
+                [
+                    {
+                        "name": "param_123",
+                        "in": "path",
+                        "description": "",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "param-456",
+                        "in": "path",
+                        "description": "",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    },
+                ],
+            ),
+        ],
+    )
+    def test_extract_openapi_parameters_from_path(self, input_path, expected_params):
+        actual_params = extract_openapi_parameters_from_path(input_path)
+        assert actual_params == expected_params, (
+            f"路径参数解析失败。输入路径: {input_path}\n预期结果: {expected_params}\n实际结果: {actual_params}"
+        )

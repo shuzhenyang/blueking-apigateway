@@ -19,11 +19,12 @@
 <script setup lang="ts">
 import { AngleDownLine } from 'bkui-vue/lib/icon';
 import { getLoginURL } from '@/utils';
-import { useEnv, useUserInfo } from '@/stores';
+import { useEnv, useFeatureFlag, useUserInfo } from '@/stores';
 
 const { t } = useI18n();
 const userInfoStore = useUserInfo();
 const envStore = useEnv();
+const featureFlagStore = useFeatureFlag();
 
 const handleLogout = () => {
   location.href = getLoginURL(envStore.env.BK_LOGIN_URL, location.origin, 'small');
@@ -31,7 +32,7 @@ const handleLogout = () => {
 </script>
 
 <template>
-  <bk-popover
+  <BkPopover
     ext-cls="user-home"
     placement="bottom"
     theme="light"
@@ -39,7 +40,15 @@ const handleLogout = () => {
     disable-outside-click
   >
     <div class="user-name">
-      {{ userInfoStore.info.display_name || userInfoStore.info.username }}
+      <template v-if="!featureFlagStore.isEnableDisplayName">
+        {{ userInfoStore?.info?.display_name || userInfoStore?.info?.username }}
+      </template>
+      <template v-else>
+        <bk-user-display-name
+          :user-id="userInfoStore?.info?.username || userInfoStore?.info?.display_name"
+          :api-base-url="envStore?.tenantUserDisplayAPI"
+        />
+      </template>
       <AngleDownLine class="pl-5px" />
     </div>
     <template #content>
@@ -50,7 +59,7 @@ const handleLogout = () => {
         {{ t('退出登录') }}
       </div>
     </template>
-  </bk-popover>
+  </BkPopover>
 </template>
 
 <style lang="scss" scoped>

@@ -94,6 +94,22 @@ def _get_apigw_schema_content(spec_version: SpecVersion) -> Mapping[Hashable, An
     return content
 
 
+def has_openapi_schema(openapi_schema: Dict[str, Any]) -> bool:
+    """
+    判断schema是否已经确认
+    """
+    if "none_schema" in openapi_schema and openapi_schema["none_schema"] is True:
+        # 对于确认过没有 schema 的资源，直接返回 True
+        return True
+
+        # currently, the schema.responses is initialized during import openapi file
+        # so, we can't judge whether the schema has configured the schema or not
+    if "requestBody" in openapi_schema or "parameters" in openapi_schema:
+        return True
+
+    return False
+
+
 def init_validator_schema():
     """
     初始化为schema_validator使用自定义schema
@@ -169,7 +185,7 @@ def convert_openapi2_parameters_to_openapi(parameters):
             "in": param.get("in"),
             "required": param.get("required", False),
             "description": param.get("description", ""),
-            "schema": {},
+            "schema": param.get("schema", {}),
         }
 
         # Swagger 2.0 'type' is moved to 'schema' in OpenAPI 3.0
@@ -256,6 +272,8 @@ def convert_request_body_to_openapi2(request_body):
     """
     parameters = []
     for content_type, content_value in request_body["content"].items():
+        if "schema" not in content_value:
+            continue
         param = {
             "in": "body",
             "name": "body",
@@ -277,6 +295,8 @@ def convert_responses_to_openapi2(responses):
         response2 = {"description": response3.get("description", ""), "schema": {}}
         # OpenAPI 2.0 不支持每个响应状态码的多媒体类型，因此我们合并所有媒体类型
         for content_value in response3.get("content", {}).values():
+            if "schema" not in content_value:
+                continue
             response2["schema"] = content_value["schema"]  # 直接取 schema，不区分媒体类型
         responses_openapi2[status_code] = response2
     return responses_openapi2
@@ -332,6 +352,8 @@ def convert_parameters(v3_parameters, consumes):
         if "content" in param:
             # 对于参数的 'content'，我们只能选择一个媒体类型
             content_type, content_value = next(iter(param["content"].items()))
+            if "schema" not in content_value:
+                continue
             v2_param["type"] = content_value["schema"]["type"]
             # 如果参数的媒体类型在 consumes 中，添加到 'consumes' 字段
             if content_type in consumes:
@@ -350,6 +372,8 @@ def convert_request_body(v3_request_body):
     v2_parameters = []
     consumes = []
     for content_type, content_value in v3_request_body["content"].items():
+        if "schema" not in content_value:
+            continue
         param2 = {
             "in": "body",
             "name": "body",  # OpenAPI 2.0 中请求体的名称通常是 'body'
@@ -373,9 +397,12 @@ def convert_responses(v3_responses):
         response2 = {"description": response3.get("description", "")}
         # OpenAPI 2.0 不支持每个响应状态码的多媒体类型，因此我们合并所有媒体类型
         for content_type, content_value in response3.get("content", {}).items():
+            if "schema" not in content_value:
+                continue
             response2["schema"] = content_value["schema"]
             produces.append(content_type)
         v2_responses[status_code] = response2
+
     return v2_responses, list(set(produces))  # 使用 set 去重
 
 

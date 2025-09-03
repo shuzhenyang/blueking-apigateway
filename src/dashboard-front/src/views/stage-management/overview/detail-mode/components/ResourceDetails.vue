@@ -171,12 +171,25 @@
             {{ t('请求参数') }}
           </p>
           <div>
-            <div
+            <BkContainer
               v-if="!Object.keys(currentSource.openapi_schema || {}).length || currentSource.openapi_schema.none_schema"
-              class="pb-24px color-#313238 text-14px"
+              class="ag-kv-box pb-24px"
+              :col="14"
+              :margin="6"
             >
-              {{ t('该资源无请求参数') }}
-            </div>
+              <BkRow class="mb-0!">
+                <BkCol :span="4">
+                  <label class="ag-key invisible">
+                    {{ t("请求方法") }}
+                  </label>
+                </BkCol>
+                <BkCol :span="10">
+                  <div class="ag-value">
+                    {{ t('该资源无请求参数') }}
+                  </div>
+                </BkCol>
+              </BkRow>
+            </BkContainer>
             <RequestParams
               v-else
               :detail="currentSource"
@@ -252,12 +265,25 @@
               :detail="currentSource"
               readonly
             />
-            <div
+            <BkContainer
               v-else
-              class="pb-24px color-#313238 text-14px"
+              class="ag-kv-box pb-24px"
+              :col="14"
+              :margin="6"
             >
-              {{ t('该资源无响应参数') }}
-            </div>
+              <BkRow class="mb-0!">
+                <BkCol :span="4">
+                  <label class="ag-key invisible">
+                    {{ t("响应参数") }}
+                  </label>
+                </BkCol>
+                <BkCol :span="10">
+                  <div class="ag-value">
+                    {{ t('该资源无响应参数') }}
+                  </div>
+                </BkCol>
+              </BkRow>
+            </BkContainer>
           </div>
 
           <p class="title mt-15px">

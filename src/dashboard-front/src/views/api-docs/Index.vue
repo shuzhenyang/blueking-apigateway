@@ -138,13 +138,16 @@
                     --
                   </span>
                   <template v-else>
-                    <span
-                      v-for="(maintainer, index) in row.maintainers"
-                      :key="maintainer.login_name"
-                    >
-                      <bk-user-display-name :user-id="maintainer" />
-                      <span v-if="index !== (row.maintainers.length - 1)">,</span>
-                    </span>
+                    <span v-if="!featureFlagStore.isEnableDisplayName">{{ row.maintainers.join(', ') }}</span>
+                    <template v-else>
+                      <span
+                        v-for="(maintainer, index) in row.maintainers"
+                        :key="maintainer.login_name"
+                      >
+                        <bk-user-display-name :user-id="maintainer" />
+                        <span v-if="index !== (row.maintainers.length - 1)">,</span>
+                      </span>
+                    </template>
                   </template>
                 </template>
               </BkTableColumn>
@@ -562,11 +565,12 @@ $primary-color: #3a84ff;
 
       .page-tab {
         display: flex;
-        width: 135px;
         height: 52px;
+        min-width: 135px;
         cursor: pointer;
         justify-content: center;
         align-items: center;
+        padding-inline: 6px;
 
         &:hover {
           color: #3a84ff;
@@ -639,8 +643,8 @@ $primary-color: #3a84ff;
           }
 
           .components-wrap {
+            max-height: calc(100vh - 200px);
             padding-bottom: 16px;
-            max-height: calc(100vh - 160px);
             overflow-y: auto;
 
             &::-webkit-scrollbar {
@@ -823,7 +827,9 @@ $primary-color: #3a84ff;
         overflow-y: hidden;
 
         :deep(.bk-table-body) {
+
           &.bk-scrollbar {
+
             .bk__rail-x,
             .bk__rail-y {
               display: none !important;

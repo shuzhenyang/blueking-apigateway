@@ -21,22 +21,23 @@
       <BkForm class="flex">
         <BkFormItem
           :label="t('选择时间')"
+          :label-width="locale === 'en' ? 108 : 80"
           class="ag-form-item-datepicker m-b-15px"
-          label-width="85"
         >
           <BkDatePicker
             :key="dateKey"
-            v-model="initDateTimeRange"
+            v-model="dateValue"
             style="width: 320px"
             :placeholder="t('选择日期时间范围')"
             :type="'datetimerange'"
-            :shortcuts="datepickerShortcuts"
-            shortcut-close
             use-shortcut-text
+            :shortcuts="shortcutsRange"
             :shortcut-selected-index="shortcutSelectedIndex"
-            @clear="handleTimeClear"
             @shortcut-change="handleShortcutChange"
-            @pick-success="handleTimeChange"
+            @change="handleChange"
+            @clear="handlePickClear"
+            @pick-success="handlePickSuccess"
+            @selection-mode-change="handleSelectionModeChange"
           />
         </BkFormItem>
         <BkFormItem
@@ -138,7 +139,8 @@
                 {{ t("申请人：") }}
               </div>
               <div class="value">
-                <bk-user-display-name :user-id="curRecord.applied_by" />
+                <span v-if="!featureFlagStore.isEnableDisplayName">{{ curRecord.applied_by }}</span>
+                <span v-else><bk-user-display-name :user-id="curRecord.applied_by" /></span>
               </div>
             </div>
             <div class="item">
@@ -178,7 +180,8 @@
                 {{ t("审批人：") }}
               </div>
               <div class="value">
-                <bk-user-display-name :user-id="curRecord.handled_by" />
+                <span v-if="!featureFlagStore.isEnableDisplayName">{{ curRecord.handled_by }}</span>
+                <span v-else><bk-user-display-name :user-id="curRecord.handled_by" /></span>
               </div>
             </div>
             <div class="item">
@@ -230,8 +233,8 @@
 
 <script setup lang="tsx">
 import { getPermissionRecordList } from '@/services/source/permission';
-import { useAccessLog } from '@/stores';
-import { useMaxTableLimit, useQueryList } from '@/hooks';
+import { useFeatureFlag } from '@/stores';
+import { useDatePicker, useMaxTableLimit, useQueryList } from '@/hooks';
 import type { IApprovalListItem } from '@/types/permission';
 import { sortByKey } from '@/utils';
 import { AUTHORIZATION_DIMENSION } from '@/constants';
@@ -239,9 +242,9 @@ import { APPROVAL_HISTORY_STATUS_MAP } from '@/enums';
 import AgIcon from '@/components/ag-icon/Index.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { maxTableLimit, clientHeight } = useMaxTableLimit();
-const accessLogStore = useAccessLog();
+const featureFlagStore = useFeatureFlag();
 
 const historyExpandColumn = shallowRef([
   {
@@ -334,9 +337,7 @@ const filterData = ref({
   time_start: '',
   time_end: '',
 });
-const initDateTimeRange = ref([]);
 const resourceList = ref([]);
-const shortcutSelectedIndex = ref<number>(-1);
 const dateKey = ref('dateKey');
 const curRecord = ref<IApprovalListItem>({
   bk_app_code: '',
@@ -357,8 +358,6 @@ const detailSliderConf = reactive({
   title: '',
   isShow: false,
 });
-// 日期 快捷方式设置
-const datepickerShortcuts = reactive(accessLogStore.datepickerShortcuts);
 
 // 列表hooks
 const {
@@ -382,6 +381,16 @@ const {
     limit: maxTableLimit,
   },
 });
+const {
+  dateValue,
+  shortcutsRange,
+  shortcutSelectedIndex,
+  handleChange,
+  handleClear,
+  handleConfirm,
+  handleShortcutChange,
+  handleSelectionModeChange,
+} = useDatePicker(filterData);
 
 const setTableHeader = () => {
   table.value.headers = [
@@ -418,9 +427,10 @@ const setTableHeader = () => {
     {
       field: 'applied_by',
       label: t('申请人'),
-      render: ({ row }: { row?: Partial<IApprovalListItem> }) => (
-        <span><bk-user-display-name user-id={row.applied_by} /></span>
-      ),
+      render: ({ row }: { row: Partial<IApprovalListItem> }) =>
+        !featureFlagStore.isEnableDisplayName
+          ? <span>{row.applied_by}</span>
+          : <span><bk-user-display-name user-id={row.applied_by} /></span>,
     },
     {
       field: 'handled_time',
@@ -429,9 +439,10 @@ const setTableHeader = () => {
     {
       field: 'handled_by',
       label: t('审批人'),
-      render: ({ row }: { row?: Partial<IApprovalListItem> }) => (
-        <span><bk-user-display-name user-id={row.handled_by} /></span>
-      ),
+      render: ({ row }: { row: Partial<IApprovalListItem> }) =>
+        !featureFlagStore.isEnableDisplayName
+          ? <span>{row.handled_by}</span>
+          : <span><bk-user-display-name user-id={row.handled_by} /></span>,
     },
     {
       field: 'status',
@@ -463,7 +474,7 @@ const setTableHeader = () => {
         return (
           <div>
             <BkButton
-              class="m-r-8px"
+              class="mr-8px"
               theme="primary"
               text
               onClick={(e: Event) => {
@@ -489,30 +500,12 @@ const handleRowClick = (e: MouseEvent, row: Partial<IApprovalListItem>) => {
   });
 };
 
-// 日期清除
-const handleTimeClear = () => {
-  shortcutSelectedIndex.value = -1;
-  filterData.value.time_start = '';
-  filterData.value.time_end = '';
+const handlePickSuccess = () => {
+  handleConfirm();
 };
 
-// 日期快捷方式改变触发
-const handleShortcutChange = (value, index: number) => {
-  shortcutSelectedIndex.value = index;
-};
-
-// 日期快捷方式改变触发
-const handleTimeChange = () => {
-  nextTick(() => {
-    const startStr = (+new Date(`${initDateTimeRange.value[0]}`)) / 1000;
-    const endStr = (+new Date(`${initDateTimeRange.value[1]}`)) / 1000;
-    const start = parseInt(startStr);
-    const end = parseInt(endStr);
-    filterData.value = Object.assign(filterData.value, {
-      time_start: start,
-      time_end: end,
-    });
-  });
+const handlePickClear = () => {
+  handleClear();
 };
 
 // 展示详情
@@ -544,7 +537,7 @@ const handleClearFilterKey = async () => {
     time_end: '',
   });
   shortcutSelectedIndex.value = -1;
-  initDateTimeRange.value = [];
+  dateValue.value = [];
   dateKey.value = String(+new Date());
   await getList();
   updateTableEmptyConfig();
@@ -579,6 +572,7 @@ onMounted(() => {
   }
 
   .header {
+
     .bk-form-item {
       margin-bottom: 16px;
     }
@@ -586,16 +580,16 @@ onMounted(() => {
 }
 
 .ag-kv-list {
+  padding: 10px 20px;
+  background: #fafbfd;
   border: 1px solid #f0f1f5;
   border-radius: 2px;
-  background: #fafbfd;
-  padding: 10px 20px;
 
   .item {
     display: flex;
     font-size: 14px;
-    border-bottom: 1px dashed #dcdee5;
     line-height: 40px;
+    border-bottom: 1px dashed #dcdee5;
 
     &:last-child {
       border-bottom: none;
@@ -609,21 +603,23 @@ onMounted(() => {
     }
 
     .value {
-      color: #313238;
-      flex: 1;
       padding-top: 10px;
       line-height: 22px;
+      color: #313238;
+      flex: 1;
     }
   }
 }
 
 :deep(.perm-record-table),
 :deep(.ag-expand-table) {
+
   tr {
     background-color: #fafbfd;
   }
 
   th {
+
     .head-text {
       font-weight: bold !important;
       color: #63656e !important;
@@ -632,8 +628,8 @@ onMounted(() => {
 
   td,
   th {
-    padding: 0 !important;
     height: 42px !important;
+    padding: 0 !important;
   }
 }
 
@@ -647,6 +643,7 @@ onMounted(() => {
 }
 
 :deep(.ag-expand-table) {
+
   .bk-fixed-bottom-border {
     display: none;
   }

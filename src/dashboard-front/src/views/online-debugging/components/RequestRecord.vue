@@ -36,17 +36,18 @@
           <BkDatePicker
             ref="topDatePicker"
             :key="dateKey"
-            v-model="dateTimeRange"
+            v-model="dateValue"
             class="search-date"
             :placeholder="t('选择日期时间范围')"
             :type="'datetimerange'"
-            :shortcuts="accessLogStore.datepickerShortcuts"
-            shortcut-close
+            :shortcuts="shortcutsRange"
             use-shortcut-text
             :shortcut-selected-index="shortcutSelectedIndex"
             @shortcut-change="handleShortcutChange"
-            @pick-success="handleTimeChange"
-            @clear="handleTimeClear"
+            @change="handleChange"
+            @clear="handlePickClear"
+            @pick-success="handlePickSuccess"
+            @selection-mode-change="handleSelectionModeChange"
           />
         </div>
 
@@ -205,9 +206,9 @@
             </template>
             <template #empty>
               <TableEmpty
-                :keyword="tableEmptyConf.keyword"
+                :empty-type="tableEmptyConf.emptyType"
                 :abnormal="tableEmptyConf.isAbnormal"
-                @reacquire="setSearchTimeRange"
+                @refresh="getList"
                 @clear-filter="handleClearFilterKey"
               />
             </template>
@@ -219,7 +220,8 @@
 </template>
 
 <script lang="ts" setup>
-import { useAccessLog, useGateway } from '@/stores';
+import { useGateway } from '@/stores';
+import { useDatePicker } from '@/hooks';
 import TableEmpty from '@/components/table-empty/Index.vue';
 import EditorMonaco from '@/components/ag-editor/Index.vue';
 import AgSideslider from '@/components/ag-sideslider/Index.vue';
@@ -232,7 +234,6 @@ import { copy } from '@/utils';
 
 const { t } = useI18n();
 const gatewayStore = useGateway();
-const accessLogStore = useAccessLog();
 
 const isShow = ref<boolean>(false);
 const filterData = ref<any>({
@@ -240,15 +241,25 @@ const filterData = ref<any>({
   time_start: '',
   time_end: '',
 });
-const dateTimeRange = ref([]);
+
+const {
+  dateValue,
+  shortcutsRange,
+  shortcutSelectedIndex,
+  handleChange,
+  handleClear,
+  handleConfirm,
+  handleShortcutChange,
+  handleSelectionModeChange,
+} = useDatePicker(filterData);
+
 const dateKey = ref<string>('dateKey');
 const topDatePicker = ref();
-const shortcutSelectedIndex = shallowRef(-1);
 const tableRef = ref();
 const resourceEditorRef: any = ref<InstanceType<typeof EditorMonaco>>();
 const tableList = ref<any>([]);
 const tableEmptyConf = reactive<any>({
-  keyword: '',
+  emptyType: '',
   isAbnormal: false,
 });
 let expandIds: number[] = [];
@@ -340,44 +351,21 @@ const getRequestHeader = (row: Record<string, any>) => {
 
 const updateTableEmptyConfig = () => {
   if (filterData.value.resource_name || filterData.value.time_end) {
-    tableEmptyConf.keyword = 'placeholder';
+    tableEmptyConf.emptyType = 'searchEmpty';
     return;
   }
-  tableEmptyConf.keyword = '';
+  tableEmptyConf.emptyType = '';
 };
 
-const handleShortcutChange = (value: Record<string, any>, index: number) => {
-  shortcutSelectedIndex.value = index;
+const handlePickClear = () => {
+  handleClear();
+  getList();
   updateTableEmptyConfig();
 };
 
-const formatDatetime = (timeRange: number[]) => {
-  return [+new Date(`${timeRange[0]}`) / 1000, +new Date(`${timeRange[1]}`) / 1000];
-};
-
-const setSearchTimeRange = () => {
-  let timeRange = dateTimeRange.value;
-  // 选择的是时间快捷项，需要实时计算时间值
-  if (shortcutSelectedIndex.value !== -1) {
-    timeRange = accessLogStore.datepickerShortcuts[shortcutSelectedIndex.value].value();
-  }
-  const formatTimeRange = formatDatetime(timeRange);
-  filterData.value = Object.assign(filterData.value, {
-    time_start: formatTimeRange[0] || '',
-    time_end: formatTimeRange[1] || '',
-  });
-
+const handlePickSuccess = () => {
+  handleConfirm();
   getList();
-};
-
-const handleTimeChange = () => {
-  setSearchTimeRange();
-};
-
-const handleTimeClear = () => {
-  shortcutSelectedIndex.value = -1;
-  dateTimeRange.value = [];
-  setSearchTimeRange();
 };
 
 const handleShowDetails = async (event: Event, row: Record<string, any>) => {
@@ -399,7 +387,7 @@ const clear = () => {
   filterData.value.time_start = '';
   filterData.value.time_end = '';
   shortcutSelectedIndex.value = -1;
-  dateTimeRange.value = [];
+  dateValue.value = [];
 };
 
 const show = () => {
@@ -429,6 +417,7 @@ const getList = async () => {
 const handleClearFilterKey = () => {
   clear();
   getList();
+  updateTableEmptyConfig();
   dateKey.value = String(+new Date());
 };
 
@@ -479,26 +468,32 @@ defineExpose({ show });
 
 <style lang="scss" scoped>
 .history-container {
-  padding: 20px 24px;
   height: calc(100vh - 52px);
+  padding: 20px 24px;
   box-sizing: border-box;
+
   .history-search {
     display: flex;
     align-items: center;
     margin-bottom: 18px;
+
     .search-input {
       width: 420px;
       margin-right: 8px;
     }
+
     .search-date {
       flex: 1;
     }
   }
 }
+
 .sutra-scrollbar {
+
   :deep(.bk-modal-content) {
     scrollbar-gutter: auto;
   }
+
   :deep(.bk-table-body) {
     scrollbar-gutter: auto;
   }
@@ -507,87 +502,126 @@ defineExpose({ show });
 .details-tab {
   max-height: 600px;
   background: #f5f7fa;
+
   .tab-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+
     .header-title {
       display: flex;
       align-items: center;
     }
+
     .header-copy {
-      color: #4D4F56;
       margin-right: 18px;
+      color: #4D4F56;
       cursor: pointer;
     }
+
     .title {
-      font-size: 12px;
-      color: #313238;
-      font-family: PingFangSC-Regular;
-      font-weight: Regular;
-      padding: 8px 24px;
-      cursor: pointer;
       position: relative;
+      padding: 8px 24px;
+      font-family: PingFangSC-Regular;
+      font-size: 12px;
+      font-weight: regular;
+      color: #313238;
+      cursor: pointer;
+
       &:not(:nth-last-child(1)) {
+
         &::after {
-          content: ' ';
           position: absolute;
-          right: 0;
           top: 50%;
-          transform: translateY(-50%);
+          right: 0;
           width: 1px;
           height: 10px;
           background: #DCDEE5;
+          content: ' ';
+          transform: translateY(-50%);
         }
       }
+
       &.active {
         font-family: PingFangSC-Semibold;
         font-weight: bold;
         color: #313238;
+
         &::before {
-          content: ' ';
           position: absolute;
           top: 0;
           left: 50%;
-          transform: translateX(-50%);
           width: 96px;
           height: 2px;
           background: #313238;
+          content: ' ';
+          transform: translateX(-50%);
         }
       }
     }
   }
+
   .tab-content {
+
     .code,
     .request-body,
     .response-body {
       width: 100%;
-      transition: all, .1s;
-      min-height: 100px;
       max-height: 400px;
+      min-height: 100px;
+      transition: all, .1s;
     }
+
     .response-body {
       min-height: 250px;
     }
+
     .request-url {
       padding: 12px 24px 24px;
+
       .tag {
+        padding: 1px 4px;
         font-size: 10px;
         color: #299E56;
         background: #DAF6E5;
         border-radius: 8px;
-        padding: 1px 4px;
       }
+
       .url {
+        margin-left: 4px;
         font-size: 12px;
         color: #313238;
-        margin-left: 4px;
       }
     }
+
     .request-header {
       padding: 12px 24px 24px;
       border: 1px solid #F0F1F5;
     }
+  }
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  vertical-align: middle;
+  border-radius: 50%;
+
+  &.warning {
+    background: #FFF3E1;
+    border: 1px solid #FF9C01;
+  }
+
+  &.success {
+    background: #E5F6EA;
+    border: 1px solid #3FC06D;
+  }
+
+  &.failure {
+    background: #FFE6E6;
+    border: 1px solid #EA3636;
   }
 }
 </style>
@@ -602,15 +636,19 @@ defineExpose({ show });
 }
 
 .content-item {
+
   .monaco-editor, .monaco-editor-background, .monaco-editor .inputarea.ime-input {
     background-color: #f5f7fa !important;
   }
+
   .monaco-editor .margin {
     background-color: #f5f7fa !important;
   }
+
   .monaco-editor .line-numbers {
     color: #979BA5 !important;
   }
+
   .monaco-editor .current-line ~ .line-numbers {
     color: #979BA5 !important;
   }

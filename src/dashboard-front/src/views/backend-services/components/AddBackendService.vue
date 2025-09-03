@@ -339,7 +339,7 @@
         <div class="dialog-footer">
           <BkButton
             theme="primary"
-            @click="toPublishLogs"
+            @click="toStageReleaseRecord"
           >
             {{ t("去查看发布记录") }}
           </BkButton>
@@ -553,7 +553,14 @@ const handleConfirm = async () => {
   // 基础信息校验
   try {
     await baseInfoEl.value?.validate();
-    // 逐个stage服务配置的校验
+  }
+  catch {
+    nameRef.value?.focus();
+    handleScrollView(nameRef?.value?.$el);
+    return;
+  }
+  // 逐个stage服务配置的校验
+  try {
     for (const item of stageConfigRef.value) {
       if (!item) break;
       const { hosts, timeout } = item.model.configs;
@@ -565,11 +572,6 @@ const handleConfirm = async () => {
     }
   }
   catch {
-    if (!baseInfo.value.name) {
-      nameRef.value?.focus();
-      handleScrollView(nameRef?.value?.$el);
-      return;
-    }
     if (emptyHostIndex > -1) {
       handleScrollView(stageConfigRef.value[emptyHostIndex]?.$el);
       return;
@@ -649,8 +651,8 @@ const handleConfirm = async () => {
   }
 };
 
-const toPublishLogs = () => {
-  router.push({ name: 'ReleaseHistory' });
+const toStageReleaseRecord = () => {
+  router.push({ name: 'StageReleaseRecord' });
 };
 
 const setInit = () => {
@@ -746,10 +748,10 @@ defineExpose({ show });
   }
 
   .title {
+    margin-left: 8px;
     font-size: 14px;
     font-weight: 700;
     color: #323237;
-    margin-left: 8px;
 
     .icon {
       font-size: 18px;
@@ -766,8 +768,8 @@ defineExpose({ show });
 
     .alert-text {
       font-size: 12px;
-      color: #979ba5;
       line-height: 22px;
+      color: #979ba5;
     }
   }
 
@@ -776,6 +778,7 @@ defineExpose({ show });
   }
 
   .host-item {
+
     i {
       margin-left: 10px;
       font-size: 14px;
@@ -943,9 +946,9 @@ defineExpose({ show });
       background-color: #f5f7fb;
 
       .bk-collapse-header {
-        background-color: #f0f1f5;
         height: 40px;
         line-height: 40px;
+        background-color: #f0f1f5;
       }
 
       .bk-collapse-content {

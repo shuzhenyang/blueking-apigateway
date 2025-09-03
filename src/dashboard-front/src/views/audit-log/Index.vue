@@ -19,28 +19,32 @@
   <div class="page-wrapper-padding audit-log-content">
     <div class="ag-top-header">
       <BkForm class="audit-log-header">
-        <BkFormItem
-          :label="t('选择时间')"
-          class="ag-form-item-datepicker top-form-item-time h-32px! flex items-center"
-        >
+        <BkFormItem class="ag-form-item-datepicker top-form-item-time h-32px! flex items-center">
+          <template #label>
+            <div :class="{'w-80px': locale === 'en'}">
+              {{ t('选择时间') }}
+            </div>
+          </template>
           <BkDatePicker
             :key="dateKey"
-            v-model="dateTimeRange"
+            v-model="dateValue"
             type="datetimerange"
             class="w-320px!"
-            :placeholder="t('选择日期时间范围')"
-            :shortcuts="accessLogStore.datepickerShortcuts"
-            shortcut-close
+            format="yyyy-MM-dd HH:mm:ss"
             use-shortcut-text
+            :placeholder="t('选择日期时间范围')"
+            :shortcuts="shortcutsRange"
             :shortcut-selected-index="shortcutSelectedIndex"
+            @change="handleChange"
             @shortcut-change="handleShortcutChange"
-            @pick-success="handleTimeChange"
-            @clear="handleTimeClear"
+            @clear="handlePickClear"
+            @pick-success="handlePickSuccess"
+            @selection-mode-change="handleSelectionModeChange"
           />
         </BkFormItem>
         <BkFormItem class="ag-form-item-search">
           <BkSearchSelect
-            v-if="!userInfoStore.isTenantMode"
+            v-if="!featureFlagStore.isTenantMode"
             v-model="searchValue"
             style="width: 100%"
             unique-select
@@ -101,12 +105,12 @@
 
 <script lang="tsx" setup>
 import { cloneDeep } from 'lodash-es';
-import { t } from '@/locales';
 import type { ISearchSelect, ReturnRecordType } from '@/types/common';
-import { useMaxTableLimit, useQueryList } from '@/hooks';
+import { useDatePicker, useMaxTableLimit, useQueryList } from '@/hooks';
 import {
   useAccessLog,
   useAuditLog,
+  useFeatureFlag,
   useUserInfo,
 } from '@/stores';
 import { getTenantUsers } from '@/services/source/basic';
@@ -117,17 +121,17 @@ import {
 import TableHeaderFilter from '@/components/table-header-filter';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
+const { t, locale } = useI18n();
 const accessLogStore = useAccessLog();
 const auditLogStore = useAuditLog();
 const userInfoStore = useUserInfo();
+const featureFlagStore = useFeatureFlag();
 
-const shortcutSelectedIndex = shallowRef(-1);
 const tableKey = ref(-1);
 const orderBy = ref('');
 const dateKey = ref('dateKey');
 const members = ref([]);
 const searchValue = ref([]);
-const dateTimeRange = ref([]);
 const defaultSearchData = ref<IAuditLog>({
   keyword: '',
   op_type: '',
@@ -176,7 +180,7 @@ const tableEmptyConfig = reactive({
 });
 
 const searchData = computed(() => {
-  const isTenantMode = userInfoStore.featureFlags?.ENABLE_MULTI_TENANT_MODE || false;
+  const isTenantMode = featureFlagStore.flags?.ENABLE_MULTI_TENANT_MODE || false;
   return [
     {
       name: t('模糊查询'),
@@ -222,6 +226,16 @@ const searchData = computed(() => {
 });
 
 const { maxTableLimit, clientHeight } = useMaxTableLimit();
+const {
+  dateValue,
+  shortcutsRange,
+  shortcutSelectedIndex,
+  handleChange,
+  handleClear,
+  handleConfirm,
+  handleShortcutChange,
+  handleSelectionModeChange,
+} = useDatePicker(filterData);
 
 const getFilterData = (payload: Record<string, string>, curData: Record<string, string>) => {
   const { id, name } = payload;
@@ -332,23 +346,6 @@ const handleSortChange = ({ column, type }: Record<string, any>) => {
   refreshTableData();
 };
 
-const formatDatetime = (timeRange: number[]) => {
-  return [+new Date(`${timeRange[0]}`) / 1000, +new Date(`${timeRange[1]}`) / 1000];
-};
-
-const setSearchTimeRange = () => {
-  let timeRange = dateTimeRange.value;
-  // 选择的是时间快捷项，需要实时计算时间值
-  if (shortcutSelectedIndex.value !== -1) {
-    timeRange = accessLogStore.datepickerShortcuts[shortcutSelectedIndex.value].value();
-  }
-  const formatTimeRange = formatDatetime(timeRange);
-  filterData.value = Object.assign(filterData.value, {
-    time_start: formatTimeRange[0] || '',
-    time_end: formatTimeRange[1] || '',
-  });
-};
-
 const getStatusText = (type: string) => {
   const name = auditLogStore.operateStatus.find((item: Record<string, string>) => item.value === type)?.name;
   return name ?? '--';
@@ -412,13 +409,10 @@ const getTableColumns = () => {
     {
       label: t('操作人'),
       field: 'username',
-      render: ({ row }: { row?: IAuditLog }) => {
-        return (
-          <span>
-            <bk-user-display-name user-id={row.username} />
-          </span>
-        );
-      },
+      render: ({ row }: { row: IAuditLog }) =>
+        !featureFlagStore.isEnableDisplayName
+          ? <span>{row.username}</span>
+          : <span><bk-user-display-name user-id={row.username} /></span>,
     },
     {
       label: t('操作时间'),
@@ -431,22 +425,22 @@ const getTableColumns = () => {
   ];
 };
 
-const handleTimeChange = () => {
-  setSearchTimeRange();
+const handlePickSuccess = () => {
+  handleConfirm();
+  refreshTableData();
+};
+
+const handlePickClear = () => {
+  handleClear();
+  handleTimeClear();
 };
 
 const handleTimeClear = () => {
-  shortcutSelectedIndex.value = -1;
-  dateTimeRange.value = [];
-  setSearchTimeRange();
-};
-
-const handleShortcutChange = (shortcut: {
-  text: string
-  value?: () => void
-}, index: number) => {
-  shortcutSelectedIndex.value = index;
-  updateTableEmptyConfig();
+  filterData.value = Object.assign(filterData.value, {
+    time_start: '',
+    time_end: '',
+  });
+  pagination.value.current = 1;
 };
 
 const handleClearFilterKey = () => {
@@ -474,12 +468,12 @@ const refreshTableData = async () => {
 };
 
 const getMenuList = async (item: { id: string }, keyword: string) => {
-  if (!userInfoStore.isTenantMode) {
+  if (!featureFlagStore.isTenantMode) {
     return undefined;
   }
 
-  if (item.id === 'username' && keyword) {
-    const list = await getTenantUsers({ keyword }, userInfoStore.userInfoStore.tenant_id) as {
+  if (item.id === 'username' && keyword && featureFlagStore.isEnableDisplayName) {
+    const list = await getTenantUsers({ keyword }, userInfoStore.info.tenant_id) as {
       bk_username: string
       display_name: string
     }[];

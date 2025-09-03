@@ -88,7 +88,7 @@
             </template>
             <template v-else-if="keyword">
               <TableEmpty
-                :keyword="keyword"
+                empty-type="searchEmpty"
                 @clear-filter="keyword = ''"
               />
             </template>
@@ -156,34 +156,34 @@
               v-dompurify-html="selectedToolMarkdownHtml"
               class="ag-markdown-view"
             />
-            <div
-              v-if="Object.keys(selectedToolSchema || {}).length"
-              class="schema-wrapper"
-            >
-              <article
-                v-if="selectedToolSchema.parameters?.length || Object.keys(selectedToolSchema.requestBody || {}).length"
-                class="schema-group"
-              >
+            <div class="schema-wrapper">
+              <article class="schema-group">
                 <h3 class="title">
                   {{ t('请求参数') }}
                 </h3>
                 <RequestParams
+                  v-if="!selectedToolSchema.none_schema &&
+                    (selectedToolSchema.parameters?.length
+                      || Object.keys(selectedToolSchema.requestBody || {}).length)"
                   :detail="{ schema: selectedToolSchema }"
                   readonly
                 />
+                <div v-else>
+                  {{ t('该资源无请求参数') }}
+                </div>
               </article>
-              <article
-                v-if="Object.keys(selectedToolSchema.responses || {}).length"
-                class="schema-group"
-              >
+              <article class="schema-group">
                 <h3 class="title">
                   {{ t('响应参数') }}
                 </h3>
                 <ResponseParams
-                  v-if="Object.keys(selectedToolSchema || {}).length"
+                  v-if="Object.keys(selectedToolSchema.responses || {}).length"
                   :detail="{ schema: selectedToolSchema }"
                   readonly
                 />
+                <div v-else>
+                  {{ t('该资源无响应参数') }}
+                </div>
               </article>
             </div>
           </article>
@@ -314,9 +314,6 @@ const toolGroupList = computed(() => {
 // }, { deep: true });
 
 watch(() => server, () => {
-  if (!server.id) {
-    return;
-  }
   fetchToolList();
 }, { deep: true });
 
@@ -334,6 +331,9 @@ watch(toolList, () => {
 });
 
 const fetchToolList = async () => {
+  if (!server.id) {
+    return;
+  }
   try {
     if (page === 'market') {
       toolList.value = server?.tools ?? [];
@@ -454,10 +454,15 @@ const getHighlightedHtml = (value: string) => {
   return value;
 };
 
+onMounted(() => {
+  fetchToolList();
+});
+
 </script>
 
 <style lang="scss" scoped>
 @use "sass:color";
+
 $primary-color: #3a84ff;
 $code-bc: #1e1e1e;
 $code-color: #63656e;

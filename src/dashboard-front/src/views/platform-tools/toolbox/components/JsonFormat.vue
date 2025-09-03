@@ -34,7 +34,6 @@
           type="textarea"
           :placeholder="t('请输入')"
           clearable
-          autosize
           :resize="false"
         />
       </div>
@@ -177,6 +176,17 @@ const highlightJson = (value: string) => {
 
       .encoded-input-comp {
         height: 100%;
+        position: relative;
+        :deep(textarea) {
+          height: 100%;
+          padding: 10px 16px;
+        }
+        :deep(.show-clear-only-hover.bk-textarea--clear-icon) {
+          display: block !important;
+          position: absolute;
+          right: -2px;
+          top: 8px;
+        }
       }
     }
 
@@ -200,6 +210,7 @@ const highlightJson = (value: string) => {
     display: flex;
     flex-direction: column;
     padding-bottom: 58px;
+    overflow-y: auto;
 
     .decode-section-header {
       display: flex;
@@ -228,10 +239,15 @@ const highlightJson = (value: string) => {
     }
   }
 }
-.w-330px {
-  width: 330px;
-}
-.w-160px {
-  width: 160px;
+
+.show-notice-wrapper {
+
+  .encoded-section-wrapper {
+    padding-bottom: 66px;
+  }
+
+  .decode-section-wrapper {
+    padding-bottom: 98px;
+  }
 }
 </style>

@@ -34,6 +34,7 @@
         {{ item }}
       </BkTag>
       <BkTag
+        v-if="overflowData.length > 0"
         class="overflow-tag"
         @click="emits('click')"
       >
@@ -53,9 +54,10 @@
         v-if="overflowData.length > 0"
         ext-cls="render-row-overflow-popover-main"
         :max-height="500"
-        placement="top"
+        placement="left"
         theme="light"
-        width="430"
+        arrow
+        v-bind="popoverProps"
       >
         <BkTag
           class="overflow-tag"
@@ -65,11 +67,10 @@
         </BkTag>
         <template #content>
           <slot name="popoverContent">
-            <div class="flex gap-4px">
+            <div class="flex flex-col gap-4px">
               <BkTag
                 v-for="(item, index) in overflowData"
                 :key="index"
-                v-bk-tooltips="item"
                 class="render-row-item mb-4px max-w-400px"
               >
                 {{ item }}
@@ -91,9 +92,10 @@ interface Props {
   data: string[]
   // 容器右侧不能占用的预留空间
   right?: number
+  popoverProps?: Record<string, any>
 }
 
-const { data, right = 0 } = defineProps<Props>();
+const { data, right = 0, popoverProps = {} } = defineProps<Props>();
 
 const emits = defineEmits<{ click: [void] }>();
 
@@ -172,11 +174,5 @@ watch(() => data, findOverflowIndex, { immediate: true });
   .render-row-item {
     padding: 0 10px;
   }
-}
-</style>
-
-<style lang="scss">
-.render-row-overflow-popover-main {
-  overflow-y: auto;
 }
 </style>

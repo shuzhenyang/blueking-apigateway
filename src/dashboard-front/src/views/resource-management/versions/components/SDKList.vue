@@ -83,7 +83,8 @@
               prop="created_by"
             >
               <template #default="{ row }">
-                <span><bk-user-display-name :user-id="row.created_by" /></span>
+                <span v-if="!featureFlagStore.isEnableDisplayName">{{ row.created_by }}</span>
+                <span v-else><bk-user-display-name :user-id="row.created_by" /></span>
               </template>
             </BkTableColumn>
             <BkTableColumn
@@ -102,7 +103,7 @@
                   </BkButton>
                   <BkButton
                     v-bk-tooltips="{
-                      content: !row.download_url ? $t('暂无下载地址') : '',
+                      content: !row.download_url ? t('暂无下载地址') : '',
                       disabled: row.download_url,
                     }"
                     text
@@ -118,9 +119,9 @@
             </BkTableColumn>
             <template #empty>
               <TableEmpty
-                :keyword="tableEmptyConf.keyword"
+                :empty-type="tableEmptyConf.emptyType"
                 :abnormal="tableEmptyConf.isAbnormal"
-                @reacquire="getList"
+                @refresh="getList"
                 @clear-filter="handleClearFilterKey"
               />
             </template>
@@ -141,13 +142,17 @@
 import { useQueryList } from '@/hooks';
 import { getSDKList } from '@/services/source/sdks';
 import { copy } from '@/utils';
-import { useResourceVersion } from '@/stores';
+import {
+  useFeatureFlag,
+  useResourceVersion,
+} from '@/stores';
 import CreateSDK from './CreateSDK.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
 const emits = defineEmits<{ 'on-show-version': [version: string] }>();
 
 const { t } = useI18n();
+const featureFlagStore = useFeatureFlag();
 const resourceVersionStore = useResourceVersion();
 
 const keyword = ref('');
@@ -157,10 +162,10 @@ const filterData = ref({
   resource_version_id: '',
 });
 const tableEmptyConf = ref<{
-  keyword: string
+  emptyType: string
   isAbnormal: boolean
 }>({
-  keyword: '',
+  emptyType: '',
   isAbnormal: false,
 });
 
@@ -221,14 +226,14 @@ const handleClearFilterKey = () => {
 const updateTableEmptyConfig = () => {
   tableEmptyConf.value.isAbnormal = pagination.value.abnormal;
   if (filterData.value.keyword && !tableData.value.length) {
-    tableEmptyConf.value.keyword = 'placeholder';
+    tableEmptyConf.value.emptyType = 'searchEmpty';
     return;
   }
   if (keyword.value) {
-    tableEmptyConf.value.keyword = keyword.value;
+    tableEmptyConf.value.emptyType = keyword.value;
     return;
   }
-  tableEmptyConf.value.keyword = '';
+  tableEmptyConf.value.emptyType = '';
 };
 
 const goVersionList = (data: any) => {

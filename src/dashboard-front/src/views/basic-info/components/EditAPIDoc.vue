@@ -32,12 +32,32 @@
           property="contacts"
           required
         >
-          <MemberSelector
-            v-model="docForm.contacts"
-            :placeholder="t('请选择')"
-            has-delete-icon
+          <EditMember
+            v-if="!featureFlagStore.isTenantMode"
+            ref="selectorRef"
+            mode="edit"
+            width="600px"
+            field="contacts"
+            is-required
+            :exclude-self-tips="false"
+            :placeholder="t('请选择联系人')"
+            :content="docForm.contacts"
+            :is-error-class="'maintainers-error-tip'"
+            @on-change="(e:Record<string, any>) => handleContactsChange(e)"
           />
-          <div class="form-item-tip">
+          <TenantUserSelector
+            v-else
+            ref="selectorRef"
+            :content="docForm.contacts"
+            :is-error-class="'maintainers-error-tip'"
+            is-required
+            :placeholder="t('请选择联系人')"
+            field="contacts"
+            mode="edit"
+            width="600px"
+            @on-change="(e:Record<string, any>) => handleContactsChange(e)"
+          />
+          <div class="form-item-tip lh-32px">
             <span>{{ t('文档页面上展示出来的文档咨询接口人') }}</span>
           </div>
         </BkFormItem>
@@ -110,7 +130,7 @@
               <div class="title">
                 {{ t('网关描述') }}
               </div>
-              <div class="value">
+              <div class="value break-all">
                 {{ data?.description || '--' }}
               </div>
             </div>
@@ -152,10 +172,12 @@
 </template>
 
 <script lang="ts" setup>
+import { useFeatureFlag } from '@/stores';
 import { cloneDeep } from 'lodash-es';
-import { Message } from 'bkui-vue';
-import MemberSelector from '@/components/member-selector';
+import { Form, Message } from 'bkui-vue';
 import { patchGateway } from '@/services/source/gateway';
+import EditMember from '@/views/basic-info/components/EditMember.vue';
+import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
 
 interface IForm {
   type: string
@@ -182,6 +204,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const featureFlagStore = useFeatureFlag();
 
 const InitForm = (): IForm => {
   return {
@@ -194,7 +217,8 @@ const InitForm = (): IForm => {
   };
 };
 
-const formRef = ref();
+const formRef = ref<InstanceType<typeof Form> & { clearValidate: () => void }>();
+const selectorRef = ref<InstanceType<typeof EditMember | typeof TenantUserSelector>>();
 const loading = ref<boolean>(false);
 const docForm = ref<IForm>(InitForm());
 
@@ -214,6 +238,13 @@ const rules = {
       trigger: 'change',
     },
   ],
+  'contacts': [
+    {
+      required: true,
+      message: t('联系人不能为空'),
+      trigger: 'blur',
+    },
+  ],
 };
 
 watch(
@@ -227,10 +258,10 @@ watch(
 );
 
 const handleCancel = () => {
-  emit('update:modelValue', false);
   // setTimeout(() => {
   //   docForm.value = InitForm();
   // }, 200);
+  handleUpdateIsShow(false);
 };
 
 const handleCommit = async () => {
@@ -251,6 +282,9 @@ const handleCommit = async () => {
           link: '',
         },
       };
+      if (!contacts.length) {
+        return;
+      }
     }
     else {
       payload.doc_maintainers = {
@@ -263,7 +297,7 @@ const handleCommit = async () => {
     await patchGateway(data.id, payload);
 
     emit('done');
-    emit('update:modelValue', false);
+    handleUpdateIsShow(false);
     Message({
       message: t('更新成功'),
       theme: 'success',
@@ -276,7 +310,16 @@ const handleCommit = async () => {
 };
 
 const handleUpdateIsShow = (value: boolean) => {
+  nextTick(() => {
+    formRef.value?.clearValidate();
+    selectorRef.value.isShowError = false;
+    selectorRef.value.isEditable = false;
+  });
   emit('update:modelValue', value);
+};
+
+const handleContactsChange = ({ contacts }: { contacts: string[] }) => {
+  docForm.value.contacts = contacts;
 };
 
 </script>

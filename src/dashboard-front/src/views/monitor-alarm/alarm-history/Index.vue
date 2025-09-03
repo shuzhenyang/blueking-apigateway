@@ -29,17 +29,18 @@
         >
           <BkDatePicker
             :key="dateKey"
-            v-model="initDateTimeRange"
+            v-model="dateValue"
             class="w-320px"
             :placeholder="t('选择日期时间范围')"
             type="datetimerange"
-            :shortcuts="datepickerShortcuts"
-            shortcut-close
             use-shortcut-text
+            :shortcuts="shortcutsRange"
             :shortcut-selected-index="shortcutSelectedIndex"
-            @clear="handleTimeClear"
             @shortcut-change="handleShortcutChange"
-            @pick-success="handleTimeChange"
+            @change="handleChange"
+            @clear="handlePickClear"
+            @pick-success="handlePickSuccess"
+            @selection-mode-change="handleSelectionModeChange"
           />
         </BkFormItem>
         <BkFormItem
@@ -185,7 +186,7 @@
 <script lang="tsx" setup>
 import { cloneDeep } from 'lodash-es';
 import { useAccessLog, useGateway } from '@/stores';
-import { useMaxTableLimit, useQueryList } from '@/hooks';
+import { useDatePicker, useMaxTableLimit, useQueryList } from '@/hooks';
 import { type IAlarmRecord, getRecordList, getStrategyList } from '@/services/source/monitor';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
@@ -194,12 +195,10 @@ const gatewayStore = useGateway();
 const accessLogStore = useAccessLog();
 const { maxTableLimit, clientHeight } = useMaxTableLimit();
 
-const { datepickerShortcuts, alarmStatus } = accessLogStore;
+const { alarmStatus } = accessLogStore;
 const dateKey = ref('dateKey');
 const curStrategyCount = ref(0);
-const shortcutSelectedIndex = ref(-1);
 const scrollLoading = ref(false);
-const initDateTimeRange = ref([]);
 const alarmStrategyOption = ref([]);
 const tableColumns = ref([
   {
@@ -335,39 +334,34 @@ const {
     limit: maxTableLimit,
   },
 });
+const {
+  dateValue,
+  shortcutsRange,
+  shortcutSelectedIndex,
+  handleChange,
+  handleClear,
+  handleConfirm,
+  handleShortcutChange,
+  handleSelectionModeChange,
+} = useDatePicker(filterData);
 
 const apigwId = computed(() => gatewayStore.apigwId);
 
 // 日期清除
 const handleTimeClear = () => {
-  shortcutSelectedIndex.value = -1;
   filterData.value = Object.assign(filterData.value, {
     time_start: '',
     time_end: '',
   });
 };
 
-// 日期快捷方式改变触发
-const handleShortcutChange = (
-  item: {
-    text: string
-    value: () => void
-  },
-  index: number,
-) => {
-  shortcutSelectedIndex.value = index;
+const handlePickClear = () => {
+  handleClear();
+  handleTimeClear();
 };
 
-// 日期快捷方式改变触发
-const handleTimeChange = () => {
-  const startStr = +new Date(`${initDateTimeRange.value[0]}`) / 1000;
-  const endStr = +new Date(`${initDateTimeRange.value[1]}`) / 1000;
-  const start = parseInt(startStr);
-  const end = parseInt(endStr);
-  filterData.value = Object.assign(filterData.value, {
-    time_start: start,
-    time_end: end,
-  });
+const handlePickSuccess = () => {
+  handleConfirm();
 };
 
 // 获取状态name
@@ -375,6 +369,7 @@ const getAlarmStatusText = (status: string) => {
   const curStatus = alarmStatus.find(item => item.value === status) ?? {};
   return curStatus.name ?? '--';
 };
+
 // 获取告警策略list
 const getStrategyOption = async () => {
   const { results, count } = await getStrategyList(apigwId.value, initParams);
@@ -402,12 +397,6 @@ const handleScrollEnd = async () => {
   }
 };
 
-// 刷新表格
-const fetchRefreshTable = async () => {
-  await getList();
-  updateTableEmptyConfig();
-};
-
 // 切换告警策略选项下拉折叠状态
 const handleToggle = (value: boolean) => {
   if (value) {
@@ -425,11 +414,12 @@ const handleRowClick = (e: MouseEvent, row: IAlarmRecord) => {
 };
 
 const handleClearFilterKey = async () => {
-  initDateTimeRange.value = [];
+  dateValue.value = [];
   shortcutSelectedIndex.value = -1;
   dateKey.value = String(+new Date());
   filterData.value = cloneDeep(initFilterData);
-  await fetchRefreshTable();
+  await getList();
+  updateTableEmptyConfig();
 };
 
 const updateTableEmptyConfig = () => {
@@ -468,13 +458,18 @@ watch(
 }
 
 :deep(.alarm-history-table) {
+
   .bk-table-body {
+
     table {
+
       tbody {
+
         tr {
           cursor: pointer;
 
           td {
+
             .cell {
               height: auto !important;
               line-height: normal;
@@ -487,17 +482,17 @@ watch(
 }
 
 .ag-kv-list {
+  padding: 10px 20px;
+  background-color: #fafbfd;
   border: 1px solid #f0f1f5;
   border-radius: 2px;
-  background-color: #fafbfd;
-  padding: 10px 20px;
 
   .item {
     display: flex;
-    font-size: 14px;
-    border-bottom: 1px dashed #dcdee5;
     min-height: 40px;
+    font-size: 14px;
     line-height: 40px;
+    border-bottom: 1px dashed #dcdee5;
 
     &:last-child {
       border-bottom: none;
@@ -517,13 +512,14 @@ watch(
       pre {
         margin: 0;
         font-family: monospace;
-        white-space: pre-wrap;
         word-break: break-all;
+        white-space: pre-wrap;
       }
     }
+
     .message {
-      line-height: 22px;
       padding: 10px 0;
+      line-height: 22px;
     }
   }
 }
@@ -535,7 +531,7 @@ watch(
   margin: 6px 0;
 
   .name-item {
-    margin: 0 0 4px 0;
+    margin: 0 0 4px;
     line-height: 0;
 
     .ag-label {
@@ -546,30 +542,31 @@ watch(
 
 .strategy-name-list,
 :deep(.strategy-names) {
+
   .ag-label {
-    height: 24px;
-    line-height: 22px;
-    border: 1px solid #dcdee5;
-    text-align: center;
-    padding: 0 10px;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: normal;
     display: inline-block;
+    height: 24px;
+    padding: 0 10px;
     margin-right: 4px;
-    border-radius: 2px;
+    overflow: hidden;
+    line-height: 22px;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: normal;
     white-space: nowrap;
+    border: 1px solid #dcdee5;
+    border-radius: 2px;
   }
 }
 
 :deep(.ag-outline-dot) {
+  display: inline-block;
   width: 10px;
   height: 10px;
-  border: 2px solid #c4c6cc;
-  display: inline-block;
-  border-radius: 50%;
-  vertical-align: middle;
   line-height: 1;
+  vertical-align: middle;
+  border: 2px solid #c4c6cc;
+  border-radius: 50%;
 
   &.success {
     border-color: #34d97b;
@@ -594,7 +591,7 @@ watch(
 <style lang="scss">
 .bk-popper.monitor-tooltips {
   width: 520px;
-  white-space: pre-wrap;
   word-break: break-all;
+  white-space: pre-wrap;
 }
 </style>

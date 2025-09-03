@@ -58,7 +58,7 @@
             :value-split-code="'+'"
             clearable
             unique-select
-            style="width: 450px; background: #fffff"
+            class="w-450px bg-white"
           />
         </BkFormItem>
       </BkForm>
@@ -658,7 +658,7 @@ const handleExport = async () => {
   try {
     await exportPermissionList(apigwId.value, exportParams.value);
     Message({
-      message: t('导出成功！'),
+      message: t('导出成功'),
       theme: 'success',
     });
   }

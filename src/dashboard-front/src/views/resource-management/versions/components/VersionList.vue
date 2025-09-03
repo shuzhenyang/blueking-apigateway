@@ -109,7 +109,8 @@
               prop="created_by"
             >
               <template #default="{ row }">
-                <span><bk-user-display-name :user-id="row.created_by" /></span>
+                <span v-if="!featureFlagStore.isEnableDisplayName">{{ row.created_by }}</span>
+                <span v-else><bk-user-display-name :user-id="row.created_by" /></span>
               </template>
             </BkTableColumn>
             <BkTableColumn
@@ -165,9 +166,9 @@
             </BkTableColumn>
             <template #empty>
               <TableEmpty
-                :keyword="tableEmptyConf.keyword"
+                :empty-type="tableEmptyConf.emptyType"
                 :abnormal="tableEmptyConf.isAbnormal"
-                @reacquire="getList"
+                @refresh="getList"
                 @clear-filter="handleClearFilterKey"
               />
             </template>
@@ -319,10 +320,10 @@ const stageData = ref();
 const versionData = ref();
 const releaseSidesliderRef = ref();
 const tableEmptyConf = ref<{
-  keyword: string
+  emptyType: string
   isAbnormal: boolean
 }>({
-  keyword: '',
+  emptyType: '',
   isAbnormal: false,
 });
 
@@ -343,7 +344,7 @@ let timeId: any = null;
 const apigwId = computed(() => +route.params.id);
 
 watch(
-  filterData,
+  tableData,
   () => {
     updateTableEmptyConfig();
   },
@@ -458,12 +459,11 @@ const showRelease = async (row: any) => {
       });
     }
   }
-  catch (e) {
+  catch {
     Message({
       theme: 'warning',
       message: t('获取环境列表失败，请稍后再试！'),
     });
-    console.log(e);
   }
 };
 
@@ -490,15 +490,15 @@ const handleClearFilterKey = () => {
 const updateTableEmptyConfig = () => {
   tableEmptyConf.value.isAbnormal = pagination.value.abnormal;
   if (filterData.value.keyword && !tableData.value.length) {
-    tableEmptyConf.value.keyword = 'placeholder';
+    tableEmptyConf.value.emptyType = 'searchEmpty';
     return;
   }
   if (filterData.value.keyword) {
-    // tableEmptyConf.value.keyword = '$CONSTANT';
-    tableEmptyConf.value.keyword = filterData.value.keyword;
+    // tableEmptyConf.value.emptyType = '$CONSTANT';
+    tableEmptyConf.value.emptyType = filterData.value.keyword;
     return;
   }
-  tableEmptyConf.value.keyword = '';
+  tableEmptyConf.value.emptyType = '';
 };
 
 const getCellClass = (_column: any, _index: number, row: any) => {

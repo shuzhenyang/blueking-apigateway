@@ -64,7 +64,7 @@
           </div>
         </BkFormItem>
         <BkFormItem
-          v-if="!userStore.isTenantMode"
+          v-if="!featureFlagStore.isTenantMode"
           label-width="90"
         >
           <div class="flex">
@@ -88,10 +88,10 @@
         >
           <BkUserSelector
             v-model="filterData.applied_by"
-            :api-base-url="userStore.apiBaseUrl"
-            :tenant-id="userStore.tenant_id"
+            :api-base-url="envStore.tenantUserDisplayAPI"
+            :tenant-id="userStore.info.tenant_id"
             :placeholder="t('请输入用户')"
-            style="min-width: 200px"
+            class="w-200px"
           />
         </BkFormItem>
       </BkForm>
@@ -207,6 +207,8 @@ import {
   updatePermissionStatus,
 } from '@/services/source/permission';
 import {
+  useEnv,
+  useFeatureFlag,
   useGateway,
   usePermission,
   useUserInfo,
@@ -227,10 +229,12 @@ import CustomHeader from '@/views/permission/apply/components/CustomHeader.vue';
 import AgIcon from '@/components/ag-icon/Index.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
-const { t } = useI18n();
+const envStore = useEnv();
 const gatewayStore = useGateway();
 const userStore = useUserInfo();
 const permissionStore = usePermission();
+const featureFlagStore = useFeatureFlag();
+const { t } = useI18n();
 const {
   selections,
   handleSelectionChange,
@@ -446,11 +450,10 @@ const setTableHeader = () => {
     {
       field: 'applied_by',
       label: t('申请人'),
-      render: ({ row }: { row?: Partial<IApprovalListItem> }) => (
-        <span>
-          <bk-user-display-name user-id={row.applied_by} />
-        </span>
-      ),
+      render: ({ row }: { row?: Partial<IApprovalListItem> }) =>
+        !featureFlagStore.isEnableDisplayName
+          ? <span>{row.applied_by}</span>
+          : <span><bk-user-display-name user-id={row.applied_by} /></span>,
     },
     {
       field: 'created_time',
@@ -638,37 +641,28 @@ const updateStatus = async () => {
   let params = cloneDeep({ ...curAction.value });
   const { isSelectAll, selection } = curPermission.value;
   await approveForm.value?.validate();
-  try {
-    // 部分通过
-    const id = params?.ids?.[0] || '';
-    if (
-      ['approved'].includes(params.status)
-      && expandRows.value.includes(id)
-      && selection.length > 0
-      && !isSelectAll
-    ) {
-      params.part_resource_ids = {};
-      params = Object.assign(params, {
-        status: 'partial_approved',
-        [part_resource_ids[id]]: selection.map(item => item.id),
-      });
-    }
-    await updatePermissionStatus(apigwId.value, params);
-    batchApplyDialogConf.isShow = false;
-    applyActionDialogConf.isShow = false;
-    getList();
-    Message({
-      message: t('操作成功！'),
-      theme: 'success',
-    });
-    resetSelections(permissionTableRef.value);
-  }
-  catch (e) {
-    Message({
-      message: e?.message || e?.error?.message,
-      theme: 'error',
+  // 部分通过
+  const id = params?.ids?.[0] || '';
+  if (
+    ['approved'].includes(params.status)
+    && expandRows.value.includes(id)
+    && selection.length > 0
+    && !isSelectAll
+  ) {
+    params = Object.assign(params, {
+      status: 'partial_approved',
+      part_resource_ids: { [id]: selection.map(item => item.id) },
     });
   }
+  await updatePermissionStatus(apigwId.value, params);
+  batchApplyDialogConf.isShow = false;
+  applyActionDialogConf.isShow = false;
+  getList();
+  Message({
+    message: t('操作成功！'),
+    theme: 'success',
+  });
+  resetSelections(permissionTableRef.value);
 };
 
 // 全部通过
@@ -813,6 +807,7 @@ onMounted(() => {
 }
 
 .header-filter {
+
   .bk-form-item {
     margin-bottom: 16px;
 
@@ -821,15 +816,15 @@ onMounted(() => {
 
       .form-item-label {
         padding: 5px 7px;
-        color: #4d4f56;
-        background-color: #fafbfd;
-        border-radius: 2px 0 0 2px;
-        border: 1px solid #c4c6cc;
-        line-height: 20px;
-        text-align: center;
         overflow: hidden;
+        line-height: 20px;
+        color: #4d4f56;
+        text-align: center;
         text-overflow: ellipsis;
         white-space: nowrap;
+        background-color: #fafbfd;
+        border: 1px solid #c4c6cc;
+        border-radius: 2px 0 0 2px;
       }
 
       .form-item-value {
@@ -841,11 +836,13 @@ onMounted(() => {
 
 .perm-apply-table,
 .ag-expand-table {
+
   :deep(tr) {
     background-color: #fafbfd;
   }
 
   :deep(th) {
+
     .head-text {
       font-weight: bold !important;
       color: #63656e !important;
@@ -854,21 +851,23 @@ onMounted(() => {
 }
 
 :deep(.ag-expand-table) {
+
   td,
   th {
-    padding: 0 !important;
     height: 42px !important;
+    padding: 0 !important;
     cursor: default !important;
   }
 }
 
 :deep(.perm-apply-dot) {
+
   .dot {
+    display: inline-block;
     width: 8px;
     height: 8px;
-    border-radius: 50%;
-    display: inline-block;
     margin-right: 3px;
+    border-radius: 50%;
 
     &.approved {
       background: #e6f6eb;

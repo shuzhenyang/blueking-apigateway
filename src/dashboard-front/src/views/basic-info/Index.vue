@@ -255,7 +255,9 @@
                 {{ `${t('创建人')}：` }}
               </div>
               <div class="value">
-                <span><bk-user-display-name :user-id="basicInfoData.created_by" /></span>
+                <span v-if="!featureFlagStore.isEnableDisplayName">{{ basicInfoData.created_by }}</span>
+                <span v-else><bk-user-display-name :user-id="basicInfoData.created_by" />
+                </span>
               </div>
             </div>
             <div class="detail-item-content-item">
@@ -304,7 +306,22 @@
                 {{ `${t('联系人')}：` }}
               </div>
               <div class="value contact">
-                <span class="link">{{ basicInfoData.doc_maintainers?.contacts?.join(', ') || '--' }}</span>
+                <span>
+                  <EditMember
+                    v-if="!featureFlagStore.isEnableDisplayName"
+                    mode="detail"
+                    width="600px"
+                    field="contacts"
+                    :content="basicInfoData.doc_maintainers?.contacts"
+                  />
+                  <TenantUserSelector
+                    v-else
+                    :content="basicInfoData.doc_maintainers?.contacts"
+                    field="contacts"
+                    mode="detail"
+                    width="600px"
+                  />
+                </span>
                 <div class="sub-explain">
                   {{ t('文档页面上展示出来的文档咨询接口人') }}
                 </div>
@@ -524,6 +541,7 @@
         <BkButton
           theme="primary"
           :disabled="!formRemoveApigw"
+          class="mr-8px"
           @click="handleDeleteApigw"
         >
           {{ t('确定') }}
@@ -581,6 +599,7 @@ import { TENANT_MODE_TEXT_MAP } from '@/enums';
 import {
   useEnv,
   useFeatureFlag,
+  useGateway,
 } from '@/stores';
 import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
 import EditAPIDoc from '@/views/basic-info/components/EditAPIDoc.vue';
@@ -592,6 +611,7 @@ const route = useRoute();
 const router = useRouter();
 const featureFlagStore = useFeatureFlag();
 const envStore = useEnv();
+const gatewayStore = useGateway();
 
 // 网关id
 const apigwId = ref(0);
@@ -690,32 +710,25 @@ const md = new MarkdownIt({
 });
 
 const showGuide = async () => {
-  try {
-    const data = await getGuideDocs(apigwId.value);
-    markdownHtml.value = md.render(data.content);
-    isShowMarkdown.value = true;
-  }
-  catch (e) {
-    console.error(e);
-  }
+  const data = await getGuideDocs(apigwId.value);
+  markdownHtml.value = md.render(data.content);
+  isShowMarkdown.value = true;
 };
 
 const handleDeleteApigw = async () => {
-  try {
-    await deleteGateway(apigwId.value);
-    Message({
-      theme: 'success',
-      message: t('删除成功'),
-      width: 'auto',
-    });
-    delApigwDialog.value.isShow = false;
-    setTimeout(() => {
-      router.push({ name: 'home' });
-    }, 200);
-  }
-  catch (e) {
-    console.error(e);
-  }
+  await deleteGateway(apigwId.value);
+  Message({
+    theme: 'success',
+    message: t('删除成功'),
+    width: 'auto',
+  });
+  delApigwDialog.value.isShow = false;
+  setTimeout(() => {
+    router.push({ name: 'Home' });
+    gatewayStore.clearCurrentGateway();
+    gatewayStore.setApigwId(0);
+    gatewayStore.setApigwName('');
+  }, 200);
 };
 
 const handleChangePublic = async (value: boolean) => {
@@ -763,6 +776,7 @@ const handleOperate = async (type: string) => {
     InfoBox({
       title,
       subTitle,
+      confirmText: t('确认'),
       onConfirm: () => {
         if (statusChanging.value) {
           return;

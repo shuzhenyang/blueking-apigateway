@@ -29,9 +29,19 @@
             <template v-if="membersText">
               <span class="member-item">
                 <BkPopover>
-                  <bk-user-display-name :user-id="membersText" />
+                  <div class="overflow-hidden text-ellipsis whitespace-nowrap">
+                    <bk-user-display-name
+                      v-if="featureFlagStore.isEnableDisplayName"
+                      :user-id="membersText"
+                    />
+                    <template v-else>{{ membersText }}</template>
+                  </div>
                   <template #content>
-                    <span><bk-user-display-name :user-id="membersText" /></span>
+                    <bk-user-display-name
+                      v-if="featureFlagStore.isEnableDisplayName"
+                      :user-id="membersText"
+                    />
+                    <span>{{ membersText }}</span>
                   </template>
                 </BkPopover>
               </span>
@@ -71,7 +81,7 @@
         />
         <aside class="edit-member-actions">
           <BkPopConfirm
-            v-if="!displayValue?.includes(userInfoStore.info.username)"
+            v-if="!displayValue?.includes(userInfoStore.info.username) && excludeSelfTips"
             width="288"
             :content="t('您已将自己从维护人员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！')"
             trigger="click"
@@ -122,7 +132,7 @@
 
 <script lang="ts" setup>
 import MemberSelector from '@/components/member-selector/index.tsx';
-import { useUserInfo } from '@/stores';
+import { useFeatureFlag, useUserInfo } from '@/stores';
 
 interface IProps {
   field: string
@@ -133,6 +143,7 @@ interface IProps {
   isRequired?: boolean
   isErrorClass?: string
   errorValue?: string
+  excludeSelfTips?: boolean
 }
 
 const {
@@ -144,6 +155,7 @@ const {
   isRequired = true,
   isErrorClass = '',
   errorValue = '',
+  excludeSelfTips = true,
 } = defineProps<IProps>();
 
 const emit = defineEmits<{ 'on-change': [data: { [key: string]: string[] }] }>();
@@ -151,6 +163,7 @@ const emit = defineEmits<{ 'on-change': [data: { [key: string]: string[] }] }>()
 const { t } = useI18n();
 
 const userInfoStore = useUserInfo();
+const featureFlagStore = useFeatureFlag();
 
 const memberSelectorRef = ref();
 const memberSelectorEditRef = ref();
@@ -193,6 +206,7 @@ const handleEdit = () => {
   nextTick(() => {
     memberSelectorRef.value?.tagInputRef?.focusInputTrigger();
   });
+  console.log(displayValue.value);
 };
 
 const handleSubmit = () => {
@@ -206,32 +220,33 @@ const handleCancel = () => {
 };
 
 const handleChange = () => {
+  isShowError.value = !displayValue.value.length;
   if (isRequired && !displayValue.value.length) {
-    isShowError.value = true;
     errorTips.value = errorValue;
+    emit('on-change', { [field]: displayValue.value });
     return;
   }
   isEditable.value = true;
   nextTick(() => {
     memberSelectorRef.value?.tagInputRef?.focusInputTrigger();
   });
+  emit('on-change', { [field]: displayValue.value });
 };
 
-const handleEnter = (event: any) => {
+const handleEnter = (event: MouseEvent) => {
+  isShowError.value = !displayValue.value.length;
   if (!isEditable.value) return;
-  if (!displayValue.value?.includes(userInfoStore.info.username)) {
-    isShowError.value = true;
+  if (event.key !== 'Enter' || event.keyCode !== 13) return;
+  if (!displayValue.value?.includes(userInfoStore.info.username) && excludeSelfTips) {
     errorTips.value = t('您已将自己从维护人员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！');
     return;
   }
-  if (event.key === 'Enter' && event.keyCode === 13) {
-    triggerChange();
-  }
+  triggerChange();
 };
 
 const triggerChange = () => {
+  isShowError.value = !displayValue.value.length;
   if (isRequired && !displayValue.value.length) {
-    isShowError.value = true;
     errorTips.value = errorValue;
     return;
   }
@@ -241,6 +256,8 @@ const triggerChange = () => {
   }
   emit('on-change', { [field]: displayValue.value });
 };
+
+defineExpose({ isEditable });
 
 </script>
 

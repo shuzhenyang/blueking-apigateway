@@ -74,13 +74,16 @@
             {{ t('网关负责人') }}
           </header>
           <main class="content-main">
-            <bk-user-display-name
-              :user-id="basics.maintainers.join(', ')"
-              style="word-break: break-all;"
-            />
+            <span v-if="!featureFlagStore.isEnableDisplayName">{{ basics.maintainers.join(', ') }}</span>
+            <span v-else>
+              <bk-user-display-name
+                :user-id="basics.maintainers.join(', ')"
+                style="word-break: break-all;"
+              />
+            </span>
           </main>
         </article>
-        <template v-if="featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE">
+        <template v-if="featureFlagStore.isTenantMode">
           <article>
             <header class="content-title">
               {{ t('租户模式') }}
@@ -103,9 +106,16 @@
             {{ t('文档联系人') }}
           </header>
           <main class="content-main">
-            {{ basics.doc_maintainers?.type === 'user' ?
-              basics.doc_maintainers?.contacts.join(', ') :
-              basics.doc_maintainers?.service_account?.name }}
+            <span v-if="!featureFlagStore.isEnableDisplayName">
+              {{ basics.doc_maintainers?.type === 'user' ?
+                basics.doc_maintainers?.contacts.join(', ') :
+                basics.doc_maintainers?.service_account?.name }}
+            </span>
+            <span v-else><bk-user-display-name
+              :user-id="basics.doc_maintainers?.type === 'user' ?
+                basics.doc_maintainers?.contacts.join(', ') :
+                basics.doc_maintainers?.service_account?.name"
+            /></span>
           </main>
         </article>
         <article>
@@ -245,7 +255,7 @@ watch(
   () => basics,
   () => {
     if (basics) {
-      configureDisplayName(basics.tenant_mode === 'global' ? 'system' : userStore.info.tenant_id);
+      configureDisplayName({ tenantId: basics.tenant_mode === 'global' ? 'system' : userStore.info.tenant_id });
     }
   }, {
     deep: true,
@@ -255,11 +265,6 @@ watch(
 watchEffect(() => {
   language.value = sdks[0]?.language || 'python';
 });
-
-onBeforeUnmount(() => {
-  configureDisplayName();
-});
-
 </script>
 
 <style lang="scss" scoped>
