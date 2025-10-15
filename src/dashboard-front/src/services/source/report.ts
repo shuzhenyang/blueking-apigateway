@@ -17,7 +17,6 @@
  */
 
 import http from '../http';
-import { blobDownLoad } from '@/utils';
 
 const path = '/gateways';
 
@@ -57,7 +56,7 @@ export interface IChartDataLoading {
  */
 export const exportLogs = async (apigwId: number, data: any, extraStr?: string) => {
   const res = await http.get(`${path}/${apigwId}/logs/export/?${extraStr}`, data, { responseType: 'blob' });
-  return blobDownLoad(res);
+  return res;
 };
 
 /**
@@ -73,7 +72,7 @@ export const getReportSummary = (apigwId: number, params: any) => http.get(`${pa
  */
 export const exportReportSummary = async (apigwId: number, data: any) => {
   const res = await http.get(`${path}/${apigwId}/metrics/query-summary/export/`, data, { responseType: 'blob' });
-  return blobDownLoad(res);
+  return res;
 };
 
 /**
