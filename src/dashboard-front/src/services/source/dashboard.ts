@@ -30,6 +30,7 @@ export interface ISearchParamsType {
   time_range?: string // 时间范围，可选
   limit?: number // 限制数量，可选
   offset?: number // 偏移量，可选
+  backend_name?: string // 后端服务名称，可选
 }
 
 // 定义瞬时类型
@@ -69,6 +70,9 @@ export interface IChartDataType {
   failed_500_requests?: IChartsSires // 失败的500请求图表系列，可选
   response_time?: IChartsSires // 响应时间图表系列，可选
   response_time_90th?: IChartsSires // 响应时间90百分位图表系列，可选
+  response_time_50th?: IChartsSires // 响应时间50百分位图表系列，可选
+  response_time_95th?: IChartsSires // 响应时间95百分位图表系列，可选
+  response_time_99th?: IChartsSires // 响应时间99百分位图表系列，可选
 }
 
 // 定义图表数据加载状态类型
@@ -82,6 +86,9 @@ export interface IChartDataLoading {
   ingress?: boolean // 入口加载状态，可选
   egress?: boolean // 出口加载状态，可选
   response_time_90th?: boolean // 响应时间90百分位加载状态，可选
+  response_time_50th?: boolean // 响应时间50百分位加载状态，可选
+  response_time_95th?: boolean // 响应时间95百分位加载状态，可选
+  response_time_99th?: boolean // 响应时间99百分位加载状态，可选
 }
 
 /**

@@ -66,6 +66,7 @@ import type {
   TabType,
 } from '../types.d.ts';
 import LangSelector from './LangSelector.vue';
+import 'highlight.js/styles/github.css';
 
 const { t } = useI18n();
 
@@ -366,12 +367,10 @@ $code-color: #63656e;
     font-size: 14px;
     line-height: 24px;
     text-align: left;
-    background: #1e1e1e;
     border-radius: 2px;
 
     code {
-      font-family: "Lucida Console", "Courier New", Monaco, monospace;
-      color: #dcdcdc;
+      text-wrap: wrap;
     }
 
     .hljs {

@@ -26,6 +26,7 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import Guide from '@/components/guide/Index.vue';
+import 'highlight.js/styles/github.css';
 
 interface IProps { markdownStr?: string }
 
@@ -47,7 +48,7 @@ const md = new MarkdownIt({
     catch {
       return str;
     }
-    return str;
+    return hljs.highlightAuto(str).value;
   },
 });
 
@@ -72,5 +73,12 @@ watch(
 .content {
   padding: 24px 40px 48px;
   background: #fff;
+}
+:deep(.ag-markdown-view) {
+  .pre-wrapper {
+    .ag-copy-btn {
+      background-color: transparent;
+    }
+  }
 }
 </style>

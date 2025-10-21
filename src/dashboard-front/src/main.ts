@@ -26,7 +26,7 @@ import './styles/index.scss';
 // 全量引入 bkui-vue
 import bkui from 'bkui-vue';
 // 全量引入 bkui-vue 样式
-import '../node_modules/bkui-vue/dist/style.variable.css';
+import 'bkui-vue/dist/cli.css';
 // 全局通知组件样式
 import '@blueking/notice-component/dist/style.css';
 // 版本发布通知组件样式
@@ -47,25 +47,23 @@ import mavonEditor from 'mavon-editor';
 import 'mavon-editor/dist/css/index.css';
 // highlight.js 代码高亮风格
 import 'highlight.js/styles/vs2015.min.css';
-// tdesign 表格样式
-import '@blueking/tdesign-ui/vue3/index.css';
 // 多租户组件样式
 import '@blueking/bk-user-selector/vue3/vue3.css';
+// tdesign 表格样式
+import '@blueking/tdesign-ui/vue3/index.css';
 
 const app = createApp(App);
 
-app.use(createPinia());
-app.use(router);
-app.use(bkui);
-app.use(i18n);
-app.use(mavonEditor);
-app.use(VueDOMPurifyHTML);
-app.use(directive);
-
-// 全局组件
-app.component('AgIcon', AgIcon)
+app.use(createPinia())
+  .use(router)
+  .use(bkui)
+  .use(i18n)
+  .use(mavonEditor)
+  .use(VueDOMPurifyHTML)
+  .use(directive)
+  // 全局组件
+  .component('AgIcon', AgIcon)
   .component('IconButton', IconButton)
   .component('CopyButton', CopyButton)
-  .component('CardContainer', CardContainer);
-
-app.mount('#app');
+  .component('CardContainer', CardContainer)
+  .mount('#app');

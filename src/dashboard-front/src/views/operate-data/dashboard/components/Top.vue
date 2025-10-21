@@ -27,6 +27,43 @@
       </div>
     </div>
     <div class="top-right-wrapper">
+      <div class="refresh-time mr-12px">
+        <BkSelect
+          v-model="step"
+          class="group-select refresh-time-select"
+          :input-search="false"
+          :clearable="false"
+          :filterable="false"
+          @change="handleStepChange"
+        >
+          <template #trigger="{ selected }">
+            <div class="refresh-time-trigger">
+              <div
+                v-bk-tooltips="{ content: t('精度') }"
+                class="label"
+              >
+                <AgIcon name="xuanzejingdu" />
+              </div>
+              <div class="value">
+                <span
+                  v-show="selected[0]?.label !== 'Auto'"
+                  class="text"
+                >
+                  {{ selected[0]?.label }}
+                </span>
+                <AgIcon name="down-small" />
+              </div>
+            </div>
+          </template>
+          <BkOption
+            v-for="item in stepList"
+            :id="item.value"
+            :key="item.value"
+            :name="item.label"
+          />
+        </BkSelect>
+      </div>
+
       <div class="refresh-time">
         <BkSelect
           v-model="interval"
@@ -38,7 +75,10 @@
         >
           <template #trigger="{ selected }">
             <div class="refresh-time-trigger">
-              <div class="label">
+              <div
+                v-bk-tooltips="{ content: t('自动刷新间隔') }"
+                class="label"
+              >
                 <AgIcon name="lishijilu" />
               </div>
               <div class="value">
@@ -73,7 +113,10 @@ type IntervalItem = {
   value: string
 };
 
-const emit = defineEmits<{ 'refresh-change': [data: string] }>();
+const emit = defineEmits<{
+  'refresh-change': [data: string]
+  'step-change': [data: string]
+}>();
 
 const { t } = useI18n();
 const stage = useStage();
@@ -130,13 +173,55 @@ const intervalList = ref<IntervalItem[]>([
   },
 ]);
 
+const step = ref<string>('auto');
+const stepList = ref<IntervalItem[]>([
+  {
+    label: 'Auto',
+    value: 'auto',
+  },
+  {
+    label: '1m',
+    value: '1m',
+  },
+  {
+    label: '5m',
+    value: '5m',
+  },
+  {
+    label: '10m',
+    value: '10m',
+  },
+  {
+    label: '30m',
+    value: '30m',
+  },
+  {
+    label: '1h',
+    value: '1h',
+  },
+  {
+    label: '3h',
+    value: '3h',
+  },
+  {
+    label: '12h',
+    value: '12h',
+  },
+]);
+
 const handleRefreshChange = () => {
   emit('refresh-change', interval.value);
 };
 
+const handleStepChange = () => {
+  emit('step-change', step.value);
+};
+
 const reset = () => {
   interval.value = 'off';
+  step.value = 'auto';
   handleRefreshChange();
+  handleStepChange();
 };
 
 defineExpose({ reset });
@@ -173,6 +258,7 @@ defineExpose({ reset });
         border-radius: 2px;
         display: flex;
         align-items: center;
+        cursor: pointer;
         .label {
           width: 32px;
           height: 32px;

@@ -1,3 +1,25 @@
+<!-- 2025-09-11 -->
+# V1.18.0 Release Log
+
+### Features
+
+- Upgrade data plane apisix version to 3.13.0
+- Optimize underlying model mapping relationships
+
+---
+
+<!-- 2025-09-05 -->
+# V1.17.13 Release Log
+
+### Bug Fixes
+
+- Fix: Programmable gateway creation issues
+- Fix: Dashboard cannot be displayed correctly
+- Fix: Component API documentation issues
+- Fix: MCP Server applicant display issues
+
+---
+
 <!-- 2025-09-01 -->
 # V1.17.12 Release Log
 

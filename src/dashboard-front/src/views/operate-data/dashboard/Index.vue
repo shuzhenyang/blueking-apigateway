@@ -21,6 +21,7 @@
     <Top
       ref="topRef"
       @refresh-change="handleRefreshChange"
+      @step-change="handleStepChange"
     />
 
     <div class="ag-top-header">
@@ -31,7 +32,7 @@
         <BkFormItem :label="t('时间选择器')">
           <DatePicker
             v-model="dateTime"
-            :valid-date-range="['now-2d', 'now/d']"
+            :valid-date-range="['now-7d/d', 'now/d']"
             class="date-choose"
             format="YYYY-MM-DD HH:mm:ss"
             style="min-width: 154px;background: #fff;"
@@ -42,12 +43,25 @@
           <BkSelect
             v-model="searchParams.stage_id"
             :clearable="false"
-            :input-search="false"
-            filterable
             style="width: 150px;"
           >
             <BkOption
               v-for="option in stageList"
+              :id="option.id"
+              :key="option.id"
+              :name="option.name"
+            />
+          </BkSelect>
+        </BkFormItem>
+        <BkFormItem :label="t('后端服务')">
+          <BkSelect
+            v-model="backend_id"
+            clearable
+            style="width: 150px;"
+            @change="handleBackendChange"
+          >
+            <BkOption
+              v-for="option in backendList"
               :id="option.id"
               :key="option.id"
               :name="option.name"
@@ -190,14 +204,62 @@
 
       <div class="full-line">
         <BkLoading
-          :loading="chartLoading.response_time_90th"
+          :loading="chartLoading.response_time_50th"
           class="full-box"
         >
           <LineChart
-            ref="responseTimeRef"
-            :chart-data="chartData['response_time_90th']"
-            :title="t('资源 90th 响应耗时分布')"
-            instance-id="response_time_90th"
+            ref="responseTime50Ref"
+            :chart-data="chartData['response_time_50th']"
+            :title="t('资源 50th 响应耗时分布')"
+            instance-id="response_time_50th"
+            @clear-params="handleClearParams"
+            @report-init="handleReportInit"
+          />
+        </BkLoading>
+      </div>
+
+      <!-- <div class="full-line">
+        <BkLoading
+        :loading="chartLoading.response_time_90th"
+        class="full-box"
+        >
+        <LineChart
+        ref="responseTimeRef"
+        :chart-data="chartData['response_time_90th']"
+        :title="t('资源 90th 响应耗时分布')"
+        instance-id="response_time_90th"
+        @clear-params="handleClearParams"
+        @report-init="handleReportInit"
+        />
+        </BkLoading>
+        </div> -->
+
+      <div class="full-line">
+        <BkLoading
+          :loading="chartLoading.response_time_95th"
+          class="full-box"
+        >
+          <LineChart
+            ref="responseTime95Ref"
+            :chart-data="chartData['response_time_95th']"
+            :title="t('资源 95th 响应耗时分布')"
+            instance-id="response_time_95th"
+            @clear-params="handleClearParams"
+            @report-init="handleReportInit"
+          />
+        </BkLoading>
+      </div>
+
+      <div class="full-line">
+        <BkLoading
+          :loading="chartLoading.response_time_99th"
+          class="full-box"
+        >
+          <LineChart
+            ref="responseTime99Ref"
+            :chart-data="chartData['response_time_99th']"
+            :title="t('资源 99th 响应耗时分布')"
+            instance-id="response_time_99th"
             @clear-params="handleClearParams"
             @report-init="handleReportInit"
           />
@@ -222,6 +284,7 @@ import {
 } from '@/services/source/dashboard';
 import Top from './components/Top.vue';
 import LineChart from './components/LineChart.vue';
+import { getBackendServiceList } from '@/services/source/backendServices';
 import ResourceSearcher from '@/views/operate-data/dashboard/components/ResourceSearcher.vue';
 import DatePicker from '@blueking/date-picker';
 import '@blueking/date-picker/vue3/vue3.css';
@@ -239,6 +302,8 @@ const route = useRoute();
 
 const stageList = ref([]);
 const resourceList = ref([]);
+const backend_id = ref('');
+const backendList = ref([]);
 const dateTime = ref([
   'now-10m',
   'now',
@@ -256,7 +321,10 @@ const metricsList = ref<string[]>([
   'ingress', // 每个资源的 ingress  带宽占用
   'egress', // 每个资源的 egress 带宽占用
   // 'response_time', // 每个资源的响应耗时分布50th 80th 90th取top10资源(response_time_50th response_time_80th response_time_90th)
-  'response_time_90th',
+  // 'response_time_90th',
+  'response_time_50th',
+  'response_time_95th',
+  'response_time_99th',
 ]);
 const statisticsTypes = ref<string[]>([
   'requests_total', // 请求总数
@@ -271,7 +339,10 @@ const appRequestsRef = ref<InstanceType<typeof LineChart>>();
 const resourceRequestsRef = ref<InstanceType<typeof LineChart>>();
 const ingressRef = ref<InstanceType<typeof LineChart>>();
 const egressRef = ref<InstanceType<typeof LineChart>>();
-const responseTimeRef = ref<InstanceType<typeof LineChart>>();
+// const responseTimeRef = ref<InstanceType<typeof LineChart>>();
+const responseTime50Ref = ref<InstanceType<typeof LineChart>>();
+const responseTime95Ref = ref<InstanceType<typeof LineChart>>();
+const responseTime99Ref = ref<InstanceType<typeof LineChart>>();
 const chartLoading = ref<IChartDataLoading>({});
 const searchParams = ref<ISearchParamsType>({
   stage_id: 0,
@@ -279,6 +350,7 @@ const searchParams = ref<ISearchParamsType>({
   time_start: dayjs(formatTime.value[0]).unix(),
   time_end: dayjs(formatTime.value[1]).unix(),
   metrics: '',
+  backend_name: '',
 });
 
 let timeId: NodeJS.Timeout | null = null;
@@ -332,9 +404,26 @@ const getResources = async () => {
     order_by: 'path',
     offset: 0,
     limit: 10000,
+    backend_id: backend_id.value,
+    backend_name: searchParams.value.backend_name,
   };
   const response = await getApigwResources(apigwId.value, pageParams);
   resourceList.value = response.results;
+};
+
+const getBackendServices = async () => {
+  const pageParams = {
+    offset: 0,
+    limit: 10000,
+  };
+  const res = await getBackendServiceList(apigwId.value, pageParams);
+  backendList.value = res?.results || [];
+};
+
+const handleBackendChange = async () => {
+  searchParams.value.backend_name = backendList.value.find((item: any) => item.id === backend_id.value)?.name || '';
+  searchParams.value.resource_id = '';
+  await getResources();
 };
 
 // 请求数据
@@ -354,9 +443,12 @@ const getData = async (searchParams: ISearchParamsType, type: string) => {
   }
 };
 
-const getPageData = () => {
+const getPageData = (step?: string) => {
   metricsList.value.forEach((type: string) => {
-    getData(searchParams.value, type);
+    getData({
+      ...searchParams.value,
+      step,
+    }, type);
   });
 };
 
@@ -414,13 +506,20 @@ const syncParamsToCharts = () => {
   resourceRequestsRef.value!.syncParams(params);
   ingressRef.value!.syncParams(params);
   egressRef.value!.syncParams(params);
-  responseTimeRef.value!.syncParams(params);
+  // responseTimeRef.value!.syncParams(params);
+  responseTime50Ref.value!.syncParams(params);
+  responseTime95Ref.value!.syncParams(params);
+  responseTime99Ref.value!.syncParams(params);
 };
 
 const handleRefreshChange = (interval: string) => {
   clearInterval(timeId);
   timeId = null;
   setIntervalFn(interval);
+};
+
+const handleStepChange = (step: string) => {
+  getPageData(step);
 };
 
 const handleClearParams = () => {
@@ -430,7 +529,9 @@ const handleClearParams = () => {
     time_start: dayjs(formatTime.value[0]).unix(),
     time_end: dayjs(formatTime.value[1]).unix(),
     metrics: '',
+    backend_name: '',
   };
+  backend_id.value = '';
   topRef.value?.reset();
 };
 
@@ -455,6 +556,7 @@ const init = async () => {
   await Promise.all([
     getStages(),
     getResources(),
+    getBackendServices(),
   ]);
   const [time_start, time_end] = formatTime.value;
   if (time_start && time_end) {
@@ -552,6 +654,7 @@ onMounted(() => {
     box-shadow: 0 2px 4px 0 #1919290d;
     border-radius: 2px;
     padding-bottom: 12px;
+    margin-bottom: 16px;
   }
 }
 .full-box {

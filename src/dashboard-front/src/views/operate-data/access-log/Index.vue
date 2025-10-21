@@ -48,12 +48,26 @@
           <BkSelect
             v-model="searchParams.stage_id"
             :clearable="false"
-            searchable
             style="width: 150px;"
             @change="handleStageChange"
           >
             <BkOption
               v-for="option in stageList"
+              :id="option.id"
+              :key="option.id"
+              :name="option.name"
+            />
+          </BkSelect>
+        </BkFormItem>
+        <BkFormItem :label="t('后端服务')">
+          <BkSelect
+            v-model="backend_id"
+            clearable
+            style="width: 150px;"
+            @change="handleBackendChange"
+          >
+            <BkOption
+              v-for="option in backendList"
               :id="option.id"
               :key="option.id"
               :name="option.name"
@@ -351,6 +365,7 @@ import {
 } from '@/services/source/access-log';
 import { exportLogs } from '@/services/source/report';
 import { getApigwResources } from '@/services/source/dashboard';
+import { getBackendServiceList } from '@/services/source/backendServices';
 import {
   AngleUpFill,
   CopyShape,
@@ -393,12 +408,14 @@ const pagination = ref({
   limit: 10,
   showTotalCount: true,
 });
+const backend_id = ref('');
 const searchParams = ref<ISearchParamsInterface>({
   stage_id: 0,
   resource_id: '',
   time_start: '',
   time_end: '',
   query: '',
+  backend_name: '',
 });
 const tableEmptyConf = ref({
   emptyType: '',
@@ -521,6 +538,7 @@ const excludeObj = ref<string[]>([]);
 // });
 const chartData: Record<string, any> = ref({});
 const stageList = ref([]);
+const backendList = ref([]);
 const isAISliderShow = ref(false);
 const aiRequestMessage = ref('');
 
@@ -672,6 +690,8 @@ const getResources = async () => {
     order_by: 'path',
     offset: 0,
     limit: 10000,
+    backend_id: backend_id.value,
+    backend_name: searchParams.value.backend_name,
   };
 
   try {
@@ -840,6 +860,15 @@ const getApigwStages = async () => {
   }
 };
 
+const getBackendServices = async () => {
+  const pageParams = {
+    offset: 0,
+    limit: 10000,
+  };
+  const res = await getBackendServiceList(apigwId.value, pageParams);
+  backendList.value = res?.results || [];
+};
+
 const getPayload = () => {
   const params: any = {
     ...searchParams.value,
@@ -1000,13 +1029,12 @@ const handleDownload = async (event: Event) => {
     params.offset = (pagination.value.current - 1) * pagination.value.limit;
     params.limit = 10000;
 
-    const res = await exportLogs(apigwId.value, params, path);
-    if (res.success) {
-      Message({
-        message: t('导出成功'),
-        theme: 'success',
-      });
-    }
+    await exportLogs(apigwId.value, params, path);
+
+    Message({
+      message: t('导出成功'),
+      theme: 'success',
+    });
   }
   catch (err) {
     const error = err as Error;
@@ -1044,6 +1072,13 @@ const handleStageChange = (value: number) => {
   searchParams.value.stage_id = value;
   pagination.value.current = 1;
   getSearchData();
+};
+
+const handleBackendChange = async () => {
+  searchParams.value.backend_name = backendList.value.find((item: any) => item.id === backend_id.value)?.name || '';
+  searchParams.value.resource_id = '';
+  await getResources();
+  await getSearchData();
 };
 
 const handleSearch = (value: string) => {
@@ -1088,6 +1123,8 @@ const handleClearFilterKey = () => {
   if (stageList.value.length) {
     searchParams.value.stage_id = stageList.value[0].id;
   }
+  backend_id.value = '';
+  searchParams.value.backend_name = '';
   searchParams.value.resource_id = '';
   [datePickerRef.value.shortcut] = [accessLogStore.datepickerShortcuts[1]];
   dateValue.value = [];
@@ -1121,6 +1158,7 @@ const chartResize = () => {
 
 const initData = async () => {
   await getApigwStages();
+  await getBackendServices();
   await getResources();
   await getSearchData();
 };

@@ -26,8 +26,14 @@ class UpstreamHashOnEnum(str, YamlRepresenterEnum):
 
 
 class UpstreamTypeEnum(str, YamlRepresenterEnum):
+    # Round robin balancing with weights
     ROUNDROBIN = "roundrobin"
+    # Consistent hash
     CHASH = "chash"
+    # Pick the node with minimum latency
+    EWMA = "ewma"
+    # Picks the node with the lowest value of (active_conn + 1) / weight
+    LEAST_CONN = "least_conn"
 
 
 class UpstreamSchemeEnum(str, YamlRepresenterEnum):
@@ -53,6 +59,12 @@ class UpstreamCheckActiveTypeEnum(str, YamlRepresenterEnum):
 
 
 class ResourceRewriteHeadersStrategyEnum(str, YamlRepresenterEnum):
+    """deprecated, will be removed in the future
+    append: 追加
+    inherit: 继承
+    override: 重写
+    """
+
     APPEND = "append"  # 追加
     INHERIT = "inherit"  # 继承
     OVERRIDE = "override"  # 重写

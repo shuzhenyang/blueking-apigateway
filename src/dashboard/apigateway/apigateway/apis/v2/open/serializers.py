@@ -182,6 +182,11 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
     url = serializers.SerializerMethodField(help_text="MCPServer 访问 URL")
     detail_url = serializers.SerializerMethodField(help_text="MCPServer 网关站点详情 URL")
 
+    updated_by = serializers.CharField(read_only=True, help_text="更新人")
+    created_by = serializers.CharField(read_only=True, help_text="创建人")
+    updated_time = serializers.DateTimeField(read_only=True, help_text="更新时间")
+    created_time = serializers.DateTimeField(read_only=True, help_text="创建时间")
+
     def get_stage(self, obj) -> Dict[str, Any]:
         return self.context["stages"][obj.stage.id]
 
@@ -250,6 +255,7 @@ class MCPServerAppPermissionApplyCreateOutputSLZ(serializers.Serializer):
 class MCPServerAppPermissionRecordListInputSLZ(serializers.Serializer):
     bk_app_code = serializers.CharField(required=True, validators=[BKAppCodeValidator()], help_text="蓝鲸应用 ID")
     mcp_server_id = serializers.IntegerField(required=False, allow_null=True, help_text="MCPServer ID")
+    record_id = serializers.IntegerField(required=False, allow_null=True, help_text="申请记录 ID")
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.MCPServerAppPermissionRecordListInputSLZ"
@@ -261,7 +267,7 @@ class MCPServerAppPermissionApplyRecordListOutputSLZ(serializers.Serializer):
     bk_app_code = serializers.CharField(read_only=True, help_text="蓝鲸应用 ID")
     applied_by = serializers.CharField(read_only=True, help_text="申请人")
     applied_time = serializers.DateTimeField(read_only=True, help_text="申请时间")
-    handled_by = serializers.ListField(child=serializers.CharField(), help_text="处理人")
+    handled_by = serializers.CharField(read_only=True, help_text="处理人")
     handled_time = serializers.DateTimeField(read_only=True, help_text="处理时间")
     status = serializers.CharField(read_only=True, help_text="审批状态")
     status_display = serializers.SerializerMethodField(read_only=True)

@@ -38,7 +38,21 @@
             class="cur-icon"
           >
             <svg class="icon svg-icon">
-              <use :xlink:href="`#icon-ag-plugin-${curPluginInfo.code}`" />
+              <use
+                :xlink:href="`#icon-ag-plugin-${curPluginInfo.code}`"
+                fill="#3a84f6"
+              />
+            </svg>
+          </div>
+          <div
+            v-else-if="PLUGIN_ICONS_MIN.includes(curPluginInfo?.code)"
+            class="cur-icon"
+          >
+            <svg class="icon svg-icon small">
+              <use
+                :xlink:href="`#icon-ag-plugin-${curPluginInfo.code}`"
+                fill="#3a84f6"
+              />
             </svg>
           </div>
           <div
@@ -220,7 +234,10 @@ import { json2Yaml, yaml2Json } from '@/utils';
 import WhitelistTable from './WhitelistTable.vue';
 import { useStage } from '@/stores';
 import { onClickOutside } from '@vueuse/core';
-import { PLUGIN_ICONS } from '@/constants';
+import {
+  PLUGIN_ICONS,
+  PLUGIN_ICONS_MIN,
+} from '@/constants';
 
 interface IProps {
   curPlugin: any
@@ -722,19 +739,26 @@ onClickOutside(pluginSelectRef, () => {
     cursor: pointer;
 
     .cur-icon {
+      display: flex;
       width: 56px;
       height: 56px;
       font-size: 28px;
       font-weight: 700;
       line-height: 56px;
       color: #3a84f6;
-      text-align: center;
       background: #EAEBF0;
       border-radius: 50%;
+      justify-content: center;
+      align-items: center;
 
       .svg-icon {
         width: 56px;
         height: 56px;
+
+        &.small {
+          width: 28px;
+          height: 28px;
+        }
       }
     }
   }

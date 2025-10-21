@@ -162,21 +162,35 @@
                   @click="() => handleChoosePlugin(item)"
                   @mouseenter="() => handlePluginHover((item.code))"
                 >
-                  <div class="plungin-head">
-                    <span
+                  <div class="plugin-head">
+                    <div
                       v-if="PLUGIN_ICONS.includes(item.code || item.type)"
                       class="plugin-icon"
                     >
                       <svg class="icon svg-icon">
-                        <use :xlink:href="`#icon-ag-plugin-${item.code || item.type}`" />
+                        <use
+                          :xlink:href="`#icon-ag-plugin-${item.code || item.type}`"
+                          fill="#3a84f6"
+                        />
                       </svg>
-                    </span>
-                    <span
+                    </div>
+                    <div
+                      v-else-if="PLUGIN_ICONS_MIN.includes(item.code || item.type)"
+                      class="plugin-icon"
+                    >
+                      <svg class="icon svg-icon small">
+                        <use
+                          :xlink:href="`#icon-ag-plugin-${item.code || item.type}`"
+                          fill="#3a84f6"
+                        />
+                      </svg>
+                    </div>
+                    <div
                       v-else
                       class="plugin-icon"
                     >
                       {{ pluginCodeFirst(item.code || item.type) }}
-                    </span>
+                    </div>
                     <span
                       v-show="isBound(item)"
                       class="bindding-text"
@@ -382,7 +396,10 @@ import {
 import ConfigDisplayTable from './ConfigDisplayTable.vue';
 import { getStageStatus } from '@/utils';
 import { useRouteParams } from '@vueuse/router';
-import { PLUGIN_ICONS } from '@/constants';
+import {
+  PLUGIN_ICONS,
+  PLUGIN_ICONS_MIN,
+} from '@/constants';
 
 interface IProps {
   resourceId?: number
@@ -862,27 +879,34 @@ init();
         box-shadow: 0 2px 4px 0 rgb(25 25 41 / 25.1%);
       }
 
-      .plungin-head {
+      .plugin-head {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 12px;
 
         .plugin-icon {
-          display: inline-block;
+          display: flex;
           width: 48px;
           height: 48px;
+          overflow: hidden;
           font-size: 24px;
           font-weight: 700;
           line-height: 48px;
           color: #3a84f6;
-          text-align: center;
           background-color: #e2edfd;
           border-radius: 50%;
+          align-items: center;
+          justify-content: center;
 
           .svg-icon {
             width: 48px;
             height: 48px;
+
+            &.small {
+              width: 24px;
+              height: 24px;
+            }
           }
         }
 

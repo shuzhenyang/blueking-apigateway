@@ -219,18 +219,18 @@
             <div class="flex-1 table-wrapper">
               <AgTable
                 ref="tableRef"
-                v-model:selected-row-keys="selectedRowKeys"
                 v-model:table-data="tableData"
-                :source="getTableData"
+                :api-method="getTableData"
                 :columns="columns"
-                row-key="id"
-                :filter-row="null"
-                hover
+                :show-selection="isShowSelection"
+                :table-row-key="'id'"
+                show-settings
                 resizable
                 @filter-change="handleFilterChange"
-                @select-change="handleSelectChange"
                 @sort-change="handleSortChange"
-                @clear-queries="handleClearQueries"
+                @selection-change="handleSelectionChange"
+                @clear-filter="handleClearQueries"
+                @clear-selection="handleClearSelection"
               />
             </div>
           </div>
@@ -457,7 +457,6 @@ const tableRef = useTemplateRef('tableRef');
 const tableQueries = ref<Record<string, any>>({});
 const selectedRowKeys = ref<number[]>([]);
 const selectedRows = ref<any[]>([]);
-
 // 导入下拉
 const importDropData = ref([{
   value: 'config',
@@ -632,6 +631,10 @@ const deleteTableColumns = [
 
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
 
+const isShowSelection = computed(() => {
+  return showBatch.value;
+});
+
 const customMethodsList = computed(() => {
   const methods = HTTP_METHODS.map(item => ({
     label: item.name,
@@ -664,6 +667,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
       colKey: 'name',
       title: t('资源名称'),
       minWidth: 170,
+      fixed: 'left',
       // ellipsis: {
       //   props: { placement: 'right' },
       //   content: (h, { row }) => row.name,
@@ -685,9 +689,6 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
             }}
             onClick={() => handleShowInfo(row.id)}
           >
-            <span>
-              {row.name}
-            </span>
             {row.has_updated
               ? (
                 <div
@@ -696,11 +697,25 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
                     placement: 'right',
                     delay: 300,
                   }}
-                  class="inline-block w-8px h-8px ml-4px cursor-pointer border-1px border-solid border-#ff9c01 rounded-1/2 bg-#fff3e1"
+                  class="inline-block w-8px h-8px mr-4px cursor-pointer border-1px border-solid border-#ff9c01 rounded-1/2 bg-#fff3e1"
                 >
                 </div>
               )
               : ''}
+            <span>
+              {row.name}
+            </span>
+            {
+              row.auth_config?.auth_verified_required === false && row.auth_config.app_verified_required === false
+                ? (
+                  <ag-icon
+                    v-bk-tooltips={{ content: t('该资源未配置认证方式，存在安全风险。') + t('请点击"编辑"按钮为资源配置适当的认证方式。') + t('如当前配置符合预期，可忽略该提示。') }}
+                    name="exclamation-circle-fill"
+                    class="ml-6px color-#F59500"
+                  />
+                )
+                : ''
+            }
           </div>
         </div>
       ),
@@ -735,14 +750,14 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
     {
       colKey: 'plugin_count',
       title: t('插件数'),
-      width: 80,
       cell: (h, { row }) => (
         <bk-button
           text
           theme="primary"
           onClick={() => handleShowInfo(row.id, 'pluginManage')}
         >
-          {row.plugin_count}
+          <span class="mr-4px">{row.plugin_count}</span>
+          <ag-icon name="cog" />
         </bk-button>
       ),
     },
@@ -874,14 +889,6 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
       ),
     },
   ];
-  if (showBatch.value) {
-    cols.unshift({
-      colKey: 'row-select',
-      type: 'multiple',
-      width: 80,
-      fixed: 'left',
-    });
-  }
   return cols;
 });
 
@@ -1009,7 +1016,9 @@ watch(
 );
 
 watch(tableQueries, () => {
-  tableRef.value!.fetchData(tableQueries.value);
+  nextTick(() => {
+    tableRef.value!.fetchData(tableQueries.value);
+  });
 }, { deep: true });
 
 watch(
@@ -1412,6 +1421,11 @@ onBeforeRouteLeave((to) => {
 
 const getTableData = async (params: Record<string, any> = {}) => getResourceList(gatewayId, params);
 
+const handleClearSelection = () => {
+  selectedRows.value = [];
+  selectedRowKeys.value = [];
+};
+
 const handleClearQueries = () => {
   tableQueries.value = {};
   searchValue.value = [];
@@ -1460,8 +1474,9 @@ const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterValue) =>
   });
 };
 
-const handleSelectChange: PrimaryTableProps['onSelectChange'] = (selectedRowKeys, options) => {
-  selectedRows.value = options.selectedRowData;
+const handleSelectionChange: PrimaryTableProps['onSelectChange'] = ({ selections, selectionsRowKeys }) => {
+  selectedRows.value = selections;
+  selectedRowKeys.value = selectionsRowKeys;
 };
 
 const handleSortChange: PrimaryTableProps['onSortChange'] = (sort) => {
@@ -1601,6 +1616,7 @@ onMounted(() => {
 }
 
 .resource-setting-layout {
+
   :deep(.bk-resize-layout-aside-content) {
     background-color: #fff;
   }
@@ -1609,6 +1625,7 @@ onMounted(() => {
 .resource-detail {
   max-height: calc(100vh - 165px);
   overflow-y: auto;
+
   &.show-notice {
     max-height: calc(100vh - 205px);
   }

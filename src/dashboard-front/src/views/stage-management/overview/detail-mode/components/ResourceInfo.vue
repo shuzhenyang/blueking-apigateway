@@ -39,13 +39,13 @@
       <AgTable
         v-model:table-data="tableData"
         :columns="columns"
-        row-key="id"
+        table-row-key="id"
+        show-settings
         :filter-row="null"
         :frontend-search="isSearching"
-        hover
-        local
+        local-page
         @filter-change="handleFilterChange"
-        @clear-queries="handleClearQueries"
+        @clear-filter="handleClearQueries"
       />
     </div>
   </template>
@@ -151,14 +151,28 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'name',
     title: t('资源名称'),
+    ellipsis: true,
     cell: (h, { row }) => (
-      <bk-button
-        theme="primary"
-        text
-        onClick={() => showDetails(row)}
-      >
-        { row.name }
-      </bk-button>
+      <div>
+        <bk-button
+          theme="primary"
+          text
+          onClick={() => showDetails(row)}
+        >
+          { row.name }
+        </bk-button>
+        {
+          hasNoVerification(row)
+            ? (
+              <ag-icon
+                v-bk-tooltips={{ content: t('该资源未配置认证方式，存在安全风险。') + t('如当前配置符合预期，可忽略该提示。') }}
+                name="exclamation-circle-fill"
+                class="ml-6px color-#F59500"
+              />
+            )
+            : ''
+        }
+      </div>
     ),
   },
   {
@@ -370,6 +384,11 @@ const handleClearQueries = () => {
 
 const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filters) => {
   Object.assign(filterValue.value, filters);
+};
+
+const hasNoVerification = (row: any) => {
+  const config = JSON.parse(row.contexts?.resource_auth?.config || '{}');
+  return config.auth_verified_required === false && config.app_verified_required === false;
 };
 
 defineExpose({ reload: init });
