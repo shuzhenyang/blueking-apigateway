@@ -100,6 +100,7 @@
       <AgTable
         ref="permissionTableRef"
         v-model:table-data="tableData"
+        v-model:selected-row-keys="selectedRowKeys"
         show-settings
         resizable
         show-selection
@@ -107,7 +108,8 @@
         :expandable="expandableConfig"
         :expanded-row-keys="expandableConfig.expandedRowKeys"
         :show-first-full-row="selections.length > 0"
-        :filter-value="filterData"
+        :max-limit-config="{ allocatedHeight: 240, mode: 'tdesign'}"
+        :filter-value="filterValue"
         :api-method="getTableData"
         :columns="getTableColumns"
         :row-class-name="handleSetRowClass"
@@ -115,7 +117,6 @@
         @filter-change="handleFilterChange"
         @selection-change="handleSelectionChange"
         @clear-filter="handleClearFilter"
-        @clear-selection="handleClearSelection"
         @request-done="handleRequestDone"
       >
         <template #expandedRow="{row}">
@@ -189,7 +190,7 @@
 
 <script lang="tsx" setup>
 import { cloneDeep } from 'lodash-es';
-import { Form, Loading, Message } from 'bkui-vue';
+import { Button, Form, Loading, Message, Popover } from 'bkui-vue';
 import {
   getApigwResources,
   getPermissionApplyList,
@@ -202,7 +203,6 @@ import {
   usePermission,
   useUserInfo,
 } from '@/stores';
-import { useTableFilterChange } from '@/hooks/use-table-filter-change';
 import type { IApprovalListItem } from '@/types/permission';
 import type { ITableMethod } from '@/types/common';
 import { sortByKey } from '@/utils';
@@ -220,13 +220,13 @@ const userStore = useUserInfo();
 const permissionStore = usePermission();
 const featureFlagStore = useFeatureFlag();
 const { t } = useI18n();
-const { handleTableFilterChange } = useTableFilterChange();
 
 const permissionTableRef = useTemplateRef<InstanceType<typeof AgTable> & ITableMethod>('permissionTableRef');
 const approveForm = ref<InstanceType<typeof Form> & { validate: () => void }>();
 const childPermTableRef = ref([]);
 const tableData = ref([]);
 const selections = ref([]);
+const selectedRowKeys = ref([]);
 const resourceList = ref([]);
 const childrenColumns = shallowRef([
   {
@@ -251,11 +251,8 @@ const childrenColumns = shallowRef([
     ellipsis: true,
   },
 ]);
-const filterData = ref({
-  bk_app_code: '',
-  applied_by: '',
-  grant_dimension: '',
-});
+const filterData = ref({});
+const filterValue = ref({});
 const curAction = ref({
   ids: [],
   status: '',
@@ -270,7 +267,6 @@ const curPermission = ref({
   isSelectAll: true,
   resource_ids: [],
 });
-const curExpandRow = ref({});
 const expandableConfig = ref({
   expandColumn: false,
   expandedRowKeys: [],
@@ -338,6 +334,7 @@ const approveFormMessage = computed(() => {
 watch(
   () => filterData.value,
   () => {
+    filterValue.value = Object.assign({}, filterData.value);
     handleSearch();
   },
   { deep: true },
@@ -481,8 +478,8 @@ const getTableColumns = computed(() => {
         ) {
           return (
             <div>
-              <BkPopover content={t('请选择资源')}>
-                <BkButton
+              <Popover content={t('请选择资源')}>
+                <Button
                   class="m-r-10px is-disabled"
                   theme="primary"
                   text
@@ -491,9 +488,9 @@ const getTableColumns = computed(() => {
                   }}
                 >
                   {t('全部通过')}
-                </BkButton>
-              </BkPopover>
-              <BkButton
+                </Button>
+              </Popover>
+              <Button
                 theme="primary"
                 text
                 onClick={(e: Event) => {
@@ -501,15 +498,15 @@ const getTableColumns = computed(() => {
                 }}
               >
                 {t('全部驳回')}
-              </BkButton>
+              </Button>
             </div>
           );
         }
         else {
           return (
             <div>
-              <BkButton
-                class="m-r-10px"
+              <Button
+                class="mr-10px"
                 theme="primary"
                 text
                 onClick={(e: Event) => {
@@ -517,8 +514,8 @@ const getTableColumns = computed(() => {
                 }}
               >
                 {row?.isSelectAll ? t('全部通过') : t('部分通过')}
-              </BkButton>
-              <BkButton
+              </Button>
+              <Button
                 theme="primary"
                 text
                 onClick={(e: Event) => {
@@ -526,7 +523,7 @@ const getTableColumns = computed(() => {
                 }}
               >
                 {t('全部驳回')}
-              </BkButton>
+              </Button>
             </div>
           );
         }
@@ -571,6 +568,11 @@ const handleBatchApply = () => {
   batchApplyDialogConf.isShow = true;
 };
 
+const handleSelectionChange: PrimaryTableProps['onSelectChange'] = ({ selections: selected, selectionsRowKeys }) => {
+  selections.value = selected;
+  selectedRowKeys.value = selectionsRowKeys;
+};
+
 // 折叠table 多选发生变化触发
 const handleRowSelectionChange = (row: Partial<IApprovalListItem>, rowSelections) => {
   const { selections } = rowSelections;
@@ -585,15 +587,9 @@ const handleRowSelectionChange = (row: Partial<IApprovalListItem>, rowSelections
 
 // 处理表头筛选联动搜索框
 const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterItem: FilterValue) => {
-  handleTableFilterChange({
-    filterItem,
-    filterData,
-  });
+  filterData.value = Object.assign(filterData.value, filterItem);
+  filterValue.value = Object.assign({}, filterItem);
   getResourceList();
-};
-
-const handleSelectionChange: PrimaryTableProps['onSelectChange'] = ({ selections: selected }) => {
-  selections.value = selected;
 };
 
 // 批量审批api
@@ -617,12 +613,13 @@ const updateStatus = async () => {
   await updatePermissionStatus(apigwId.value, params);
   batchApplyDialogConf.isShow = false;
   applyActionDialogConf.isShow = false;
-  getList();
   Message({
     message: t('操作成功！'),
     theme: 'success',
   });
-  resetSelections(permissionTableRef.value);
+  handleClearSelection();
+  getList();
+  getResourceList();
 };
 
 // 全部通过
@@ -704,7 +701,7 @@ const handleRowClick = ({ e, row }: {
     row.isExpand = !row.isExpand;
     expandableConfig.value.expandedRowKeys
       = expandableConfig.value.expandedRowKeys.filter(item => item === row.id);
-    curExpandRow.value = row.isExpand ? row : {};
+    const curExpandRow = row.isExpand ? row : {};
     if (row.isExpand) {
       expandableConfig.value.expandedRowKeys.push(row.id);
     }
@@ -713,7 +710,7 @@ const handleRowClick = ({ e, row }: {
         = expandableConfig.value.expandedRowKeys.filter(item => item !== row.id);
     }
     tableData.value.forEach((item) => {
-      const isExpand = item.id === curExpandRow.value.id;
+      const isExpand = item.id === curExpandRow.id;
       item.isExpand = isExpand;
       if (!isExpand) {
         item = Object.assign(item, {
@@ -727,14 +724,11 @@ const handleRowClick = ({ e, row }: {
 };
 
 const handleClearFilter = () => {
-  filterData.value = Object.assign({}, {
-    bk_app_code: '',
-    applied_by: '',
-    grant_dimension: '',
-  });
+  filterData.value = {};
 };
 
 const handleClearSelection = () => {
+  tableRef.value.handleResetSelection();
   selections.value = [];
 };
 

@@ -416,7 +416,7 @@ watch(
     () => route.name,
   ],
   () => {
-    activeMenuKey.value = (route.meta?.menuKey || route.name) as string;
+    activeMenuKey.value = (route.meta?.matchRoute || route.name) as string;
     gatewayId.value = Number(route.params.id || 0);
     headerTitle.value = route.meta.title as string;
     // 设置全局网关
@@ -583,6 +583,7 @@ onMounted(() => {
         position: absolute;
         top: 1px;
         left: 120px;
+
         &.en {
           left: 142px;
         }
@@ -607,6 +608,7 @@ onMounted(() => {
             position: absolute;
             top: 6px;
             left: 58px;
+
              &.en {
               left: 130px;
             }

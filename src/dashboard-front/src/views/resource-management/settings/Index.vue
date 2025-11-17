@@ -21,7 +21,8 @@
     v-show="!gatewayStore.isProgrammableGateway"
     class="h-full"
   >
-    <ResourceSettingTopBar
+    <TopBar
+      :gateway-id="gatewayId"
       :current-source="curResource"
       :is-detail="!isCollapsed"
       :latest="versionConfigs.needNewVersion"
@@ -93,18 +94,32 @@
                   v-show="showBatch"
                   class="batch-status"
                 >
-                  <BkButton
-                    class="mr-8px"
-                    @click="() => handleBatchOperate('edit')"
+                  <BkPopover
+                    :content="t('请先勾选资源')"
+                    :disabled="selectedRowKeys?.length > 0"
+                    :popover-delay="0"
                   >
-                    {{ t('编辑资源') }}
-                  </BkButton>
-                  <BkButton
-                    class="mr-8px"
-                    @click="() => handleBatchOperate('delete')"
+                    <BkButton
+                      class="mr-8px"
+                      :disabled="!selectedRowKeys?.length"
+                      @click="() => handleBatchOperate('edit')"
+                    >
+                      {{ t('编辑资源') }}
+                    </BkButton>
+                  </BkPopover>
+                  <BkPopover
+                    :content="t('请先勾选资源')"
+                    :disabled="selectedRowKeys?.length > 0"
+                    :popover-delay="0"
                   >
-                    {{ t('删除资源') }}
-                  </BkButton>
+                    <BkButton
+                      class="mr-8px"
+                      :disabled="!selectedRowKeys?.length"
+                      @click="() => handleBatchOperate('delete')"
+                    >
+                      {{ t('删除资源') }}
+                    </BkButton>
+                  </BkPopover>
                 </div>
                 <AgDropdown
                   v-show="!isCollapsed"
@@ -223,6 +238,7 @@
                 :api-method="getTableData"
                 :columns="columns"
                 :show-selection="isShowSelection"
+                :show-first-full-row="selectedRows.length > 0"
                 :table-row-key="'id'"
                 show-settings
                 resizable
@@ -230,13 +246,15 @@
                 @sort-change="handleSortChange"
                 @selection-change="handleSelectionChange"
                 @clear-filter="handleClearQueries"
-                @clear-selection="handleClearSelection"
               />
             </div>
           </div>
         </template>
         <template #aside>
-          <aside v-if="!isCollapsed">
+          <aside
+            v-if="!isCollapsed"
+            id="resource-setting-aside"
+          >
             <BkTab
               v-model:active="active"
               class="resource-tab-panel"
@@ -413,7 +431,7 @@ import AgDropdown from '@/components/ag-dropdown/Index.vue';
 import PluginManage from '@/components/plugin-manage/Index.vue';
 import ResourceDocViewer from './components/ResourceDocViewer.vue';
 import AgTable from '@/components/ag-table/Index.vue';
-import ResourceSettingTopBar from './components/TopBar.vue';
+import TopBar from './components/TopBar.vue';
 import PageNotFound from '@/views/404.vue';
 // import mitt from '@/common/event-bus';
 import {
@@ -437,6 +455,7 @@ import CreateResourceVersion from '@/components/create-resource-version/Index.vu
 import VersionDiff from '@/components/version-diff/Index.vue';
 import ResourceDocSlider from '../components/ResourceDocSlider.vue';
 import RenderTagOverflow from '@/components/render-tag-overflow/Index.vue';
+import { useRouteQuery } from '@vueuse/router';
 
 interface ApigwIDropList extends IDropList { tooltips?: string }
 
@@ -451,6 +470,14 @@ const gatewayStore = useGateway();
 const resourceVersionStore = useResourceVersion();
 const resourceSettingStore = useResourceSetting();
 const featureFlagStore = useFeatureFlag();
+
+// 资源列表 url query
+const queryKeyword = useRouteQuery('keyword');
+const queryName = useRouteQuery('name');
+const queryPath = useRouteQuery('path');
+const queryMethod = useRouteQuery('method');
+const queryBackendName = useRouteQuery('backend_name');
+const queryBackendId = useRouteQuery('backend_id');
 
 const tableData = ref<any[]>([]);
 const tableRef = useTemplateRef('tableRef');
@@ -475,9 +502,9 @@ const exportDropData = ref<ApigwIDropList[]>([
   },
   {
     value: 'filtered',
-    label: t('已筛选资源'),
+    label: t('(进入批量操作) 选择资源'),
     disabled: false,
-    tooltips: t('请先筛选资源'),
+    tooltips: '',
   },
   // { value: 'selected', label: t('已选资源'), disabled: false, tooltips: t('请先勾选资源') },
 ]);
@@ -506,7 +533,7 @@ const active = ref('resourceInfo');
 
 const isComponentLoading = ref(false);
 
-const searchValue = ref([]);
+const searchValue = ref<any[]>([]);
 const searchData = shallowRef([
   // {
   //   name: t('模糊查询'),
@@ -534,6 +561,11 @@ const searchData = shallowRef([
     name: t('后端服务'),
     id: 'backend_name',
     placeholder: t('请输入后端服务'),
+  },
+  {
+    name: t('后端服务ID'),
+    id: 'backend_id',
+    placeholder: t('请输入后端服务ID'),
   },
 ]);
 
@@ -724,11 +756,13 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
       colKey: 'backend.name',
       title: t('后端服务'),
       width: 130,
+      ellipsis: true,
     },
     {
       colKey: 'method',
       title: t('前端请求方法'),
       width: 130,
+      ellipsis: true,
       cell: (h, { row }) => (
         <bk-tag theme={METHOD_THEMES[row.method as keyof typeof METHOD_THEMES]}>
           {row.method}
@@ -765,6 +799,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
       colKey: 'docs',
       title: t('文档'),
       width: 80,
+      ellipsis: true,
       cell: (h, { row }) => (
         <div>
           {row.docs?.length
@@ -846,7 +881,8 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
     {
       colKey: 'updated_time',
       title: t('更新时间'),
-      minWidth: 220,
+      width: 260,
+      ellipsis: true,
       sorter: true,
     },
     {
@@ -928,8 +964,8 @@ watch(
     });
 
     exportDropData.value.forEach((e: IDropList) => {
-      if (e.value === 'filtered') {
-        e.disabled = !v.length || !searchValue.value.length;
+      if (['filtered'].includes(e.value)) {
+        e.disabled = false;
       }
     });
   },
@@ -971,6 +1007,8 @@ watch(
 watch(
   searchValue,
   () => {
+    tableQueries.value = { order_by: tableQueries.value.order_by };
+
     if (route.query?.backend_id) {
       const { backend_id } = route.query;
       tableQueries.value.backend_id = backend_id;
@@ -996,16 +1034,41 @@ watch(
             tableQueries.value[e.id] = e.values[0].id;
           }
         }
+
+        if (e.id === e.name) {
+          queryKeyword.value = e.name;
+        }
+        else if (e.id === 'name') {
+          queryName.value = e.values[0].id;
+        }
+        else if (e.id === 'path') {
+          queryPath.value = e.values[0].id;
+        }
+        else if (e.id === 'method') {
+          queryMethod.value = e.values?.map((item: any) => item.id)?.join(',');
+        }
+        else if (e.id === 'backend_name') {
+          queryBackendName.value = e.values[0].id;
+        }
+        else if (e.id === 'backend_id') {
+          queryBackendId.value = e.values[0].id;
+        }
       });
     }
     else {
       tableQueries.value = {};
+      queryKeyword.value = undefined;
+      queryName.value = undefined;
+      queryPath.value = undefined;
+      queryMethod.value = undefined;
+      queryBackendName.value = undefined;
+      queryBackendId.value = undefined;
     }
 
     exportDropData.value.forEach((e: IDropList) => {
       // 已选资源
-      if (e.value === 'filtered') {
-        e.disabled = !searchValue.value.length;
+      if (['filtered'].includes(e.value)) {
+        e.disabled = false;
       }
     });
   },
@@ -1024,9 +1087,94 @@ watch(tableQueries, () => {
 watch(
   () => route.query,
   () => {
+    if (route.query?.keyword) {
+      queryKeyword.value = route.query.keyword as string;
+      const searchValueItem = searchValue.value.find((item: any) => item.id === queryKeyword.value);
+      if (!searchValueItem) {
+        searchValue.value.push({
+          id: queryKeyword.value,
+          name: queryKeyword.value,
+          type: 'text',
+        });
+      }
+    }
+    if (route.query?.name) {
+      queryName.value = route.query.name as string;
+      const searchValueItem = searchValue.value.find((item: any) => item.id === 'name');
+      if (!searchValueItem) {
+        searchValue.value.push({
+          id: 'name',
+          name: t('资源名称'),
+          values: [
+            {
+              id: queryName.value,
+              name: queryName.value,
+            },
+          ],
+        });
+      }
+    }
+    if (route.query?.path) {
+      queryPath.value = route.query.path as string;
+      const searchValueItem = searchValue.value.find((item: any) => item.id === 'path');
+      if (!searchValueItem) {
+        searchValue.value.push({
+          id: 'path',
+          name: t('前端请求路径'),
+          values: [
+            {
+              id: queryPath.value,
+              name: queryPath.value,
+            },
+          ],
+        });
+      }
+    }
+    if (route.query?.method) {
+      queryMethod.value = route.query.method as string;
+      const searchValueItem = searchValue.value.find((item: any) => item.id === 'method');
+      if (!searchValueItem) {
+        searchValue.value.push({
+          id: 'method',
+          name: t('前端请求方法'),
+          values: queryMethod.value.split(',').map((item: string) => ({
+            id: item,
+            name: item,
+          })),
+        });
+      }
+    }
+    if (route.query?.backend_name) {
+      queryBackendName.value = route.query.backend_name as string;
+      const searchValueItem = searchValue.value.find((item: any) => item.id === 'backend_name');
+      if (!searchValueItem) {
+        searchValue.value.push({
+          id: 'backend_name',
+          name: t('后端服务'),
+          values: [
+            {
+              id: queryBackendName.value,
+              name: queryBackendName.value,
+            },
+          ],
+        });
+      }
+    }
     if (route.query?.backend_id) {
-      const { backend_id } = route.query;
-      tableQueries.value.backend_id = backend_id;
+      queryBackendId.value = route.query.backend_id as string;
+      const searchValueItem = searchValue.value.find((item: any) => item.id === 'backend_id');
+      if (!searchValueItem) {
+        searchValue.value.push({
+          id: 'backend_id',
+          name: t('后端服务ID'),
+          values: [
+            {
+              id: queryBackendId.value,
+              name: queryBackendId.value,
+            },
+          ],
+        });
+      }
     }
     if (resourceSettingStore.previousPagination) {
       nextTick(() => {
@@ -1129,8 +1277,7 @@ const handleShowBatch = () => {
 // 退出批量操作
 const handleOutBatch = () => {
   showBatch.value = false;
-  selectedRowKeys.value = [];
-  selectedRows.value = [];
+  handleClearSelection();
   exportDropData.value = [
     {
       value: 'all',
@@ -1138,9 +1285,9 @@ const handleOutBatch = () => {
     },
     {
       value: 'filtered',
-      label: t('已筛选资源'),
-      disabled: !searchValue.value.length || !tableData.value.length,
-      tooltips: t('请先筛选资源'),
+      label: t('(进入批量操作) 选择资源'),
+      disabled: false,
+      tooltips: '',
     },
   ];
 };
@@ -1172,15 +1319,6 @@ const handleShowDiff = async () => {
 
 // 处理批量编辑或删除
 const handleBatchOperate = async (type: string) => {
-  if (!selectedRowKeys.value?.length) {
-    Message({
-      message: t('请先勾选资源'),
-      theme: 'warning',
-      width: 'auto',
-    });
-    return;
-  }
-
   dialogData.isShow = true;
   // 批量删除
   if (type === 'delete') {
@@ -1209,6 +1347,10 @@ const handleExport = async ({ value }: { value: string }) => {
       exportParams.resource_filter_condition = undefined;
       exportParams.resource_ids = undefined;
       break;
+  }
+  if (['filtered'].includes(value)) {
+    handleShowBatch();
+    return;
   }
   exportParams.export_type = value;
   exportDialogConfig.exportFileDocType = 'resource';
@@ -1298,9 +1440,9 @@ const handleImport = (v: IDropList) => {
 const handleShowDoc = (data: any, languages = 'zh') => {
   curResource.value = data;
   resourceId.value = data.id; // 资源id
-  docSliderConf.isShowDocSide = true;
   docSliderConf.title = `${t('文档详情')}【${data.name}】`;
   docSliderConf.languages = languages;
+  docSliderConf.isShowDocSide = true;
 };
 
 // 改变侧栏边title
@@ -1424,6 +1566,7 @@ const getTableData = async (params: Record<string, any> = {}) => getResourceList
 const handleClearSelection = () => {
   selectedRows.value = [];
   selectedRowKeys.value = [];
+  tableRef.value?.handleResetSelection();
 };
 
 const handleClearQueries = () => {
