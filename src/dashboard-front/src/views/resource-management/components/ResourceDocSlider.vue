@@ -59,16 +59,31 @@
                     </div>
                   </BkButton>
                 </BkButtonGroup>
-                <div
-                  v-if="hasDoc"
-                  class="absolute right-0 top-7px flex items-center cursor-pointer"
-                  @click="handleTranslateClick"
-                >
-                  <AiBluekingButton :tooltip-options="{ disabled: true }" />
-                  <div class="text-12px gradient-text-color">
-                    {{ language === 'zh' ? t('一键翻译英文') : t('一键翻译中文') }}
+                <template v-if="featureFlagStore.isAIEnabled">
+                  <div
+                    v-if="hasDoc"
+                    v-bk-tooltips="{
+                      content: isTranslating ? t('翻译中') : t('请先创建文档'),
+                      disabled: !isTranslating && hasDocByLanguage(language),
+                    }"
+                    class="absolute right-0 top-7px flex items-center cursor-pointer"
+                    @click="handleTranslateClick"
+                  >
+                    <AiBluekingButton
+                      :disabled="isTranslating || !hasDocByLanguage(language)"
+                      :tooltip-options="{ disabled: true }"
+                    />
+                    <div
+                      class="text-12px"
+                      :class="{
+                        'color-#dcdee5 cursor-not-allowed': isTranslating || !hasDocByLanguage(language),
+                        'gradient-text-color': !isTranslating && hasDocByLanguage(language),
+                      }"
+                    >
+                      {{ language === 'zh' ? t('一键翻译英文') : t('一键翻译中文') }}
+                    </div>
                   </div>
-                </div>
+                </template>
               </div>
             </div>
             <div v-show="isEmpty">
@@ -195,6 +210,7 @@ import { useRouteParams } from '@vueuse/router';
 import AiBluekingButton from '@/components/ai-seek/AiBluekingButton.vue';
 import { getAICompletion } from '@/services/source/ai.ts';
 import hljs from 'highlight.js';
+import { useFeatureFlag } from '@/stores';
 
 interface IProps {
   resource?: object
@@ -223,6 +239,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const featureFlagStore = useFeatureFlag();
 const gatewayId = useRouteParams('id', 0, { transform: Number });
 
 const languagesData = ref([{
@@ -279,12 +296,15 @@ const toolbars = ref<any>({
   subfield: true,
   preview: true,
 });
+const isTranslating = ref(false);
 
 const hasDoc = computed(() => {
   const cnDoc = docData.value.find((e: any) => e.language === 'zh')?.id;
   const enDoc = docData.value.find((e: any) => e.language === 'en')?.id;
   return cnDoc || enDoc;
 });
+
+const hasDocByLanguage = (lang: string) => !!docData.value.find((e: any) => e.language === lang)?.id;
 
 // 渲染highlight的markdown
 const renderHljsMd = (content: string) => {
@@ -363,6 +383,9 @@ const initData = async () => {
 const isDocEmptyByLanguage = (lang: string) => !docData.value.find((item: any) => item.language === lang)?.id;
 
 const handleTranslateClick = async () => {
+  if (isTranslating.value || !hasDocByLanguage(language.value)) {
+    return;
+  }
   // 要翻译成什么语言
   const targetLanguage = language.value === 'zh' ? 'en' : 'zh';
   const input = docData.value.find((item: any) => item.language === language.value)?.content;
@@ -373,11 +396,13 @@ const handleTranslateClick = async () => {
         theme: 'primary',
         message: t('获取翻译中'),
       });
+      isTranslating.value = true;
       const response = await getAICompletion(gatewayId.value, {
         inputs: {
           input,
           type: 'doc_translate',
           enable_streaming: false,
+          language: targetLanguage,
         },
       });
       await saveResourceDocs(gatewayId.value, resource.id, {
@@ -386,10 +411,11 @@ const handleTranslateClick = async () => {
       });
       Message({
         theme: 'success',
-        message: t('{lang}文档创建成功', { lang: language.value === 'zh' ? t('英文') : t('中文') }),
+        message: t('{lang}文档创建成功', { lang: targetLanguage === 'zh' ? t('中文') : t('英文') }),
       });
       initData();
       emit('fetch');
+      isTranslating.value = false;
     }
     else {
       InfoBox({
@@ -398,11 +424,13 @@ const handleTranslateClick = async () => {
         confirmText: t('更新'),
         cancelText: t('取消'),
         onConfirm: async () => {
+          isTranslating.value = true;
           const response = await getAICompletion(gatewayId.value, {
             inputs: {
               input,
               type: 'doc_translate',
               enable_streaming: false,
+              language: targetLanguage,
             },
           });
           const docId = docData.value.find((item: any) => item.language === targetLanguage)!.id;
@@ -416,6 +444,7 @@ const handleTranslateClick = async () => {
           });
           initData();
           emit('fetch');
+          isTranslating.value = false;
         },
       });
     }

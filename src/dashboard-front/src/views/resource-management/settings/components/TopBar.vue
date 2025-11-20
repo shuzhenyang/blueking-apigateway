@@ -44,11 +44,12 @@
           {{ currentSource?.name }}
         </div>
       </div>
-      <div>
+      <div v-if="featureFlagStore.isAIEnabled">
         <BkPopover
           ref="popoverRef"
           width="650"
           theme="light"
+          z-index="5000"
           trigger="click"
         >
           <div class="flex items-center cursor-pointer">
@@ -77,7 +78,9 @@
                   :columns="columns"
                   table-row-key="id"
                   resizable
+                  show-first-full-row
                   select-on-row-click
+                  @clear-selection="() => { selectedResources = [] }"
                   @selection-change="handleResourceSelect"
                 />
               </div>
@@ -86,6 +89,7 @@
                   <BkButton
                     class="h-26px"
                     theme="primary"
+                    :disabled="selectedResources.length === 0"
                     @click="handleTranslateConfirmClick"
                   >
                     {{ t('确定') }}
@@ -108,7 +112,10 @@
 
 <script setup lang="tsx">
 import AiBluekingButton from '@/components/ai-seek/AiBluekingButton.vue';
-import { useStage } from '@/stores';
+import {
+  useFeatureFlag,
+  useStage,
+} from '@/stores';
 import AgTable from '@/components/ag-table/Index.vue';
 import type { PrimaryTableProps } from '@blueking/tdesign-ui';
 import { getResourceList } from '@/services/source/resource.ts';
@@ -133,6 +140,7 @@ const {
 
 const { t } = useI18n();
 const stage = useStage();
+const featureFlagStore = useFeatureFlag();
 
 const selectedResources = ref<any[]>([]);
 const tableRef = useTemplateRef('tableRef');
@@ -145,7 +153,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     align: 'center',
     fixed: 'left',
     width: 60,
-    checkProps: ({ row }) => ({ disabled: !row.docs?.find(item => item.language === 'zh')?.id }),
+    checkProps: ({ row }) => ({ disabled: !hasDoc(row) }),
   },
   {
     colKey: 'name',
@@ -165,11 +173,24 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
 
 const getTableData = async (params: Record<string, any> = {}) => getResourceList(toValue(gatewayId), params);
 
+const hasDoc = (resource: any) => resource.docs?.some(item => item.id);
+
 const getHasDocText = (resource: any, lang = 'zh') =>
   resource.docs?.find(item => item.language === lang)?.id ? t('有') : t('无');
 
 const handleTranslateConfirmClick = async () => {
-  await batchResourceDocAITranslate(toValue(gatewayId), { doc_ids: selectedResources.value.filter(item => item.docs?.find(doc => doc.language === 'zh')).map(item => item.docs.find(doc => doc.language === 'zh').id) });
+  const docIds: number[] = [];
+  selectedResources.value.forEach((resource) => {
+    const cnDocId = resource.docs?.find(doc => doc.language === 'zh')?.id;
+    const enDocId = resource.docs?.find(doc => doc.language === 'en')?.id;
+    if (cnDocId) {
+      docIds.push(cnDocId);
+    }
+    if (enDocId) {
+      docIds.push(enDocId);
+    }
+  });
+  await batchResourceDocAITranslate(toValue(gatewayId), { doc_ids: docIds });
   popoverRef.value?.hide();
   Message({
     theme: 'success',
