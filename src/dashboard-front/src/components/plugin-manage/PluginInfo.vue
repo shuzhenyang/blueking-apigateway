@@ -152,7 +152,12 @@
             'bk-user-restriction',
             'bk-request-body-limit',
             'bk-access-token-source',
-            'redirect'
+            'redirect',
+            'bk-mock',
+            'response-rewrite',
+            'fault-injection',
+            'request-validation',
+            'api-breaker',
           ].includes(choosePlugin)"
         >
           <Component
@@ -258,6 +263,11 @@ import BkUserRestriction from '@/components/plugin-form/bk-user-restriction/Inde
 import BkRequestBodyLimit from '@/components/plugin-form/bk-request-body-limit/Index.vue';
 import BkAccessTokenSource from '@/components/plugin-form/bk-access-token-source/Index.vue';
 import Redirect from '@/components/plugin-form/redirect/Index.vue';
+import BkMock from '@/components/plugin-form/bk-mock/Index.vue';
+import ResponseRewrite from '@/components/plugin-form/response-rewrite/Index.vue';
+import FaultInjection from '@/components/plugin-form/fault-injection/Index.vue';
+import RequestValidate from '@/components/plugin-form/request-validation/Index.vue';
+import ApiBreaker from '@/components/plugin-form/api-breaker/Index.vue';
 
 // 右侧插件使用示例是否可见
 const showExample = defineModel<boolean>('showExample', { default: false });
@@ -324,6 +334,11 @@ const pluginFormCompMap = {
   'bk-request-body-limit': BkRequestBodyLimit,
   'bk-access-token-source': BkAccessTokenSource,
   'redirect': Redirect,
+  'bk-mock': BkMock,
+  'response-rewrite': ResponseRewrite,
+  'fault-injection': FaultInjection,
+  'request-validation': RequestValidate,
+  'api-breaker': ApiBreaker,
 };
 
 const isBound = computed(() => {
@@ -394,6 +409,11 @@ const handleAdd = async () => {
       'bk-request-body-limit',
       'bk-access-token-source',
       'redirect',
+      'bk-mock',
+      'response-rewrite',
+      'fault-injection',
+      'request-validation',
+      'api-breaker',
     ].includes(choosePlugin.value)) {
       const formValue = await formRef.value!.getValue();
       Object.assign(data, { yaml: json2Yaml(JSON.stringify(formValue)).data });
