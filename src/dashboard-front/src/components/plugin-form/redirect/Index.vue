@@ -22,7 +22,6 @@
       <BkInput
         v-model="form.ret_code"
         :max="599"
-        :min="200"
         :precision="0"
         type="number"
         clearable
@@ -56,13 +55,14 @@ const rules = {
   uri: [
     {
       validator: (value: string) => /(\\\$[0-9a-zA-Z_]+)|\$\{([0-9a-zA-Z_]+)\}|\$([0-9a-zA-Z_]+)|(\$|[^$\\]+)/.test(value),
-      message: t('需要符合规则 (\\\\\\$[0-9a-zA-Z_]+)|\\$\\{([0-9a-zA-Z_]+)\\}|\\$([0-9a-zA-Z_]+)|(\\$|[^$\\\\]+)'),
+      message: t('需要符合规则 (\\\\\\$[0-9a-zA-Z_]+)\\|\\$\\{([0-9a-zA-Z_]+)\\}\\|\\$([0-9a-zA-Z_]+)\\|(\\$|[^$\\\\]+)'),
       trigger: 'change',
     },
   ],
   ret_code: [
     {
-      validator: (value: string) => isInteger(Number(value)) && Number(value) >= 200 && Number(value) <= 599,
+      validator: (value: string) =>
+        !value || (isInteger(Number(value)) && Number(value) >= 200 && Number(value) <= 599),
       message: t('必须是介于 200 到 599 的正整数'),
       trigger: 'change',
     },

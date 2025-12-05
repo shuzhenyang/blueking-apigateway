@@ -168,6 +168,11 @@ class ResponseRewriteConvertor(PluginConvertor):
 
     def convert(self, config: Dict[str, Any]) -> Dict[str, Any]:
         config = format_response_rewrite_config(config)
+
+        status_code = config.get("status_code")
+        if status_code:
+            config["status_code"] = int(status_code)
+
         if config.get("vars"):
             config["vars"] = ast.literal_eval(config["vars"])
 
@@ -230,6 +235,31 @@ class ProxyCacheConvertor(PluginConvertor):
         return config
 
 
+class AIProxyConvertor(PluginConvertor):
+    plugin_type_code: ClassVar[PluginTypeCodeEnum] = PluginTypeCodeEnum.AI_PROXY
+
+    def convert(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        auth = config["auth"]
+
+        header = auth.get("header")
+        query = auth.get("query")
+
+        if header and query:
+            raise ValueError("Only one of header or query can be configured")
+
+        if header:
+            auth.pop("query", None)
+            auth["header"] = {item["key"]: item["value"] for item in header}
+            return config
+
+        if query:
+            auth.pop("header", None)
+            auth["query"] = {item["key"]: item["value"] for item in query}
+            return config
+
+        raise ValueError("At least one of header or query must be configured")
+
+
 class PluginConvertorFactory:
     plugin_convertors: ClassVar[Dict[PluginTypeCodeEnum, PluginConvertor]] = {
         c.plugin_type_code: c
@@ -245,6 +275,7 @@ class PluginConvertorFactory:
             BkAccessTokenSourceConvertor(),
             BKUserRestrictionConvertor(),
             ProxyCacheConvertor(),
+            AIProxyConvertor(),
         ]
     }
 

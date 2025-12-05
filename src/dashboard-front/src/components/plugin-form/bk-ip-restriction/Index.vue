@@ -1,3 +1,20 @@
+/*
+ * TencentBlueKing is pleased to support the open source community by making
+ * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
+ * Copyright (C) 2025 Tencent. All rights reserved.
+ * Licensed under the MIT License (the "License"); you may not use this file except
+ * in compliance with the License. You may obtain a copy of the License at
+ *
+ *     http://opensource.org/licenses/MIT
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * We undertake not to change the open source license (MIT license) applicable
+ * to the current version of the project delivered to anyone in the future.
+ */
 <template>
   <BkForm
     ref="formRef"
@@ -31,8 +48,9 @@
 </template>
 
 <script setup lang="ts">
+import { cloneDeep } from 'lodash-es';
 import { Form } from 'bkui-vue';
-import { type ISchema } from '@/components/plugin-manage/schema-type';
+import type { IIPRestriction, ISchema } from '@/components/plugin-manage/schema-type';
 import SchemaField from '@/components/plugin-manage/components/SchemaField.vue';
 
 interface IProps {
@@ -44,9 +62,9 @@ interface IProps {
 
 interface IEmits { (e: 'update:modelValue', value: any): void }
 
-const formData = defineModel('modelValue', {
+const formData = defineModel<IIPRestriction>('modelValue', {
   required: true,
-  type: [Object, String],
+  type: Object,
 });
 
 const {
@@ -59,13 +77,6 @@ const emit = defineEmits<IEmits>();
 
 const { t } = useI18n();
 
-// IPv4 CIDR 正则
-const ipv4CidrRegex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}(\/([0-9]|[12]\d|3[0-2]))?$/;
-
-// IPv6 CIDR 正则
-const ipv6CidrRegex
-  = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))(\/([0-9]|[1-9]\d|1[01]\d|12[0-8]))?$/;
-
 const formRef = ref<InstanceType<typeof Form> | null>(null);
 
 const schemaFieldRef = ref<InstanceType<typeof SchemaField> | null>(null);
@@ -77,32 +88,25 @@ const selectedSchema = computed(() => {
 });
 
 const curSelectType = computed(() => {
-  return Object.keys(selectedSchema.value?.properties ?? {})?.[0] ?? '';
+  const properties = selectedSchema.value?.properties ?? {};
+  const firstKey = Object.keys(properties)?.[0];
+  return firstKey ?? 'whitelist';
 });
 
 const formRules = computed(() => {
   const schemaTitle = selectedSchema.value?.title ?? '';
   const requiredField = selectedSchema.value?.required;
-  const minLength = Array.isArray(requiredField) && requiredField?.includes(curSelectType.value)
+  // 仅基于当前选中的字段计算规则（curSelectType 是 whitelist/blacklist）
+  const minLength = Array.isArray(requiredField) && requiredField.includes(curSelectType.value)
     ? selectedSchema.value?.properties?.[curSelectType.value]?.minLength
     : undefined;
+
   const commonRules = [
     {
       required: true,
       message: t('请输入{inputValue}', { inputValue: schemaTitle }),
       trigger: 'change',
-      validator: (value: string) => {
-        return !!value?.trim();
-      },
-    },
-    // 格式校验（IPv4/CIDR 或 IPv6/CIDR）
-    {
-      message: t('{ipTitle}格式不符合IPv4/CIDR或IPv6/CIDR规范', { ipTitle: schemaTitle }),
-      trigger: 'change',
-      validator: (value: string) => {
-        if (!value?.trim()) return true;
-        return ipv4CidrRegex.test(value) || ipv6CidrRegex.test(value);
-      },
+      validator: (value: string) => !!value?.trim(),
     },
   ];
 
@@ -114,27 +118,28 @@ const formRules = computed(() => {
         count: minLength,
       }),
       trigger: 'change',
-      validator: (value: string) => {
-        const trimmedValue = value?.trim() || '';
-        return trimmedValue.length >= minLength;
-      },
+      validator: (value: string) => (value?.trim() || '').length >= minLength,
     });
   }
 
   const mergedRules = [...commonRules, ...extraRules];
 
-  return {
-    whitelist: mergedRules,
-    blacklist: mergedRules,
-  };
+  return { [curSelectType.value]: mergedRules };
 });
 
-const validate = async () => {
+const getValue = () => {
+  return cloneDeep(formData.value);
+};
+
+const validate = async (): Promise<boolean> => {
   try {
-    const isValid = await formRef.value?.validate(); ;
+    const isValid = await formRef.value?.validate();
     if (!isValid) {
-      schemaFieldRef.value?.comRef?.schemaFieldRef?.[0]?.comRef?.focus();
-      return;
+      const schemaField = schemaFieldRef.value?.comRef?.schemaFieldRef?.[0];
+      if (schemaField?.comRef?.focus) {
+        schemaField.comRef.focus();
+      }
+      return false;
     }
     return isValid;
   }
@@ -150,6 +155,7 @@ const clearValidate = () => {
 // 切换类型时重置模型值
 const handleOptionChange = () => {
   clearValidate();
+  formData.value = {};
   emit('update:modelValue', {});
 };
 
@@ -164,6 +170,7 @@ watch(
 );
 
 defineExpose({
+  getValue,
   validate,
   clearValidate,
 });

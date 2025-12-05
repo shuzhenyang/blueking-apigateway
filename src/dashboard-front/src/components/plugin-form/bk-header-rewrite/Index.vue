@@ -1,3 +1,20 @@
+/*
+ * TencentBlueKing is pleased to support the open source community by making
+ * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
+ * Copyright (C) 2025 Tencent. All rights reserved.
+ * Licensed under the MIT License (the "License"); you may not use this file except
+ * in compliance with the License. You may obtain a copy of the License at
+ *
+ *     http://opensource.org/licenses/MIT
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * We undertake not to change the open source license (MIT license) applicable
+ * to the current version of the project delivered to anyone in the future.
+ */
 <template>
   <BkForm
     ref="formRef"
@@ -18,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { isEmpty, isObject } from 'lodash-es';
+import { cloneDeep, isEmpty, isObject } from 'lodash-es';
 import { Form } from 'bkui-vue';
 import type { IHeaderWriteFormData, ISchema } from '@/components/plugin-manage/schema-type';
 import SchemaField from '@/components/plugin-manage/components/SchemaField.vue';
@@ -47,10 +64,10 @@ const {
   disabled = false,
 } = defineProps<IProps>();
 
-const DEFAULT_FORM_DATA: IHeaderWriteFormData = {
+const DEFAULT_FORM_DATA: IHeaderWriteFormData = reactive({
   set: [],
   remove: [],
-};
+});
 
 const formRef = ref<InstanceType<typeof Form> | null>(null);
 
@@ -74,17 +91,9 @@ const formRules = computed(() => ({
   ],
 }));
 
-watch(
-  () => formData.value,
-  (newVal) => {
-    if (isObject(newVal) && isEmpty(newVal)) {
-      nextTick(() => {
-        formData.value = { ...DEFAULT_FORM_DATA };
-      });
-    }
-  },
-  { immediate: true },
-);
+const getValue = () => {
+  return cloneDeep(formData.value);
+};
 
 const handleAddItem = (row) => {
   const typeMap = {
@@ -106,7 +115,7 @@ const handleRemoveItem = (row) => {
   formData.value[field.name]?.splice(index, 1);
 };
 
-const validate = async () => {
+const validate = async (): Promise<boolean> => {
   try {
     const isValid = await formRef.value?.validate();
     if (!isValid) {
@@ -123,7 +132,19 @@ const clearValidate = () => {
   return formRef.value?.clearValidate();
 };
 
+watch(
+  () => formData.value,
+  (newVal) => {
+    clearValidate();
+    if (isObject(newVal) && isEmpty(newVal)) {
+      formData.value = { ...DEFAULT_FORM_DATA };
+    }
+  },
+  { immediate: true },
+);
+
 defineExpose({
+  getValue,
   validate,
   clearValidate,
 });

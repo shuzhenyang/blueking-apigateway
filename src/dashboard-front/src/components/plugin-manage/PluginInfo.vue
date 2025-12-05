@@ -152,7 +152,12 @@
             'bk-user-restriction',
             'bk-request-body-limit',
             'bk-access-token-source',
-            'redirect'
+            'redirect',
+            'bk-mock',
+            'response-rewrite',
+            'fault-injection',
+            'request-validation',
+            'api-breaker',
           ].includes(choosePlugin)"
         >
           <Component
@@ -161,13 +166,14 @@
             :data="schemaFormData"
           />
         </template>
-        <template v-else-if="isCustomPlugin">
+        <template v-else-if="isDynamicFormPlugin">
           <component
             :is="pluginFormCompMap[choosePlugin as keyof typeof pluginFormCompMap]"
             ref="formRef"
             v-model="schemaFormData"
-            :schema="formConfig.schema"
             :route-mode="choosePlugin"
+            :schema="formConfig.schema"
+            :layout="formConfig.layout"
           />
         </template>
         <BkSchemaForm
@@ -269,7 +275,14 @@ import BkRequestBodyLimit from '@/components/plugin-form/bk-request-body-limit/I
 import BkAccessTokenSource from '@/components/plugin-form/bk-access-token-source/Index.vue';
 import BkIpRestriction from '@/components/plugin-form/bk-ip-restriction/Index.vue';
 import BkHeaderRewrite from '@/components/plugin-form/bk-header-rewrite/Index.vue';
+import BkRateLimit from '@/components/plugin-form/bk-rate-limit/Index.vue';
+import BkCors from '@/components/plugin-form/bk-cors/Index.vue';
 import Redirect from '@/components/plugin-form/redirect/Index.vue';
+import BkMock from '@/components/plugin-form/bk-mock/Index.vue';
+import ResponseRewrite from '@/components/plugin-form/response-rewrite/Index.vue';
+import FaultInjection from '@/components/plugin-form/fault-injection/Index.vue';
+import RequestValidate from '@/components/plugin-form/request-validation/Index.vue';
+import ApiBreaker from '@/components/plugin-form/api-breaker/Index.vue';
 
 interface IProps {
   curPlugin: any
@@ -347,10 +360,19 @@ const pluginFormCompMap = {
   'redirect': Redirect,
   'bk-ip-restriction': BkIpRestriction,
   'bk-header-rewrite': BkHeaderRewrite,
+  'bk-mock': BkMock,
+  'response-rewrite': ResponseRewrite,
+  'fault-injection': FaultInjection,
+  'request-validation': RequestValidate,
+  'api-breaker': ApiBreaker,
+  'bk-rate-limit': BkRateLimit,
+  'bk-cors': BkCors,
 };
 
-const isCustomPlugin = computed(() => {
-  return ['bk-ip-restriction', 'bk-header-rewrite'].includes(choosePlugin.value);
+const dynamicFormPlugin = shallowRef(['bk-cors', 'bk-ip-restriction', 'bk-header-rewrite', 'bk-rate-limit']);
+
+const isDynamicFormPlugin = computed(() => {
+  return dynamicFormPlugin.value.includes(choosePlugin.value);
 });
 
 const isBound = computed(() => {
@@ -420,31 +442,32 @@ const handleAdd = async () => {
     if (formStyle.value === 'raw') {
       Object.assign(data, { yaml: whitelist.value?.sendPolicyData().data });
     }
-    else if ([
+    if ([
       'proxy-cache',
       'bk-user-restriction',
       'bk-request-body-limit',
       'bk-access-token-source',
       'redirect',
+      'bk-mock',
+      'response-rewrite',
+      'fault-injection',
+      'request-validation',
+      'api-breaker',
+      ...dynamicFormPlugin.value,
     ].includes(choosePlugin.value)) {
+      if (isDynamicFormPlugin.value) {
+        // 动态插件需要调用下子组件的验证
+        const isValidate = await formRef.value?.validate();
+        if (!isValidate) {
+          return;
+        }
+      }
       const formValue = await formRef.value!.getValue();
       Object.assign(data, { yaml: json2Yaml(JSON.stringify(formValue)).data });
       schemaFormData.value = formValue;
     }
-    else {
-      const isValidate = await formRef.value?.validate();
-      if (!isValidate) {
-        return;
-      }
-      Object.assign(data, { yaml: json2Yaml(JSON.stringify(schemaFormData.value)).data });
-    }
   }
-  catch (err) {
-    const error = err as Error;
-    Message({
-      theme: 'error',
-      message: error.message || t('表单校验失败'),
-    });
+  catch {
     return;
   }
 

@@ -3,10 +3,10 @@
     <BkForm
       v-for="(user, index) in localUsers"
       :key="index"
-      ref="forms"
+      v-bind="$attrs"
+      ref="formRefs"
       :model="user"
       class="form-element"
-      v-bind="$attrs"
       :rules="rules"
     >
       <BkFormItem
@@ -54,7 +54,6 @@
 </template>
 
 <script lang="ts" setup>
-import { Form } from 'bkui-vue';
 import { cloneDeep } from 'lodash-es';
 
 interface IProps { users?: { key: string }[] }
@@ -63,14 +62,19 @@ const { users = [] } = defineProps<IProps>();
 
 const { t } = useI18n();
 
-const localUsers = ref<{ key: string }[]>([]);
+const formRefs = ref();
 
-const formRefs = useTemplateRef<InstanceType<typeof Form>[]>('forms');
+const localUsers = ref<{ key: string }[]>([]);
 
 const rules = {
   key: [
     {
-      validator: (val: string) => localUsers.value.filter(item => item.key === val).length <= 1,
+      validator: () => !!localUsers.value?.filter(item => !!item.key).length,
+      message: t('需要至少填写一个用户'),
+      trigger: 'blur',
+    },
+    {
+      validator: (val: string) => !val || localUsers.value.filter(item => item.key === val).length <= 1,
       message: t('用户已存在'),
       trigger: 'blur',
     },
@@ -92,18 +96,11 @@ const handleRemoveItem = (index: number) => {
   localUsers.value.splice(index, 1);
 };
 
-const validate = async () => {
-  return await Promise.all(formRefs.value!.map(formRef => formRef.validate()));
-};
+const getValue = () =>
+  Promise.all(formRefs.value.map(formRef => formRef.validate()))
+    .then(() => localUsers.value?.filter(item => !!item.key) || []);
 
-const getValue = async () => {
-  return Promise.resolve(localUsers.value?.filter(item => !!item.key) || []);
-};
-
-defineExpose({
-  validate,
-  getValue,
-});
+defineExpose({ getValue });
 
 </script>
 
