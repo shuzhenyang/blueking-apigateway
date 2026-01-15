@@ -33,9 +33,9 @@
             :placeholder="t('请输入 MCP 名称或描述搜索')"
             clearable
             type="search"
-            @enter="getList"
+            @enter="handleSearch"
             @blur="getList"
-            @clear="getList"
+            @clear="handleSearch"
             @input="handleInput"
           />
           <!-- <BkCheckbox v-model="isPublic">{{ t('仅展示官方') }}</BkCheckbox> -->
@@ -47,87 +47,27 @@
           </div> -->
       </div>
       <div
-        v-if="mcpList?.length"
-        class="card-list"
+        v-if="search"
+        class="text-12px mb-16px"
       >
-        <div
-          v-for="item in mcpList"
-          :key="item.id"
-          class="card"
-          @click="() => goDetails(item.id)"
+        <I18nT
+          keypath="共找到 {0} 个结果"
+          tag="span"
         >
-          <div class="header">
-            <BkOverflowTitle
-              class="title"
-              style="max-width: calc(100% - 115px)"
-            >
-              {{ item.name }}
-            </BkOverflowTitle>
-            <BkTag
-              v-if="item.gateway.is_official"
-              theme="success"
-              class="mr8"
-            >
-              {{ t('官方') }}
-            </BkTag>
-            <BkTag theme="info">
-              {{ item.stage?.name }}
-            </BkTag>
-          </div>
-          <div class="content">
-            <div class="info-item">
-              <div class="label">
-                {{ t('访问地址') }}：
-              </div>
-              <div class="value flex-row align-items-center">
-                <BkOverflowTitle style="width: calc(100% - 28px)">
-                  {{ item.url }}
-                </BkOverflowTitle>
-                <div
-                  class="copy-wrapper"
-                  @click.stop="() => handleCopy(item.url)"
-                >
-                  <AgIcon
-                    name="copy"
-                    size="14"
-                    class="icon"
-                  />
-                </div>
-              </div>
-            </div>
-            <div class="info-item">
-              <div class="label">
-                {{ t('工具数量') }}：
-              </div>
-              <div class="value">
-                {{ item.tools_count }}
-              </div>
-            </div>
-            <div class="info-item">
-              <div class="label">
-                {{ t('描述') }}：
-              </div>
-              <div class="value">
-                {{ item.description }}
-              </div>
-            </div>
-            <div class="info-item">
-              <div class="label">
-                {{ t('标签') }}：
-              </div>
-              <div class="value">
-                <BkTag
-                  v-for="label in item.labels"
-                  :key="label"
-                  class="mr8"
-                >
-                  {{ label }}
-                </BkTag>
-              </div>
-            </div>
-          </div>
-        </div>
+          <strong class="color-#3A84FF">{{ mcpAllList.length }}</strong>
+        </I18nT>
       </div>
+      <template v-if="mcpList?.length">
+        <div class="flex flex-wrap justify-start card-list">
+          <ServerItemCard
+            v-for="market of mcpList"
+            :key="market.id"
+            :server="market"
+            :show-actions="false"
+            @click="() => handleCardClick(market.id)"
+          />
+        </div>
+      </template>
       <div
         v-else
         class="empty-wrapper"
@@ -141,29 +81,38 @@
         />
       </div>
     </div>
+    <!-- 触底翻页触发器 -->
+    <div
+      v-intersection-observer="onIntersectionObserver"
+      class="h-40px"
+    />
   </div>
 </template>
 
 <script lang="ts" setup>
-import AgIcon from '@/components/ag-icon/Index.vue';
 import { type IMarketplaceItem, getMcpMarketplace } from '@/services/source/mcp-market';
-import { copy } from '@/utils';
 import mcpBanner from '@/images/mcp-banner.jpg';
 import mcpBannerEn from '@/images/mcp-banner-en.jpg';
 import TableEmpty from '@/components/table-empty/Index.vue';
+import ServerItemCard from '@/components/ag-mcp-card/Index.vue';
+import { vIntersectionObserver } from '@vueuse/components';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 
-const search = ref<string>('');
-const isPublic = ref<boolean>(false);
+const search = ref('');
+const isPublic = ref(false);
 const mcpAllList = ref<IMarketplaceItem[]>([]);
-const tableEmptyConf = ref<{
-  emptyType: string
-  isAbnormal: boolean
-}>({
+const tableEmptyConf = ref({
   emptyType: '',
   isAbnormal: false,
+});
+
+const pagination = ref({
+  current: 1,
+  limit: 12,
+  count: 0,
+  hasNoMore: false,
 });
 
 const bannerImg = computed(() => {
@@ -185,28 +134,37 @@ const mcpList = computed(() => {
 });
 
 const getList = async () => {
+  if (pagination.value.hasNoMore) {
+    return;
+  }
   const res = await getMcpMarketplace({
-    limit: 999,
-    offset: 0,
+    limit: pagination.value.limit,
+    offset: pagination.value.limit * (pagination.value.current - 1),
     keyword: search.value,
   });
 
-  // res.count
-  mcpAllList.value = res.results;
-};
-getList();
+  if (pagination.value.current === 1) {
+    mcpAllList.value = res.results;
+  }
+  else {
+    mcpAllList.value = mcpAllList.value.concat(res.results);
+  }
 
-const handleInput = () => {
-  if (!search.value) {
-    getList();
+  pagination.value.count = res.count;
+  pagination.value.current += 1;
+
+  if (mcpAllList.value.length >= pagination.value.count) {
+    pagination.value.hasNoMore = true;
   }
 };
 
-const handleCopy = (str: string) => {
-  copy(str);
+const handleInput = () => {
+  if (!search.value) {
+    handleSearch();
+  }
 };
 
-const goDetails = (id: number) => {
+const handleCardClick = (id: number) => {
   router.push({
     name: 'McpMarketDetails',
     params: { id },
@@ -221,15 +179,39 @@ const updateTableEmptyConfig = () => {
   tableEmptyConf.value.emptyType = 'empty';
 };
 
-const handleClearFilterKey = async () => {
+const handleClearFilterKey = () => {
   search.value = '';
+  pagination.value.current = 1;
+  pagination.value.hasNoMore = false;
   getList();
 };
+
+const handleSearch = () => {
+  pagination.value.current = 1;
+  pagination.value.hasNoMore = false;
+  getList();
+};
+
+const onIntersectionObserver = ([entry]: IntersectionObserverEntry[]) => {
+  if (entry?.isIntersecting) {
+    getList();
+  }
+};
+
+onBeforeMount(() => {
+  // 如果屏幕宽度小于1620px，那么每页显示3列数据，否则每页显示4列数据
+  const cols = window.innerWidth < 1620 ? 3 : 4;
+  // 每屏可展示行数
+  const cardContainerHeight = window.innerHeight - 352;
+  const rows = Math.ceil(cardContainerHeight / 206);
+  pagination.value.limit = cols * rows;
+});
 
 </script>
 
 <style lang="scss" scoped>
 .banner {
+
   img {
     width: 100%;
     min-width: 1280px;
@@ -239,6 +221,7 @@ const handleClearFilterKey = async () => {
 .main {
   padding-bottom: 26px;
   margin: 0 auto;
+
   .top {
     display: flex;
     justify-content: space-between;
@@ -251,63 +234,21 @@ const handleClearFilterKey = async () => {
     }
 
     .guide {
+      font-size: 12px;
       color: #3A84FF;
       cursor: pointer;
-      font-size: 12px;
     }
   }
 
-  .card-list {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+  :deep(.card-list) {
     box-sizing: border-box;
-    .card {
-      padding: 0 24px;
-      border-radius: 2px;
-      background: #FFFFFF;
-      box-shadow: 0 2px 4px 0 #1919290d;
-      box-sizing: border-box;
-      cursor: pointer;
-      .header {
-        display: flex;
-        align-items: center;
-        border-bottom: 1px solid #EAEBF0;
-        height: 54px;
-        .title {
-          color: #313238;
-          font-size: 18px;
-          font-weight: Bold;
-          line-height: 54px;
-          margin-right: 16px;
-        }
-      }
-      .content {
-        padding: 12px 0 4px;
-        .info-item {
-          display: flex;
-          align-items: center;
-          margin-bottom: 12px;
-          .label {
-            font-size: 14px;
-            color: #4D4F56;
-          }
-          .value {
-            flex: 1;
-            font-size: 14px;
-            color: #313238;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            .copy-wrapper {
-              width: 28px;
-              text-align: right;
-            }
-            .icon {
-              color: #3A84FF;
-            }
-          }
-        }
+
+    .ag-mcp-card-wrapper {
+      padding: 20px;
+
+      .mcp-footer-content {
+        right: 20px;
+        left: 20px;
       }
     }
   }
@@ -317,26 +258,40 @@ const handleClearFilterKey = async () => {
   }
 }
 
-@media (max-width: 1599.98px) {
+@media (max-width: 1619px) {
+
   .main {
     width: 1280px;
   }
-  .card-list {
+
+  :deep(.card-list) {
     gap: 20px 25px;
-    .card {
+
+    .ag-mcp-card-wrapper {
       width: 410px;
+
+      .mcp-card-title {
+        max-width: 240px;
+      }
     }
   }
 }
 
-@media (min-width: 1600px) {
+@media (min-width: 1620px) {
+
   .main {
     width: 1600px;
   }
-  .card-list {
+
+  :deep(.card-list) {
     gap: 20px 26.67px;
-    .card {
+
+    .ag-mcp-card-wrapper {
       width: 380px;
+
+      .mcp-card-title {
+        max-width: 216px;
+      }
     }
   }
 }

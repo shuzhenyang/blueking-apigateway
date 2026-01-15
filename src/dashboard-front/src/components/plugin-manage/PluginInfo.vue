@@ -111,11 +111,25 @@
             {{ curPluginInfo?.notes || infoNotes }}
           </div>
         </main>
-        <aside
-          class="plugin-example-btn"
-          @click="toggleShowExample"
-        >
-          {{ t('查看填写示例') }}
+        <aside class="plugin-example-btn">
+          <div class="flex flex-col items-start gap-12px">
+            <IconButton
+              text
+              theme="primary"
+              icon="bulk-edit"
+              @click="toggleShowExample"
+            >
+              {{ t('填写示例') }}
+            </IconButton>
+            <IconButton
+              text
+              theme="primary"
+              icon="jump"
+              @click="handleDocClick"
+            >
+              {{ t('说明文档') }}
+            </IconButton>
+          </div>
         </aside>
       </div>
       <div class="info-form-container mt-20px">
@@ -177,7 +191,7 @@
           />
         </template>
         <BkSchemaForm
-          v-else
+          v-else-if="Object.keys(schemaFormData || {}).length"
           ref="formRef"
           v-model="schemaFormData"
           class="mt-20px plugin-form"
@@ -185,17 +199,25 @@
           :layout="formConfig.layout"
           :rules="formConfig.rules"
         />
+        <div
+          v-else
+          class="color-#63656e text-14px"
+        >
+          {{ t('该插件无需任何参数') }}
+        </div>
       </div>
       <div class="info-btn mt-20px">
         <div class="last-step">
           <BkPopConfirm
             v-if="isStage"
-            :title="t('确认{optType}插件（{name}）到 {stage} 环境？',
-                      {
-                        optType: isAdd ? t('添加') : t('修改'),
-                        name: curPluginInfo?.name,
-                        stage: stageStore?.curStageData?.name
-                      })"
+            :title="t(
+              '确认{optType}插件（{name}）到 {stage} 环境？',
+              {
+                optType: isAdd ? t('添加') : t('修改'),
+                name: curPluginInfo?.name,
+                stage: stageStore?.curStageData?.name
+              }
+            )"
             :content="t('插件配置变更后，将立即影响线上环境，请确认。')"
             trigger="click"
             @confirm="handleAdd"
@@ -247,7 +269,7 @@
       </header>
       <main class="example-main">
         <pre
-          v-dompurify-html="exampleHtml"
+          v-bk-xss-html="exampleHtml"
           class="example-pre"
         />
       </main>
@@ -256,14 +278,20 @@
 </template>
 
 <script setup lang="ts">
-import { cloneDeep } from 'lodash-es';
+import {
+  cloneDeep,
+  snakeCase,
+} from 'lodash-es';
 import { creatPlugin, getPluginForm, updatePluginConfig } from '@/services/source/plugin-manage';
 import { Message } from 'bkui-vue';
 // @ts-expect-error missing module type
 import createForm from '@blueking/bkui-form';
 import { json2Yaml, yaml2Json } from '@/utils';
 import WhitelistTable from './WhitelistTable.vue';
-import { useStage } from '@/stores';
+import {
+  useEnv,
+  useStage,
+} from '@/stores';
 import { onClickOutside } from '@vueuse/core';
 import {
   PLUGIN_ICONS,
@@ -320,6 +348,7 @@ interface IProps {
 }
 
 const stageStore = useStage();
+const envStore = useEnv();
 const BkSchemaForm = createForm();
 
 const { t } = useI18n();
@@ -491,219 +520,6 @@ const getSchemaFormData = async (code: string) => {
     const { apigwId } = scopeInfo;
     isPluginFormLoading.value = true;
     const res = await getPluginForm(apigwId, code);
-    // const res = {
-    //   id: 7,
-    //   language: '',
-    //   notes: '默认频率限制，表示单个应用的默认频率限制；特殊应用频率限制，对指定应用设置单独的频率限制。频率控制插件，绑定环境时，表示应用对环境下所有资源的总频率限制；绑定资源时，表示应用对单个资源的频率限制',
-    //   style: 'dynamic',
-    //   default_value: '',
-    //   config: {
-    //     schema: {
-    //       title: '频率控制',
-    //       type: 'object',
-    //       properties: {
-    //         rates: {
-    //           type: 'object',
-    //           properties: {
-    //             default: {
-    //               type: 'object',
-    //               title: '默认频率限制',
-    //               'ui:group': {
-    //                 type: 'card',
-    //                 showTitle: true,
-    //                 style: {
-    //                   background: '#F5F7FA',
-    //                   padding: '10px 20px 10px 30px',
-    //                 },
-    //               },
-    //               required: [
-    //                 'tokens',
-    //                 'period',
-    //               ],
-    //               properties: {
-    //                 tokens: {
-    //                   type: 'integer',
-    //                   title: '次数',
-    //                   default: 100,
-    //                   'ui:rules': [
-    //                     'required',
-    //                   ],
-    //                   'ui:component': {
-    //                     name: 'bfInput',
-    //                     min: 1,
-    //                   },
-    //                   'ui:props': {
-    //                     labelWidth: 100,
-    //                   },
-    //                 },
-    //                 period: {
-    //                   type: 'integer',
-    //                   title: '时间范围',
-    //                   default: 1,
-    //                   'ui:rules': [
-    //                     'required',
-    //                   ],
-    //                   'ui:component': {
-    //                     name: 'select',
-    //                     datasource: [
-    //                       {
-    //                         label: '秒',
-    //                         value: 1,
-    //                       },
-    //                       {
-    //                         label: '分',
-    //                         value: 60,
-    //                       },
-    //                       {
-    //                         label: '时',
-    //                         value: 3600,
-    //                       },
-    //                       {
-    //                         label: '天',
-    //                         value: 86400,
-    //                       },
-    //                     ],
-    //                     clearable: false,
-    //                   },
-    //                   'ui:props': {
-    //                     labelWidth: 100,
-    //                   },
-    //                 },
-    //               },
-    //             },
-    //             specials: {
-    //               type: 'array',
-    //               title: '特殊应用频率限制',
-    //               'ui:group': {
-    //                 type: 'card',
-    //                 showTitle: true,
-    //                 style: {
-    //                   background: '#F5F7FA',
-    //                   padding: '10px 20px 20px 20px',
-    //                 },
-    //               },
-    //               items: {
-    //                 type: 'object',
-    //                 required: [
-    //                   'tokens',
-    //                   'period',
-    //                   'bk_app_code',
-    //                 ],
-    //                 'ui:group': {
-    //                   style: {
-    //                     background: '#FFF',
-    //                     padding: '10px 10px 10px 10px',
-    //                   },
-    //                 },
-    //                 properties: {
-    //                   tokens: {
-    //                     type: 'integer',
-    //                     title: '次数',
-    //                     default: 1,
-    //                     'ui:rules': [
-    //                       'required',
-    //                     ],
-    //                     'ui:component': {
-    //                       name: 'bfInput',
-    //                       min: 1,
-    //                     },
-    //                     'ui:props': {
-    //                       labelWidth: 100,
-    //                     },
-    //                   },
-    //                   period: {
-    //                     type: 'integer',
-    //                     title: '时间范围',
-    //                     default: 1,
-    //                     'ui:rules': [
-    //                       'required',
-    //                     ],
-    //                     'ui:component': {
-    //                       name: 'select',
-    //                       datasource: [
-    //                         {
-    //                           label: '秒',
-    //                           value: 1,
-    //                         },
-    //                         {
-    //                           label: '分',
-    //                           value: 60,
-    //                         },
-    //                         {
-    //                           label: '时',
-    //                           value: 3600,
-    //                         },
-    //                         {
-    //                           label: '天',
-    //                           value: 86400,
-    //                         },
-    //                       ],
-    //                       clearable: false,
-    //                     },
-    //                     'ui:props': {
-    //                       labelWidth: 100,
-    //                     },
-    //                   },
-    //                   bk_app_code: {
-    //                     type: 'string',
-    //                     title: '蓝鲸应用ID',
-    //                     pattern: '^[a-z0-9][a-z0-9_-]{0,31}$',
-    //                     'ui:rules': [
-    //                       'required',
-    //                     ],
-    //                   },
-    //                 },
-    //               },
-    //             },
-    //           },
-    //         },
-    //       },
-    //     },
-    //     layout: [
-    //       [
-    //         {
-    //           prop: 'rates',
-    //           group: [
-    //             [
-    //               {
-    //                 prop: 'default',
-    //                 container: {
-    //                   'grid-template-columns': '250px 200px',
-    //                 },
-    //                 group: [
-    //                   [
-    //                     'tokens',
-    //                     'period',
-    //                   ],
-    //                 ],
-    //               },
-    //             ],
-    //             [
-    //               {
-    //                 prop: 'specials',
-    //                 container: {
-    //                   'grid-template-columns': '250px 200px 250px',
-    //                 },
-    //                 group: [
-    //                   [
-    //                     'tokens',
-    //                     'period',
-    //                     'bk_app_code',
-    //                   ],
-    //                 ],
-    //               },
-    //             ],
-    //           ],
-    //         },
-    //       ],
-    //     ],
-    //     formData: {},
-    //     rules: {},
-    //   },
-    //   type_id: 4,
-    //   type_code: 'bk-rate-limit',
-    //   type_name: '频率控制',
-    // };
 
     // 当使用 select 组件切换到 ip 访问保护插件时，schemaFormData 没有被正确地设置
     // 需要手动重置 schemaFormData
@@ -744,6 +560,14 @@ const toggleShowExample = async () => {
     await getSchemaFormData(choosePlugin.value);
   }
   showExample.value = !showExample.value;
+};
+
+const handleDocClick = () => {
+  const pluginNameInSnakeCase = snakeCase(choosePlugin.value).toUpperCase();
+  const link = envStore.env.DOC_LINKS[`PLUGIN_${pluginNameInSnakeCase}` as keyof typeof envStore.env.DOC_LINKS];
+  if (link) {
+    window.open(link, '_blank');
+  }
 };
 
 const init = async () => {
@@ -921,8 +745,6 @@ defineExpose({
   .plugin-example-btn {
     margin-top: 16px;
     font-size: 14px;
-    color: #3A84FF;
-    cursor: pointer;
     flex-shrink: 0;
   }
 }

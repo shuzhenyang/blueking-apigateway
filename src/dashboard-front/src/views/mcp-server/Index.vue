@@ -17,49 +17,63 @@
  */
 
 <template>
-  <div class="page-wrapper">
-    <div class="server-list">
-      <ServerItemCard
-        v-for="server in serverList"
-        :key="server.id"
-        :server="server"
-        @delete="handleDelete"
-        @edit="handleEdit"
-        @enable="handleEnable"
-        @suspend="handleSuspend"
-        @click="() => handleCardClick(server.id)"
-      />
-      <!-- 添加按钮卡片 -->
-      <div
-        class="flex items-center justify-center add-server-card"
-        @click="handleAddServerClick"
+  <div>
+    <div class="page-wrapper">
+      <BkLoading
+        :loading="isLoading"
+        :z-index="99"
       >
-        <AgIcon
-          name="add-small"
-          size="40"
-        />
-      </div>
+        <div
+          ref="serverListRef"
+          class="server-list"
+        >
+          <ServerItemCard
+            v-for="server in serverList"
+            :key="server.id"
+            :server="server"
+            @delete="handleDelete"
+            @edit="handleEdit"
+            @enable="handleEnable"
+            @suspend="handleSuspend"
+            @click="() => handleCardClick(server.id)"
+          />
+          <!-- 添加按钮卡片 -->
+          <div
+            class="flex items-center justify-center add-server-card"
+            @click="handleAddServerClick"
+          >
+            <AgIcon
+              name="add-small"
+              size="40"
+            />
+          </div>
+        </div>
+      </BkLoading>
+      <CreateSlider
+        ref="createSliderRef"
+        :server-id="editingServerId"
+        @updated="handleServerUpdated"
+      />
     </div>
-    <CreateSlider
-      ref="createSliderRef"
-      :server-id="editingServerId"
-      @updated="handleServerUpdated"
+    <div
+      v-intersection-observer="onIntersectionObserver"
+      class="h-40px"
     />
   </div>
 </template>
 
 <script lang="ts" setup>
-import ServerItemCard from './components/ServerItemCard.vue';
-import CreateSlider from './components/CreateSlider.vue';
+import { Message } from 'bkui-vue';
+import { vIntersectionObserver } from '@vueuse/components';
 import {
   deleteServer,
   getServers,
   patchServerStatus,
 } from '@/services/source/mcp-server';
-import {
-  InfoBox,
-  Message,
-} from 'bkui-vue';
+import { useFeatureFlag } from '@/stores';
+import { usePopInfoBox } from '@/hooks';
+import CreateSlider from './components/CreateSlider.vue';
+import ServerItemCard from '@/components/ag-mcp-card/Index.vue';
 
 type MCPServerType = Awaited<ReturnType<typeof getServers>>['results'][number];
 
@@ -69,14 +83,88 @@ const { gatewayId = 0 } = defineProps<IProps>();
 
 const { t } = useI18n();
 const router = useRouter();
+const featureFlagStore = useFeatureFlag();
 
-const createSliderRef = ref();
+const createSliderRef = ref<InstanceType<typeof CreateSlider>>();
+const serverListRef = ref<HTMLDivElement>(null);
 const serverList = ref<MCPServerType[]>([]);
-const editingServerId = ref<number>();
+const editingServerId = ref();
+const isLoading = ref(true);
+const pagination = ref({
+  current: 1,
+  limit: 0,
+  count: 0,
+  hasNoMore: false,
+});
+
+const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
+
+const getSingleCardHeight = (): number => {
+  const firstCard = serverListRef.value?.querySelector('.ag-mcp-card-wrapper');
+  const addCard = serverListRef.value?.querySelector('.add-server-card');
+
+  // 如果有已渲染的卡片，取卡片最小高度，否则取添加卡片的高度
+  if (firstCard) {
+    // 卡片默认最小高度189px + 16px间距
+    return 189 + 16;
+  }
+  return (addCard as HTMLElement).offsetHeight + 16;
+};
+
+const getCardsPerRow = (): number => {
+  const wrapperWidth = window.innerWidth;
+  if (wrapperWidth >= 1280) return 3; // 大屏：每行3个
+  if (wrapperWidth < 1280 && wrapperWidth >= 768) return 2; // 中屏：每行2个
+  return 1; // 小屏：每行1个
+};
+
+const calculateMaxVisibleCards = (): number => {
+  // 通知栏高度40px
+  const noticeH = isShowNoticeAlert.value ? 40 : 0;
+  // 获取页面可用高度（排除顶部导航/内边距）, 44px=页面内边距(20+24)，104px=顶部预留高度
+  const wrapperHeight = window.innerHeight - 44 - 104 - noticeH;
+
+  // 获取单卡片高度和每行卡片数
+  const singleCardHeight = getSingleCardHeight();
+  const cardsPerRow = getCardsPerRow();
+
+  // 计算可展示行数
+  const maxRows = Math.floor(wrapperHeight / singleCardHeight);
+
+  // 计算最大可展示卡片数
+  const maxCards = Math.max(maxRows * cardsPerRow, 3);
+
+  // 预留一行空间用于触发加载更多
+  return maxCards + getCardsPerRow();
+};
 
 const fetchServerList = async () => {
-  const response = await getServers(gatewayId);
-  serverList.value = response?.results || [];
+  const { hasNoMore, current, limit } = pagination.value;
+  isLoading.value = true;
+  if (hasNoMore) {
+    isLoading.value = false;
+    return;
+  };
+
+  try {
+    const params = {
+      limit,
+      offset: limit * (current - 1),
+    };
+    const res = await getServers(gatewayId, params);
+    const { results = [], count = 0 } = res ?? {};
+    serverList.value = current === 1 ? results : [...serverList.value, ...results];
+    pagination.value = Object.assign(pagination.value, {
+      count,
+      hasNoMore: serverList.value.length >= count,
+      current: current + 1,
+    });
+  }
+  finally {
+    setTimeout(() => {
+      isLoading.value = false;
+    }, 500);
+  }
 };
 
 const handleAddServerClick = () => {
@@ -91,51 +179,63 @@ const handleEdit = (id: number) => {
 
 const handleSuspend = async (id: number) => {
   const server = serverList.value.find(server => server.id === id);
-  InfoBox({
-    title: t('确定停用 {n}？', { n: server.name }),
-    infoType: 'warning',
+  usePopInfoBox({
+    isShow: true,
+    type: 'warning',
+    title: () => t('确认停用 {n}？', { n: server.name }),
     subTitle: t('停用后，{n} 下所有工具不可访问，请确认！', { n: server.name }),
+    confirmText: t('确认停用'),
+    cancelText: t('取消'),
     onConfirm: async () => {
       await patchServerStatus(gatewayId, id, { status: 0 });
       Message({
         theme: 'success',
         message: t('已停用'),
       });
-      await fetchServerList();
+      resetPagination();
     },
   });
 };
 
 const handleEnable = async (id: number) => {
   await patchServerStatus(gatewayId, id, { status: 1 });
-  await fetchServerList();
   Message({
     theme: 'success',
     message: t('已启用'),
   });
+  resetPagination();
 };
 
 const handleDelete = async (id: number) => {
   const server = serverList.value.find(server => server.id === id);
   if (server) {
-    InfoBox({
+    usePopInfoBox({
+      isShow: true,
+      type: 'warning',
       title: t('确定删除 {n}？', { n: server.name }),
-      infoType: 'danger',
-      subTitle: t('删除后，{n} 不可恢复，请谨慎操作！', { n: server.name }),
+      subTitle: () => t('删除后，{n} 不可恢复，请谨慎操作！', { n: server.name }),
+      confirmText: t('删除'),
+      cancelText: t('取消'),
+      confirmButtonTheme: 'danger',
       onConfirm: async () => {
         await deleteServer(gatewayId, id);
         Message({
           theme: 'success',
-          message: t('已删除'),
+          message: t('删除成功'),
         });
-        await fetchServerList();
+        resetPagination();
       },
     });
   }
 };
 
 const handleServerUpdated = () => {
-  fetchServerList();
+  // 如果是新建编辑mcp重置滚动条到顶部
+  const mcpEl = document.querySelector('.MCPServer-navigation-content .default-header-view');
+  if (mcpEl?.scrollTop > 0) {
+    mcpEl.scrollTop = 0;
+  }
+  resetPagination();
 };
 
 const handleCardClick = (id: number) => {
@@ -145,8 +245,39 @@ const handleCardClick = (id: number) => {
   });
 };
 
-onMounted(() => {
+const handleResize = () => {
+  const newLimit = calculateMaxVisibleCards();
+  if (pagination.value.limit !== newLimit) {
+    pagination.value.limit = newLimit || 3;
+    resetPagination();
+  }
+};
+
+const onIntersectionObserver = ([entry]: IntersectionObserverEntry[]) => {
+  if (entry?.isIntersecting) {
+    fetchServerList();
+  }
+};
+
+const resetPagination = () => {
+  // 保留上一次的limit
+  const lastLimit = pagination.value.limit * (pagination.value.current - 1);
+  pagination.value = Object.assign(pagination.value, {
+    limit: lastLimit,
+    current: 1,
+    count: 0,
+    hasNoMore: false,
+  });
   fetchServerList();
+};
+
+onMounted(() => {
+  pagination.value.limit = calculateMaxVisibleCards();
+  window.addEventListener('resize', handleResize);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize);
 });
 </script>
 
@@ -172,18 +303,45 @@ onMounted(() => {
         color: #3a84ff;
       }
     }
+
+    :deep(.ag-mcp-card-wrapper) {
+      padding: 20px 40px;
+
+      .mcp-card-title {
+        max-width: calc(100% - 80px);
+      }
+
+      .mcp-footer-content {
+        right: 40px;
+        left: 40px;
+      }
+    }
   }
 }
 
 @media (min-width: 768px) {
   .add-server-card {
-    width: calc(50% - 12px);
+    width: calc(50% - 24px);
+  }
+
+  :deep(.ag-mcp-card-wrapper) {
+    width: calc(50% - 24px);
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1280px) {
   .add-server-card {
     width: calc(33.333% - 16px);
+  }
+
+  :deep(.ag-mcp-card-wrapper) {
+    width: calc(33.333% - 16px);
+  }
+}
+
+@media (max-width: 1320px) {
+  :deep(.mcp-card-title) {
+    min-width: 30px;
   }
 }
 </style>

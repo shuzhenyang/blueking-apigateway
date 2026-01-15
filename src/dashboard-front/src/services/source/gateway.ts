@@ -16,7 +16,6 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import http from '../http';
-import { blobDownLoad } from '@/utils';
 
 const path = '/gateways';
 
@@ -43,6 +42,11 @@ interface IApiGateway {
   created_by: string
   created_time: string
   updated_time: string
+  operation_status: {
+    status?: string
+    link?: string
+    source?: string
+  }
 }
 
 interface IApiGatewayDetail extends IApiGateway {
@@ -64,6 +68,8 @@ interface IApiGatewayDetail extends IApiGateway {
   bk_app_codes: string[]
   related_app_codes: string[]
   links: any
+  is_deprecated: boolean
+  deprecated_note: string
 }
 
 interface IApiGatewayEditParam {
@@ -154,6 +160,8 @@ export const patchGateway = (id: number, data: Partial<IApiGatewayEditParam>) =>
 
 export const putGatewayBasics = (id: number, data: Partial<IApiGatewayEditParam>) => http.put(`${path}/${id}/`, data);
 
+export const checkNameAvailable = (param: { name: string }) => http.get(`${path}/check-name-available/`, param);
+
 // 获取操作指引
 export const getGuideDocs = (id: number) => http.get(`${path}/${id}/dev-guideline/`);
 
@@ -171,10 +179,4 @@ export const getReleasingStatus = (apigwId: number) => http.get(`${path}/${apigw
  * @param apigwId 网关id
  * @param data 导出参数
  */
-export const exportDocs = async (apigwId: number, data: any) => {
-  const res = await http.post(`${path}/${apigwId}/docs/export/`, data, {
-    responseType: 'blob',
-    catchError: true,
-  });
-  return blobDownLoad(res);
-};
+export const exportDocs = async (apigwId: number, data: any) => http.post(`${path}/${apigwId}/docs/export/`, data, { responseType: 'blob' });

@@ -152,12 +152,24 @@
                               :class="{ active: api.id === curApi?.id }"
                               @click="() => handleApiClick(api.id, api.name)"
                             >
-                              <header
-                                v-dompurify-html="getHighlightedHtml(api.name)"
-                                class="res-item-name"
-                              />
+                              <div class="flex items-center">
+                                <header
+                                  :ref="el => setNameRef(el, api.id)"
+                                  v-bk-xss-html="getHighlightedHtml(api.name)"
+                                  v-bk-tooltips="{ content: api.name, disabled: !overflowMap[api.id]?.name }"
+                                  class="res-item-name mr-8px"
+                                />
+                                <BkTag
+                                  v-if="curTargetBasics?.is_deprecated"
+                                  theme="danger"
+                                >
+                                  deprecated
+                                </BkTag>
+                              </div>
                               <main
-                                v-dompurify-html="getHighlightedHtml(api.description)"
+                                :ref="el => setDescRef(el, api.id)"
+                                v-bk-xss-html="getHighlightedHtml(api.description)"
+                                v-bk-tooltips="{ content: api.description, disabled: !overflowMap[api.id]?.desc }"
                                 class="res-item-desc"
                               />
                             </article>
@@ -182,6 +194,7 @@
                   v-if="apiList.length && curApi"
                   v-bkloading="{ loading: isLoading }"
                   :api="curApi"
+                  :basics="curTargetBasics"
                   :nav-list="navList"
                   :markdown-html="curApiMarkdownHtml"
                   :updated-time="updatedTime"
@@ -330,6 +343,11 @@ const allSystemList = computed(() => {
 // 分类列表变化时更新 collapse 展开状态
 watch(apiGroupList, () => {
   activeGroupPanelNames.value = apiGroupList.value.map(item => item.name);
+});
+
+watch([filteredApiList, keyword], async () => {
+  await nextTick();
+  checkOverflow();
 });
 
 watch(() => route.query, async () => {
@@ -545,6 +563,64 @@ const getHighlightedHtml = (value: string) => {
     return value.replace(new RegExp(`(${keyword.value})`, 'i'), '<em class="ag-keyword">$1</em>');
   }
   return value;
+};
+
+const nameRefs = new Map<number, HTMLElement>();
+const descRefs = new Map<number, HTMLElement>();
+type IOverflow = {
+  name: boolean
+  desc: boolean
+};
+
+const overflowMapRef = ref<Record<number, IOverflow>>({});
+const overflowMap = computed(() => overflowMapRef.value);
+
+const toHTMLElement = (el: any): HTMLElement | null => {
+  if (!el) return null;
+  if (el instanceof HTMLElement) return el;
+  if (el?.$el instanceof HTMLElement) return el.$el;
+  return null;
+};
+
+const setNameRef = (el: any, id: number) => {
+  const node = toHTMLElement(el);
+  if (!node) {
+    nameRefs.delete(id);
+    return;
+  }
+  nameRefs.set(id, node);
+};
+
+const setDescRef = (el: any, id: number) => {
+  const node = toHTMLElement(el);
+  if (!node) {
+    descRefs.delete(id);
+    return;
+  }
+  descRefs.set(id, node);
+};
+
+const checkOverflow = () => {
+  nameRefs.forEach((el, id) => {
+    const nameOverflow = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
+    if (!overflowMapRef.value[id]) {
+      overflowMapRef.value[id] = {
+        name: false,
+        desc: false,
+      };
+    }
+    overflowMapRef.value[id].name = nameOverflow;
+  });
+  descRefs.forEach((el, id) => {
+    const descOverflow = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
+    if (!overflowMapRef.value[id]) {
+      overflowMapRef.value[id] = {
+        name: false,
+        desc: false,
+      };
+    }
+    overflowMapRef.value[id].desc = descOverflow;
+  });
 };
 
 const boardList = ref<IBoard[]>([]);
@@ -841,24 +917,24 @@ onBeforeMount(() => {
         flex-direction: column;
         justify-content: center;
 
-        .res-item-name,
         .res-item-desc {
           display: -webkit-box;
           overflow: hidden;
           -webkit-box-orient: vertical;
           -webkit-line-clamp: 1;
-        }
-
-        .res-item-name {
-          font-size: 14px;
-          line-height: 22px;
-          color: #313238;
-        }
-
-        .res-item-desc {
           font-size: 12px;
           line-height: 20px;
           color: #979ba5;
+        }
+
+        .res-item-name {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 14px;
+          line-height: 22px;
+          color: #313238;
         }
 
         &:hover,

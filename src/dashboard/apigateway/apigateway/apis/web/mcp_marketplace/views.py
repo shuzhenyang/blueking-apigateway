@@ -70,7 +70,10 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
         keyword = slz.validated_data.get("keyword")
         if keyword:
             queryset = queryset.filter(
-                Q(name__icontains=keyword) | Q(description__icontains=keyword) | Q(_labels__icontains=keyword)
+                Q(name__icontains=keyword)
+                | Q(title__icontains=keyword)
+                | Q(description__icontains=keyword)
+                | Q(_labels__icontains=keyword)
             )
 
         # tenant_id filter here
@@ -80,6 +83,9 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
 
         # optimize query by using select_related
         queryset = queryset.select_related("gateway", "stage")
+
+        # order by updated_time desc
+        queryset = queryset.order_by("-updated_time")
 
         # note: the stage offline will update related mcp server status to inactive,
         # the stage publish will update the mcp server resource_names,
@@ -107,12 +113,17 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
             for stage in Stage.objects.filter(id__in=stage_ids)
         }
 
+        # 获取 prompts_count
+        mcp_server_ids = [mcp_server.id for mcp_server in page]
+        prompts_count_map = MCPServerHandler.get_prompts_count_map(mcp_server_ids)
+
         slz = MCPServerListOutputSLZ(
             page,
             many=True,
             context={
                 "gateways": gateways,
                 "stages": stages,
+                "prompts_count_map": prompts_count_map,
             },
         )
 
@@ -151,12 +162,13 @@ class MCPMarketplaceServerRetrieveApi(generics.RetrieveAPIView):
             template_name,
             context={
                 "name": instance.name,
-                "sse_url": build_mcp_server_url(instance.name),
+                "url": build_mcp_server_url(instance.name, instance.protocol_type),
                 "description": instance.description,
                 "bk_login_ticket_key": settings.BK_LOGIN_TICKET_KEY,
                 "bk_access_token_doc_url": settings.BK_ACCESS_TOKEN_DOC_URL,
                 "enable_multi_tenant_mode": settings.ENABLE_MULTI_TENANT_MODE,
                 "user_tenant_id": user_tenant_id,
+                "protocol_type": instance.protocol_type,
             },
         )
         # set the guideline here, for slz
@@ -187,12 +199,23 @@ class MCPMarketplaceServerRetrieveApi(generics.RetrieveAPIView):
         # append the maintainers
         instance.maintainers = instance.gateway.maintainers
 
+        # 获取 prompts_count 和 prompts 列表
+        prompts_count_map = MCPServerHandler.get_prompts_count_map([instance.id])
+        prompts = MCPServerHandler.get_prompts(instance.id)
+
+        # 获取用户自定义文档
+        user_custom_doc = MCPServerHandler.get_user_custom_doc(instance.id)
+
         serializer = self.get_serializer(
             instance,
             context={
                 "gateways": gateways,
                 "stages": stages,
                 "labels": labels,
+                "tool_name_map": instance.gen_tool_name_map(),
+                "prompts_count_map": prompts_count_map,
+                "prompts": prompts,
+                "user_custom_doc": user_custom_doc,
             },
         )
         # 返回工具列表页面需要的信息

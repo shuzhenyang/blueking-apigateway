@@ -161,8 +161,8 @@ requires-dist = [
     { name = "bkapi-client-core", specifier = "==1.2.0" },
     { name = "bkapi-client-generator", specifier = "==0.1.30" },
     { name = "bkapi-component-open", specifier = ">=1.0.3,<2" },
-    { name = "bkpaas-auth", specifier = "==3.1.2" },
-    { name = "blue-krill", specifier = "==2.1.2" },
+    { name = "bkpaas-auth", specifier = "==3.1.3" },
+    { name = "blue-krill", specifier = "==2.1.5" },
     { name = "cachetools", specifier = "==6.1.0" },
     { name = "celery", specifier = "==5.5.3" },
     { name = "certifi", specifier = "==2025.7.14" },
@@ -424,21 +424,21 @@ sdist = { url = "https://files.pythonhosted.org/packages/2a/92/177b8d4694c14180b
 
 [[package]]
 name = "bkpaas-auth"
-version = "3.1.2"
+version = "3.1.3"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "django" },
     { name = "requests" },
     { name = "six" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/ee/35ad48109dd93f76a6905a6fd9022b472003367586e9f9ec676cb1e2b02c/bkpaas_auth-3.1.2.tar.gz", hash = "sha256:20595bcfbce7ea6f7fd0cd21cd7136cdb1452752cf5ebbc3c610dd5658f6950e", size = 19959, upload-time = "2025-06-13T06:59:17.44Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/e4/35bae2539ffacd11f7a18e98eb7ccfb7864d2a929a6f4b6f9b7d81bff9e3/bkpaas_auth-3.1.3.tar.gz", hash = "sha256:e415096458beadb0edd051dd67aeaf56544b717f16c89a71f00671a2c340dd1f", size = 18428, upload-time = "2025-12-10T08:46:24.535Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/6d/76a51037e4225e9b6669fdf446240c3f89d30cb2bc41d0bf2985a2e93958/bkpaas_auth-3.1.2-py3-none-any.whl", hash = "sha256:4bb5614d38679144f7c1ec82d54529f956e5fa2e778b6d14e420d40f14164d13", size = 24032, upload-time = "2025-06-13T07:24:55.698Z" },
+    { url = "https://files.pythonhosted.org/packages/67/15/dfe55d8e73509c5a3e6541d4aaa3fe1d49536ab894f97b2087fc3cc8a120/bkpaas_auth-3.1.3-py3-none-any.whl", hash = "sha256:175365f72388c66bec597467374396fd85ab1ad835a0e6c9732062e6f4e4a5a2", size = 23828, upload-time = "2025-12-10T08:46:23.178Z" },
 ]
 
 [[package]]
 name = "blue-krill"
-version = "2.1.2"
+version = "2.1.5"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "bk-crypto-python-sdk" },
@@ -455,9 +455,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/df/ed1cabd6846517e99e0742d1c587ca5a18bb1d4597bda10027ab6e249a59/blue_krill-2.1.2.tar.gz", hash = "sha256:c3ed6baf0e00a6da9b95d4fe68a7198e0ad872cd0fae4508ff3a4a85825a09e2", size = 65156, upload-time = "2025-03-20T11:29:30.547Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/c3/b3b40410e273dfa29fe6320dad3c7b150a5752ab383bc716828ccf3094d2/blue_krill-2.1.5.tar.gz", hash = "sha256:fc7e82a8b56d8739c70388a10acdde1ff76ed0d8ec2e7c3fb7d4cc87109dacdc", size = 64102, upload-time = "2025-12-19T09:11:37.594Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/24/f032d798d23de0235bc2e08a98457cfb8818039d5a6ea38b4ce425cc7b7f/blue_krill-2.1.2-py3-none-any.whl", hash = "sha256:25cd214a4746a421550b034f7145df45c30ccc854115e1043b11486b16fb7bb0", size = 103478, upload-time = "2025-03-20T11:29:28.816Z" },
+    { url = "https://files.pythonhosted.org/packages/57/73/01f3853e9ccffcb8a717b588293a47cb284a07fcb2b06e5667cb356015ed/blue_krill-2.1.5-py3-none-any.whl", hash = "sha256:ed626eb867f6069a702cee029a1e37ed3d41a1dd7a474509a997c25d53abd85a", size = 98547, upload-time = "2025-12-19T09:16:06.183Z" },
 ]
 
 [[package]]

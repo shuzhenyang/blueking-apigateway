@@ -29,6 +29,19 @@
         {{ t('该资源无请求参数') }}
       </BkCheckbox>
     </div>
+    <div
+      v-if="!readonly && !disabled"
+      class="text-right mb-6px"
+    >
+      <IconButton
+        text
+        theme="primary"
+        icon="upload"
+        @click="handleImportSchema"
+      >
+        {{ t('通过 JSON 生成') }}
+      </IconButton>
+    </div>
     <BkTable
       v-if="!disabled"
       ref="tableRef"
@@ -57,7 +70,23 @@
             :disabled="row.in === 'body'"
             :placeholder="t('参数名')"
             class="edit-input"
-          />
+            :class="{ 'has-error': invalidRowIdMap[row.id] }"
+            @change="() => clearInvalidState(row.id)"
+            @input="() => clearInvalidState(row.id)"
+          >
+            <template
+              v-if="invalidRowIdMap[row.id]"
+              #suffix
+            >
+              <div class="h-full pr-6px bg-#fff0f1 content-center">
+                <AgIcon
+                  name="exclamation-circle-fill"
+                  size="12"
+                  class="color-#EA3636 h-12px "
+                />
+              </div>
+            </template>
+          </BkInput>
         </template>
       </BkTableColumn>
       <BkTableColumn
@@ -212,6 +241,7 @@
       <template #expandRow="row">
         <div v-if="row?.in === 'body'">
           <RequestParamsTable
+            ref="sub-table-ref"
             v-model="row.body"
             :readonly="readonly"
           />
@@ -242,6 +272,8 @@ import {
   type JSONSchema7,
   type JSONSchema7TypeName,
 } from 'json-schema';
+import { useFileSystemAccess } from '@vueuse/core';
+import toJsonSchema from 'to-json-schema';
 
 interface ITableRow {
   id: string
@@ -295,8 +327,18 @@ const {
   readonly = false,
 } = defineProps<IProp>();
 
+const { data: importedJsonText, fileSize, open } = useFileSystemAccess({
+  dataType: 'Text',
+  types: [{
+    description: 'text',
+    accept: { 'text/plain': ['.txt', '.json'] },
+  }],
+});
+
 const { t } = useI18n();
+
 const tableRef = ref();
+const subTableRef = useTemplateRef('sub-table-ref');
 
 const tableData = ref<ITableRow[]>([
   {
@@ -309,7 +351,10 @@ const tableData = ref<ITableRow[]>([
     description: '',
   },
 ]);
-const inList = ref([
+
+const invalidRowIdMap = ref<Record<string, boolean>>({});
+
+const inList = [
   {
     label: 'Header',
     value: 'header',
@@ -326,9 +371,9 @@ const inList = ref([
     label: 'Body',
     value: 'body',
   },
-]);
+];
 
-const typeList = ref([
+const typeList = [
   {
     label: 'String',
     value: 'string',
@@ -349,7 +394,7 @@ const typeList = ref([
     label: 'Object',
     value: 'object',
   },
-]);
+];
 
 const convertPropertyType = (type: string): JSONSchema7TypeName => {
   switch (type) {
@@ -387,6 +432,23 @@ const convertSchemaToBodyRow = (schema: JSONSchema7) => {
       };
       if (Object.keys(property.properties || {}).length) {
         row.body = convertSchemaToBodyRow(property);
+      }
+      else if (property.type === 'array' && Object.keys(property.items || {}).length) {
+        if (property.items.type === 'object') {
+          row.body = [{
+            id: uniqueId(),
+            name: '',
+            type: 'object',
+            required: false,
+            default: '',
+            description: property.items.description ?? '',
+            body: [],
+          }];
+          row.body[0].body = convertSchemaToBodyRow(property.items);
+        }
+        else {
+          row.body = convertSchemaToBodyRow(property.items);
+        }
       }
       body.push(row);
     }
@@ -626,18 +688,122 @@ const handleTableMounted = () => {
   tableRef.value?.setAllRowExpand(true);
 };
 
+const handleImportSchema = async () => {
+  await open();
+  // 文件大小限制为 10KB
+  if (fileSize.value > 10 * 1024) {
+    Message({
+      theme: 'warning',
+      message: t('文件大小超过 10KB'),
+    });
+    return;
+  }
+
+  if (importedJsonText.value) {
+    let jsonObject: any = {};
+    try {
+      jsonObject = JSON.parse(importedJsonText.value);
+    }
+    catch {
+      Message({
+        theme: 'error',
+        message: t('请选择合法的 JSON'),
+      });
+      return;
+    }
+
+    try {
+      const schema = toJsonSchema(jsonObject);
+
+      const row = {
+        id: uniqueId(),
+        name: t('根节点'),
+        in: 'body',
+        type: 'object' as JSONSchema7TypeName,
+        required: false,
+        description: '',
+      };
+
+      // 是否已存在 request body 表格行
+      const currentBodyRowIndex = tableData.value.findIndex(item => item.in === 'body');
+      if (currentBodyRowIndex > -1) {
+        Object.assign(row, tableData.value[currentBodyRowIndex]);
+      }
+
+      const subBody = convertSchemaToBodyRow(schema);
+      if (subBody) {
+        Object.assign(row, { body: subBody });
+      }
+
+      // 替换行
+      if (currentBodyRowIndex > -1) {
+        tableData.value[currentBodyRowIndex] = row;
+      }
+      // 插入新行
+      else {
+        tableData.value.push(row);
+      }
+
+      nextTick(() => {
+        tableRef.value?.setAllRowExpand(true);
+      });
+    }
+    catch {
+      Message({
+        theme: 'error',
+        message: t('生成 JSON Schema 失败'),
+      });
+    }
+  }
+  else {
+    Message({
+      theme: 'warning',
+      message: t('请选择合法的 JSON'),
+    });
+  }
+};
+
+const setInvalidRowId = () => {
+  invalidRowIdMap.value = {};
+  tableData.value?.forEach((row) => {
+    if (!row.name) {
+      invalidRowIdMap.value[row.id] = true;
+    }
+  });
+};
+
+const clearInvalidState = (rowId: string) => {
+  delete invalidRowIdMap.value[rowId];
+};
+
 onMounted(() => {
   tableRef.value?.setAllRowExpand(true);
 });
 
 defineExpose({
-  getValue: () => {
-    const parameters = genParameters();
-    const requestBody = genBody();
-    return {
-      parameters,
-      requestBody,
-    };
+  getValue: async () => {
+    try {
+      await subTableRef.value?.validate();
+
+      setInvalidRowId();
+      if (Object.keys(invalidRowIdMap.value).length) {
+        throw new Error('invalid request params');
+      }
+
+      const parameters = genParameters();
+      const requestBody = genBody();
+      return {
+        parameters,
+        requestBody,
+      };
+    }
+    catch {
+      Message({
+        theme: 'warning',
+        message: t('请填写完整的请求参数'),
+      });
+      throw new Error('invalid request params');
+    }
   },
 });
 </script>
@@ -673,6 +839,13 @@ defineExpose({
 
   &:hover {
     border: 1px solid #a3c5fd;
+  }
+
+  &.has-error {
+
+    :deep(.bk-input--text) {
+      background-color: #fff0f1 !important;
+    }
   }
 }
 

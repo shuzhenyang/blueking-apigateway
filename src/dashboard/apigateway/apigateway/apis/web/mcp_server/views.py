@@ -30,16 +30,24 @@ from apigateway.apps.mcp_server.constants import (
     MCPServerAppPermissionApplyProcessedStateEnum,
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerAppPermissionGrantTypeEnum,
+    MCPServerExtendTypeEnum,
     MCPServerStatusEnum,
 )
-from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission, MCPServerAppPermissionApply
+from apigateway.apps.mcp_server.models import (
+    MCPServer,
+    MCPServerAppPermission,
+    MCPServerAppPermissionApply,
+    MCPServerExtend,
+)
 from apigateway.biz.audit import Auditor
 from apigateway.biz.mcp_server import MCPServerHandler
+from apigateway.biz.mcp_server.prompt import MCPServerPromptHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.constants import CallSourceTypeEnum
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
 from apigateway.common.tenant.request import get_user_tenant_id
+from apigateway.common.tenant.user_credentials import get_user_credentials_from_request
 from apigateway.core.models import Stage
 from apigateway.service.mcp.mcp_server import build_mcp_server_url
 from apigateway.utils.django import get_model_dict
@@ -56,6 +64,10 @@ from .serializers import (
     MCPServerCreateInputSLZ,
     MCPServerGuidelineOutputSLZ,
     MCPServerListOutputSLZ,
+    MCPServerRemotePromptsBatchInputSLZ,
+    MCPServerRemotePromptsBatchOutputSLZ,
+    MCPServerRemotePromptsOutputSLZ,
+    MCPServerRemotePromptsQueryInputSLZ,
     MCPServerRetrieveOutputSLZ,
     MCPServerStageReleaseCheckInputSLZ,
     MCPServerStageReleaseCheckOutputSLZ,
@@ -64,6 +76,8 @@ from .serializers import (
     MCPServerUpdateInputSLZ,
     MCPServerUpdateLabelsInputSLZ,
     MCPServerUpdateStatusInputSLZ,
+    MCPServerUserCustomDocInputSLZ,
+    MCPServerUserCustomDocOutputSLZ,
 )
 
 
@@ -86,7 +100,7 @@ from .serializers import (
 )
 class MCPServerListCreateApi(generics.ListCreateAPIView):
     def list(self, request, *args, **kwargs):
-        queryset = MCPServer.objects.filter(gateway=self.request.gateway).order_by("-status", "-id")
+        queryset = MCPServer.objects.filter(gateway=self.request.gateway).order_by("-status", "-updated_time")
 
         page = self.paginate_queryset(queryset)
 
@@ -97,21 +111,30 @@ class MCPServerListCreateApi(generics.ListCreateAPIView):
             }
             for stage in Stage.objects.filter(gateway=self.request.gateway)
         }
+
+        # 获取 prompts_count
+        mcp_server_ids = [mcp_server.id for mcp_server in page]
+        prompts_count_map = MCPServerHandler.get_prompts_count_map(mcp_server_ids)
+
         slz = MCPServerListOutputSLZ(
             page,
             many=True,
-            context={"stages": stages},
+            context={"stages": stages, "prompts_count_map": prompts_count_map},
         )
 
         return self.get_paginated_response(slz.data)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
+        valid_resource_names = MCPServerHandler().get_valid_resource_names(
+            gateway_id=self.request.gateway.id, stage_id=request.data["stage_id"]
+        )
         ctx = {
             "gateway": self.request.gateway,
             "created_by": request.user.username,
             "status": MCPServerStatusEnum.ACTIVE.value,
             "source": CallSourceTypeEnum.Web,
+            "valid_resource_names": valid_resource_names,
         }
         slz = MCPServerCreateInputSLZ(data=request.data, context=ctx)
         slz.is_valid(raise_exception=True)
@@ -181,7 +204,9 @@ class MCPServerRetrieveUpdateDestroyApi(generics.RetrieveUpdateDestroyAPIView):
             }
         }
 
-        serializer = self.get_serializer(instance, context={"stages": stages})
+        prompts = MCPServerHandler.get_prompts(instance.id)
+
+        serializer = self.get_serializer(instance, context={"stages": stages, "prompts": prompts})
         return OKJsonResponse(data=serializer.data)
 
     def update(self, request, *args, **kwargs):
@@ -195,7 +220,10 @@ class MCPServerRetrieveUpdateDestroyApi(generics.RetrieveUpdateDestroyAPIView):
         )
 
         slz = MCPServerUpdateInputSLZ(
-            instance, data=request.data, partial=partial, context={"valid_resource_names": valid_resource_names}
+            instance,
+            data=request.data,
+            partial=partial,
+            context={"valid_resource_names": valid_resource_names, "username": request.user.username},
         )
         slz.is_valid(raise_exception=True)
         slz.save(updated_by=request.user.username)
@@ -221,6 +249,9 @@ class MCPServerRetrieveUpdateDestroyApi(generics.RetrieveUpdateDestroyAPIView):
 
         if instance.is_active:
             raise error_codes.FAILED_PRECONDITION.format(_("请先停用 MCPServer，然后再删除。"), replace=True)
+
+        # 删除 prompts
+        MCPServerHandler.delete_prompts(instance.id)
 
         instance.delete()
 
@@ -331,7 +362,7 @@ class MCPServerToolsListApi(generics.ListAPIView):
         slz = MCPServerToolOutputSLZ(
             tool_resources,
             many=True,
-            context={"labels": labels},
+            context={"labels": labels, "tool_name_map": instance.gen_tool_name_map()},
         )
 
         return OKJsonResponse(status=status.HTTP_200_OK, data=slz.data)
@@ -340,7 +371,7 @@ class MCPServerToolsListApi(generics.ListAPIView):
 @method_decorator(
     name="get",
     decorator=swagger_auto_schema(
-        operation_description="获取 MCPServer 使用指南",
+        operation_description="获取 MCPServer 官方使用指南",
         responses={status.HTTP_200_OK: MCPServerGuidelineOutputSLZ()},
         tags=["WebAPI.MCPServer"],
     ),
@@ -359,14 +390,16 @@ class MCPServerGuidelineRetrieveApi(generics.RetrieveAPIView):
             template_name,
             context={
                 "name": instance.name,
-                "sse_url": build_mcp_server_url(instance.name),
+                "url": build_mcp_server_url(instance.name, instance.protocol_type),
                 "description": instance.description,
                 "bk_login_ticket_key": settings.BK_LOGIN_TICKET_KEY,
                 "bk_access_token_doc_url": settings.BK_ACCESS_TOKEN_DOC_URL,
                 "enable_multi_tenant_mode": settings.ENABLE_MULTI_TENANT_MODE,
                 "user_tenant_id": user_tenant_id,
+                "protocol_type": instance.protocol_type,
             },
         )
+
         slz = self.get_serializer({"content": content})
 
         return OKJsonResponse(data=slz.data)
@@ -397,6 +430,107 @@ class MCPServerToolDocRetrieveApi(generics.RetrieveAPIView):
 
         slz = MCPServerToolDocOutputSLZ(doc)
         return OKJsonResponse(data=slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="获取 MCPServer 用户自定义文档",
+        responses={status.HTTP_200_OK: MCPServerUserCustomDocOutputSLZ()},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+@method_decorator(
+    name="post",
+    decorator=swagger_auto_schema(
+        operation_description="创建 MCPServer 用户自定义文档",
+        request_body=MCPServerUserCustomDocInputSLZ,
+        responses={status.HTTP_201_CREATED: ""},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+@method_decorator(
+    name="put",
+    decorator=swagger_auto_schema(
+        operation_description="更新 MCPServer 用户自定义文档",
+        request_body=MCPServerUserCustomDocInputSLZ,
+        responses={status.HTTP_204_NO_CONTENT: ""},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+@method_decorator(
+    name="delete",
+    decorator=swagger_auto_schema(
+        operation_description="删除 MCPServer 用户自定义文档",
+        responses={status.HTTP_204_NO_CONTENT: ""},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPServerUserCustomDocApi(generics.RetrieveUpdateDestroyAPIView, generics.CreateAPIView):
+    queryset = MCPServer.objects.all()
+    lookup_url_kwarg = "mcp_server_id"
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        extend = MCPServerExtend.objects.filter(
+            mcp_server=instance, type=MCPServerExtendTypeEnum.USER_CUSTOM_DOC.value
+        ).first()
+
+        content = extend.content if extend else ""
+        slz = MCPServerUserCustomDocOutputSLZ({"content": content})
+
+        return OKJsonResponse(data=slz.data)
+
+    def create(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        # 检查是否已存在
+        if MCPServerExtend.objects.filter(
+            mcp_server=instance, type=MCPServerExtendTypeEnum.USER_CUSTOM_DOC.value
+        ).exists():
+            raise error_codes.FAILED_PRECONDITION.format(_("用户自定义文档已存在，请使用更新接口。"), replace=True)
+
+        slz = MCPServerUserCustomDocInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        MCPServerExtend.objects.create(
+            mcp_server=instance,
+            type=MCPServerExtendTypeEnum.USER_CUSTOM_DOC.value,
+            content=slz.validated_data["content"],
+            created_by=request.user.username,
+            updated_by=request.user.username,
+        )
+
+        return OKJsonResponse(status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        extend = MCPServerExtend.objects.filter(
+            mcp_server=instance, type=MCPServerExtendTypeEnum.USER_CUSTOM_DOC.value
+        ).first()
+
+        if not extend:
+            raise error_codes.NOT_FOUND.format(_("用户自定义文档不存在，请先创建。"), replace=True)
+
+        slz = MCPServerUserCustomDocInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        extend.content = slz.validated_data["content"]
+        extend.updated_by = request.user.username
+        extend.save(update_fields=["content", "updated_by", "updated_time"])
+
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        MCPServerExtend.objects.filter(
+            mcp_server=instance, type=MCPServerExtendTypeEnum.USER_CUSTOM_DOC.value
+        ).delete()
+
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
 
 @method_decorator(
@@ -598,7 +732,11 @@ class MCPServerAppPermissionApplyListApi(MCPServerAppPermissionApplyQuerySetMixi
 
         page = self.paginate_queryset(queryset)
 
-        slz = MCPServerAppPermissionApplyListOutputSLZ(page, many=True)
+        context = {
+            "gateway_tenant_mode": request.gateway.tenant_mode,
+            "gateway_tenant_id": request.gateway.tenant_id,
+        }
+        slz = MCPServerAppPermissionApplyListOutputSLZ(page, many=True, context=context)
         return self.get_paginated_response(slz.data)
 
 
@@ -650,3 +788,55 @@ class MCPServerAppPermissionApplyUpdateStatusApi(MCPServerAppPermissionApplyQuer
             MCPServerHandler.sync_permissions(kwargs["mcp_server_id"])
 
         return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
+
+
+# ========== Prompts 相关 API ==========
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="从第三方平台获取 Prompts 列表",
+        query_serializer=MCPServerRemotePromptsQueryInputSLZ,
+        responses={status.HTTP_200_OK: MCPServerRemotePromptsOutputSLZ()},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPServerRemotePromptsListApi(generics.ListAPIView):
+    """从第三方平台获取 Prompts 列表"""
+
+    def list(self, request, *args, **kwargs):
+        slz = MCPServerRemotePromptsQueryInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+
+        # 调用第三方平台获取 prompts 列表
+        user_credentials = get_user_credentials_from_request(request)
+        prompts = MCPServerHandler.fetch_remote_prompts(user_credentials=user_credentials)
+
+        output_slz = MCPServerRemotePromptsOutputSLZ({"prompts": prompts})
+        return OKJsonResponse(data=output_slz.data)
+
+
+@method_decorator(
+    name="post",
+    decorator=swagger_auto_schema(
+        operation_description="根据 ID 列表批量获取第三方平台 Prompts 内容",
+        request_body=MCPServerRemotePromptsBatchInputSLZ,
+        responses={status.HTTP_200_OK: MCPServerRemotePromptsBatchOutputSLZ()},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPServerRemotePromptsBatchApi(generics.CreateAPIView):
+    """根据 ID 列表批量获取第三方平台 Prompts 内容"""
+
+    def create(self, request, *args, **kwargs):
+        slz = MCPServerRemotePromptsBatchInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        prompt_ids = slz.validated_data["ids"]
+
+        # 调用第三方平台批量获取 prompts 内容
+        prompts = MCPServerPromptHandler.fetch_remote_prompts_by_ids(prompt_ids)
+
+        output_slz = MCPServerRemotePromptsBatchOutputSLZ({"prompts": prompts})
+        return OKJsonResponse(data=output_slz.data)

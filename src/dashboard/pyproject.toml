@@ -33,8 +33,8 @@ dependencies = [
     "jsonfield==3.1.0",
     "importlib-metadata==8.4.0",
     "greenlet==3.2.3",
-    "bkpaas-auth==3.1.2",
-    "blue-krill==2.1.2",
+    "bkpaas-auth==3.1.3",
+    "blue-krill==2.1.5",
     "bk-crypto-python-sdk==2.0.1",
     "cryptography==45.0.5",
     "apigw-manager==4.1.0",
@@ -299,6 +299,7 @@ ignore_imports = [
     "apigateway.controller.tasks.release -> apigateway.biz.resource_version",
     "apigateway.apps.support.task -> apigateway.biz.ai.constant",
     "apigateway.apps.support.task -> apigateway.biz.ai.ai",
+    "apigateway.apps.mcp_server.tasks -> apigateway.biz.mcp_server.prompt",
     # -- esb legacy
     "apigateway.apps.esb.*.* -> apigateway.biz.*",
     "apigateway.apps.esb.*.* -> apigateway.biz.*.*",
@@ -341,6 +342,7 @@ ignore_imports = [
     "apigateway.apps.metrics.tasks -> apigateway.service.statistics",
     "apigateway.apps.support.task -> apigateway.biz.ai.constant",
     "apigateway.apps.support.task -> apigateway.biz.ai.ai",
+    "apigateway.apps.mcp_server.tasks -> apigateway.biz.mcp_server.prompt",
     # -- django commands
     "apigateway.apps.*.management.commands.* -> apigateway.core.models",
     "apigateway.core.management.commands.* -> apigateway.biz.gateway",

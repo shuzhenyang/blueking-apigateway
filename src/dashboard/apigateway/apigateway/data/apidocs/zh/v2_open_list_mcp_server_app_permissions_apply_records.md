@@ -24,6 +24,7 @@
       "mcp_server": {
         "id": 1,
         "name": "test",
+        "title": "测试服务",
         "description": null
       },
       "id": 1,
@@ -36,7 +37,8 @@
       "status_display": "通过",
       "comment": "",
       "reason": "",
-      "expire_days": 0
+      "expire_days": 0,
+      "approval_url": "http://dashboard.example.com/123/mcp/permission?serverId=1"
     }
   ]
 }
@@ -64,13 +66,15 @@
 | comment        | string | 审批内容          |
 | reason         | string | 申请理由          |
 | expire_days    | int    | 过期时间          |
+| approval_url   | string | 权限审批 URL      |
 | mcp_server     | object | mcp_server 信息 |
 
 
 #### data.mcp_server
 
-| 参数名称          | 参数类型    | 描述              |
-|---------------|---------|-----------------|
-| id            | int     | mcp_server ID   |
-| name          | string  | mcp_server 名称   |
-| description   | string  | mcp_server 描述   |
+| 参数名称          | 参数类型    | 描述                   |
+|---------------|---------|----------------------|
+| id            | int     | mcp_server ID        |
+| name          | string  | mcp_server 名称        |
+| title         | string  | mcp_server 中文名/显示名称  |
+| description   | string  | mcp_server 描述        |

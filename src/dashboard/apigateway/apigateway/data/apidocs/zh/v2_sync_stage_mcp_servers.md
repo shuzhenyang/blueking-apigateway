@@ -25,11 +25,13 @@ mcp_servers 参数说明
 | 参数名称       | 参数类型          | 必选 | 描述                                                                     |
 |------------|---------------|----|------------------------------------------------------------------------|
 | `name`     | string        | 是  | MCP Server 名字 例如： `"mcp1"`(系统会默认转换为 {gateway_name}-{stage-name}-{name}) |
-| `description` | string        | 否  | MCP Server 描述                                                           |
+| `title`    | string        | 否  | MCP Server 中文名/显示名称                                                    |
+| `description` | string        | 是  | MCP Server 描述                                                           |
 | `labels`   | array[string] | 否  | MCP Server 标签                                                          |
 | `resource_names` | array[string] | 是  | MCP Server 关联的 resource 列表                                             |
 | `is_public` | bool          | 否  | 是否公开，默认不公开                                                             |
 | `status`   | integer          | 否  | 状态：1：启用，0：关闭(默认关闭)                                                     |
+| `protocol_type` | string       | 否  | MCP 协议类型：sse（默认）、streamable_http                                       |
 | `target_app_codes`   | array[string]          | 否  | 主动授权的应用列表                                                              |
 
 
@@ -44,12 +46,14 @@ mcp_servers 参数说明
         "tag2"
       ],
       "name": "server1",
+      "title": "服务1",
       "resource_names": [
         "resource1"
       ],
       "is_public": true,
       "description": "description",
       "status": 1,
+      "protocol_type": "sse",
       "target_app_codes": [
         "app1",
         "app2"
@@ -68,7 +72,7 @@ mcp_servers 参数说明
     "data": [
       {
          "name": "gateway-stage-server1",
-          "action": "create",
+          "action": "created",
           "id": 1
       }
       
@@ -90,4 +94,4 @@ data
 |--------| -------- |------------------|
 | id     | integer  | MCP Server ID    |
 | name   | string   | MCP Serve name   |
-| action | string   | updated / crated |
+| action | string   | updated / created |

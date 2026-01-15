@@ -16,7 +16,7 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
-from typing import ClassVar, List
+from typing import ClassVar, Dict, List
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -30,13 +30,21 @@ from .constants import (
     MCPServerAppPermissionApplyExpireDaysEnum,
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerAppPermissionGrantTypeEnum,
+    MCPServerExtendTypeEnum,
+    MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
 )
+
+# 工具名分隔符：resource_name@tool_name
+TOOL_NAME_SEPARATOR = "@"
+POSITION_RESOURCE_NAME = 0
+POSITION_TOOL_NAME = 1
 
 
 class MCPServer(TimestampedModelMixin, OperatorModelMixin):
     name = models.CharField(max_length=64, unique=True)
-    description = models.CharField(max_length=512, blank=True, null=True)
+    title = models.CharField(max_length=128, blank=True, default="", help_text="MCPServer 中文名/显示名称")
+    description = models.TextField(blank=True, null=True)
 
     gateway = models.ForeignKey(Gateway, on_delete=models.CASCADE)
     stage = models.ForeignKey(Stage, on_delete=models.CASCADE)
@@ -44,9 +52,19 @@ class MCPServer(TimestampedModelMixin, OperatorModelMixin):
     is_public = models.BooleanField(default=False)
 
     _labels = models.CharField(db_column="labels", max_length=1024, blank=True, null=True, default="")
+    # db: resource_name_1;resource_name_2@tool_name_2;resource_name_3@tool_name_3
+    # would parse to resource_names and tool_names, if tool_name is empty, it will be the same as resource_name
+    # resource_names: [resource_name_1, resource_name_2, resource_name_3]
+    # tool_names: [resource_name_1, tool_name_2, tool_name_3]
     _resource_names = models.TextField(db_column="resource_names", blank=True, null=True, default="")
 
     status = models.IntegerField(choices=MCPServerStatusEnum.get_choices())
+    protocol_type = models.CharField(
+        max_length=32,
+        choices=MCPServerProtocolTypeEnum.get_choices(),
+        default=MCPServerProtocolTypeEnum.SSE.value,
+        help_text="MCP 协议类型",
+    )
 
     def __str__(self):
         return f"<MCPServer: {self.pk}/{self.name}>"
@@ -67,22 +85,105 @@ class MCPServer(TimestampedModelMixin, OperatorModelMixin):
         self._labels = ";".join(value)
 
     @property
-    def resource_names(self) -> List[str]:
+    def is_active(self) -> bool:
+        return self.status == MCPServerStatusEnum.ACTIVE.value
+
+    def _parse_resource_names_to_part(self, position: int) -> List[str]:
+        """
+        db: resource_name_1;resource_name_2@tool_name_2;resource_name_3@tool_name_3
+        position: 0 is resource_names list: [resource_name_1, resource_name_2, resource_name_3]
+        position: 1 is tool_names list:     [resource_name_1, tool_name_2, tool_name_3]
+        """
+
         if not self._resource_names:
             return []
-        return self._resource_names.split(";")
+
+        result = []
+        for i in self._resource_names.split(";"):
+            if TOOL_NAME_SEPARATOR in i:
+                result.append(i.split(TOOL_NAME_SEPARATOR)[position])
+            else:
+                result.append(i)
+        return result
+
+    @property
+    def resource_names(self) -> List[str]:
+        """获取纯资源名称列表（去除工具名部分）"""
+        return self._parse_resource_names_to_part(POSITION_RESOURCE_NAME)
 
     @resource_names.setter
     def resource_names(self, value: List[str]):
-        self._resource_names = ";".join(value)
+        raise NotImplementedError(
+            "Not supported, you should use update_resource_names or delete_resource_names instead"
+        )
+
+    def delete_resource_names(self, deleted_resource_names: set) -> bool:
+        """移除已删除的资源
+
+        Args:
+            to_deleted_resource_names: 需要删除的纯资源名称集合
+
+        Returns:
+            是否有资源被移除
+        """
+        if not deleted_resource_names:
+            return False
+
+        current_resource_names = self.resource_names
+        current_tool_names = self.tool_names
+
+        result = []
+        for index, resource_name in enumerate(current_resource_names):
+            if resource_name in deleted_resource_names:
+                continue
+
+            tool_name = current_tool_names[index]
+            if tool_name and tool_name != resource_name:
+                result.append(f"{resource_name}{TOOL_NAME_SEPARATOR}{tool_name}")
+            else:
+                result.append(resource_name)
+
+        self._resource_names = ";".join(result)
+        return True
+
+    @property
+    def tool_names(self) -> List[str]:
+        """获取工具名列表（与 resource_names 顺序对应）
+        如果没有设置工具名，使用资源名
+        """
+        return self._parse_resource_names_to_part(POSITION_TOOL_NAME)
+
+    @tool_names.setter
+    def tool_names(self, value: List[str]):
+        raise NotImplementedError(
+            "Not supported, you should use update_resource_names or delete_resource_names instead"
+        )
 
     @property
     def tools_count(self) -> int:
-        return len(self.resource_names)
+        return len(self.tool_names)
 
-    @property
-    def is_active(self) -> bool:
-        return self.status == MCPServerStatusEnum.ACTIVE.value
+    def gen_tool_name_map(self) -> Dict[str, str]:
+        """生成工具名称映射"""
+        return dict(zip(self.resource_names, self.tool_names))
+
+    def update_resource_names(self, resource_names: List[str], tool_names: List[str]) -> None:
+        """更新资源名称列表
+
+        Args:
+            resource_names: 资源名称列表
+            tool_names: 工具名称列表
+        """
+        if len(resource_names) != len(tool_names):
+            raise ValueError("resource_names and tool_names length must be the same")
+
+        result = []
+        for resource_name, tool_name in zip(resource_names, tool_names):
+            if tool_name and tool_name != resource_name:
+                result.append(f"{resource_name}{TOOL_NAME_SEPARATOR}{tool_name}")
+            else:
+                result.append(resource_name)
+        self._resource_names = ";".join(result)
 
 
 class MCPServerAppPermission(TimestampedModelMixin, OperatorModelMixin):
@@ -130,3 +231,22 @@ class MCPServerAppPermissionApply(TimestampedModelMixin, OperatorModelMixin):
         indexes = [
             models.Index(fields=["mcp_server", "status"]),
         ]
+
+
+class MCPServerExtend(TimestampedModelMixin, OperatorModelMixin):
+    """MCPServer 扩展配置表"""
+
+    mcp_server = models.ForeignKey(MCPServer, on_delete=models.CASCADE, related_name="extends")
+    type = models.CharField(
+        max_length=32, choices=MCPServerExtendTypeEnum.get_choices(), db_index=True, help_text=_("配置类型")
+    )
+    content = models.TextField(blank=True, default="", help_text=_("配置内容"))
+
+    def __str__(self):
+        return f"<MCPServerExtend: {self.pk}/{self.mcp_server_id}/{self.type}>"
+
+    class Meta:
+        verbose_name = _("MCPServer 扩展配置")
+        verbose_name_plural = _("MCPServer 扩展配置")
+        db_table = "mcp_server_extend"
+        unique_together = ("mcp_server", "type")

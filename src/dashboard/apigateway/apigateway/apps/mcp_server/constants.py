@@ -61,3 +61,17 @@ class MCPServerPermissionActionEnum(StructuredEnum):
 class MCPServerLeastPrivilegeEnum(StructuredEnum):
     APPLICATION = EnumField("application")
     APPLICATION_AND_USER = EnumField("application_and_user")
+
+
+class MCPServerExtendTypeEnum(StructuredEnum):
+    """MCPServer 扩展配置类型"""
+
+    USER_CUSTOM_DOC = EnumField("user_custom_doc", label=_("用户自定义文档"))
+    PROMPTS = EnumField("prompts", label=_("Prompts 配置"))
+
+
+class MCPServerProtocolTypeEnum(StructuredEnum):
+    """MCPServer 协议类型"""
+
+    SSE = EnumField("sse", label=_("SSE"))
+    STREAMABLE_HTTP = EnumField("streamable_http", label=_("Streamable HTTP"))

@@ -23,7 +23,11 @@ from ddf import G
 from apigateway.apps.mcp_server.constants import MCPServerStatusEnum
 from apigateway.apps.mcp_server.models import MCPServer
 from apigateway.core.models import Gateway, ResourceVersion, Stage
-from apigateway.service.mcp.mcp_server import build_mcp_server_url, update_stage_mcp_server_related_resource_names
+from apigateway.service.mcp.mcp_server import (
+    build_mcp_server_permission_approval_url,
+    build_mcp_server_url,
+    update_stage_mcp_server_related_resource_names,
+)
 
 
 class TestUpdateStageMcpServerRelatedResourceNames:
@@ -68,7 +72,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server1.resource_names = ["resource1", "resource2", "old_resource"]
+        mcp_server1._resource_names = "resource1;resource2;old_resource"
         mcp_server1.save()
 
         mcp_server2 = G(
@@ -77,7 +81,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server2.resource_names = ["resource3", "another_old_resource"]
+        mcp_server2._resource_names = "resource3;another_old_resource"
         mcp_server2.save()
 
         # Call function with non-existent resource version ID
@@ -99,7 +103,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server.resource_names = ["resource1", "resource2"]
+        mcp_server._resource_names = "resource1;resource2"
         mcp_server.save()
 
         original_resource_names = mcp_server.resource_names.copy()
@@ -120,7 +124,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server.resource_names = ["resource1", "deleted_resource1", "resource2", "deleted_resource2"]
+        mcp_server._resource_names = "resource1;deleted_resource1;resource2;deleted_resource2"
         mcp_server.save()
 
         # Call the function
@@ -139,7 +143,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server.resource_names = ["deleted_resource1", "deleted_resource2", "deleted_resource3"]
+        mcp_server._resource_names = "deleted_resource1;deleted_resource2;deleted_resource3"
         mcp_server.save()
 
         # Call the function
@@ -158,7 +162,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server1.resource_names = ["resource1", "deleted_resource1", "resource2"]
+        mcp_server1._resource_names = "resource1;deleted_resource1;resource2"
         mcp_server1.save()
 
         # MCP server 2: has no deleted resources
@@ -168,7 +172,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server2.resource_names = ["resource1", "resource3"]
+        mcp_server2._resource_names = "resource1;resource3"
         mcp_server2.save()
 
         # MCP server 3: has all deleted resources
@@ -178,7 +182,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server3.resource_names = ["deleted_resource1", "deleted_resource2"]
+        mcp_server3._resource_names = "deleted_resource1;deleted_resource2"
         mcp_server3.save()
 
         # MCP server 4: has no resources
@@ -188,7 +192,7 @@ class TestUpdateStageMcpServerRelatedResourceNames:
             gateway=stage.gateway,
             status=MCPServerStatusEnum.ACTIVE.value,
         )
-        mcp_server4.resource_names = []
+        mcp_server4._resource_names = ""
         mcp_server4.save()
 
         # Call the function
@@ -212,3 +216,21 @@ class TestBuildMCPServerURL:
 
         url = build_mcp_server_url("test-mcp-server")
         assert url == "http://test.com/bk-apigateway/prod/api/v2/mcp-servers/test-mcp-server/sse/"
+
+
+class TestBuildMCPServerPermissionApprovalURL:
+    def test_build_mcp_server_permission_approval_url(self, settings):
+        settings.BK_MCP_SERVER_PERMISSION_APPROVAL_URL_TMPL = (
+            "http://dashboard.example.com/{gateway_id}/mcp/permission?serverId={mcp_server_id}"
+        )
+
+        url = build_mcp_server_permission_approval_url(gateway_id=123, mcp_server_id=456)
+        assert url == "http://dashboard.example.com/123/mcp/permission?serverId=456"
+
+    def test_build_mcp_server_permission_approval_url_with_different_ids(self, settings):
+        settings.BK_MCP_SERVER_PERMISSION_APPROVAL_URL_TMPL = (
+            "http://test.com/{gateway_id}/mcp/permission?serverId={mcp_server_id}"
+        )
+
+        url = build_mcp_server_permission_approval_url(gateway_id=1, mcp_server_id=2)
+        assert url == "http://test.com/1/mcp/permission?serverId=2"

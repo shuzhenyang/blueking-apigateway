@@ -86,7 +86,7 @@
       />
     </template>
     <template #loading>
-      <BkLoading :loading="loading" />
+      <Loading :loading="loading" />
     </template>
     <template #empty>
       <slot name="empty">
@@ -109,12 +109,14 @@ import {
   type PrimaryTableProps,
   type TableRowData,
 } from '@blueking/tdesign-ui';
-import { Checkbox } from 'bkui-vue';
+import { Checkbox, Loading } from 'bkui-vue';
 import { useRequest } from 'vue-request';
 import { cloneDeep, sortBy, sortedUniq } from 'lodash-es';
 import type { BkUiSettings } from '@blueking/tdesign-ui/typings/packages/table/types/table';
 import type { ITableMethod } from '@/types/common';
 import { useMaxTableLimit, useTDesignSelection, useTableSetting } from '@/hooks';
+import i18n from '@/locales';
+import router from '@/router';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
 interface IProps {
@@ -187,11 +189,9 @@ const emit = defineEmits<{
   'refresh': [void]
 }>();
 
+const { t, locale } = i18n.global;
+
 const slots = useSlots();
-
-const route = useRoute();
-
-const { t, locale } = useI18n();
 
 const { maxTableLimit, clientHeight } = useMaxTableLimit(maxLimitConfig);
 
@@ -259,12 +259,17 @@ const selectionColumns = computed(() => [{
   fixed: 'left',
   width: 60,
   title: () => {
+    const isDisabled = disabledSelected.value || tableData.value.every(item => disabledCheckSelection?.(item));
     return (
       <Checkbox
         v-model={isAllSelection.value}
-        disabled={disabledSelected.value || tableData.value.every(item => disabledCheckSelection?.(item))}
+        disabled={isDisabled}
         indeterminate={setIndeterminate.value}
+        class="custom-ag-table-checkbox"
         onChange={() => {
+          if (isDisabled) {
+            return;
+          }
           tableData.value.forEach((item) => {
             if (!disabledCheckSelection?.(item)) {
               item.isCustomCheck = isAllSelection.value;
@@ -285,7 +290,8 @@ const selectionColumns = computed(() => [{
     );
   },
   cell: (h, { row }) => {
-    row.isCustomCheck = selections.value.map(item => item[tableRowKey]).includes(row.id);
+    const isDisabled = disabledSelected.value || disabledCheckSelection?.(row);
+    row.isCustomCheck = selections.value.map(item => item[tableRowKey]).includes(row[tableRowKey]);
     return (
       <Checkbox
         v-model={row.isCustomCheck}
@@ -293,8 +299,13 @@ const selectionColumns = computed(() => [{
           content: row.selectionTip ?? '',
           disabled: typeof disabledCheckSelection === 'undefined' ? true : !disabledCheckSelection?.(row),
         }}
-        disabled={disabledSelected.value || disabledCheckSelection?.(row)}
-        onChange={(isCheck: boolean) => {
+        class="custom-ag-table-checkbox"
+        disabled={isDisabled}
+        onChange={(isCheck: boolean, e: MouseEvent) => {
+          e?.stopPropagation();
+          if (isDisabled) {
+            return;
+          }
           // 这里可以增加disabled逻辑
           handleCustomSelectChange({
             isCheck,
@@ -302,15 +313,20 @@ const selectionColumns = computed(() => [{
             row,
           });
           const selectionTable = tableData.value.filter(item => !disabledCheckSelection?.(item));
-          const checkedIds = tableData.value
-            .filter(item => selectionsRowKeys.value.includes(item[tableRowKey]))
-            .map(check => check[tableRowKey]);
+          const checkedIds = selectionsRowKeys.value.filter(id =>
+            selectionTable.some(item => item[tableRowKey] === id),
+          );
           isAllSelection.value = checkedIds.length > 0 && checkedIds.length === selectionTable.length;
-          tableData.value.forEach((item) => {
-            if (!disabledCheckSelection?.(item) && row[tableRowKey] === item[tableRowKey]) {
-              item.isCustomCheck = row.isCustomCheck;
+          tableData.value = tableData.value.map((item) => {
+            if (!disabledCheckSelection?.(item) && item[tableRowKey] === row[tableRowKey]) {
+              return {
+                ...item,
+                isCustomCheck: isCheck,
+              };
             }
+            return item;
           });
+
           emit('selection-change', {
             selectionsRowKeys: checkedIds,
             selections: selections.value,
@@ -357,8 +373,10 @@ const { params, loading, error, refresh, run } = useRequest(apiMethod, {
     const results = response?.results ?? [];
     paramsData.value = { ...params.value?.[0] };
     pagination.value!.total = response?.count ?? 0;
-    tableData.value = [...results];
-    getSelectionData();
+    tableData.value = cloneDeep(results);
+    setTimeout(() => {
+      getSelectionData();
+    });
     // 处理接口调用成功后抛出事件，为每个页面提供单独业务处理
     emit('request-done');
   },
@@ -422,14 +440,21 @@ const fetchData = (
   });
 };
 
-// 获取回显勾选项数据
-const getSelectionData = () => {
-  if (selectionsRowKeys.value?.length > 0 && tableData.value?.length > 0) {
+// 渲染复选框选中数据
+const renderSelectionData = (selectList?: any[]) => {
+  // 自定义传入勾选数据
+  if (selectList) {
+    selections.value = selectList;
+    selectionsRowKeys.value = selectList.map(item => item[tableRowKey]);
+  }
+  const checkTableData = selectList || selectionsRowKeys.value;
+  if (checkTableData?.length > 0 && tableData.value?.length > 0) {
     const selectionTable = tableData.value.filter(item => !disabledCheckSelection?.(item));
-    const checkedIds = tableData.value
-      .filter(item => selectionsRowKeys.value.includes(item[tableRowKey]))
+    const checkedIds = selectionTable
+      .filter(item => checkTableData.includes(item[tableRowKey]))
       .map(check => check[tableRowKey]);
-    isAllSelection.value = checkedIds.length > 0 && checkedIds.length === selectionTable.length;
+    isAllSelection.value
+      = selectionTable.filter(item => checkedIds.includes(item[tableRowKey])).length === selectionTable.length;
     tableData.value.forEach((item) => {
       if (!disabledCheckSelection?.(item)) {
         item.isCustomCheck = checkedIds.includes(item[tableRowKey]);
@@ -439,6 +464,16 @@ const getSelectionData = () => {
   else {
     isAllSelection.value = false;
   }
+};
+
+// 获取回显勾选项数据
+const getSelectionData = () => {
+  renderSelectionData();
+};
+
+// 本地分页设置回显勾选项数据
+const setSelectionData = (selectionList: any[]) => {
+  renderSelectionData(selectionList);
 };
 
 const handleRowEnter = ({ e, row }: {
@@ -603,7 +638,7 @@ onMounted(() => {
   if (immediate && !localPage) {
     fetchData({ ...offsetAndLimit.value });
   }
-  const tableSet = localStorage.getItem(`table-setting-${locale.value}-${route.name}`);
+  const tableSet = localStorage.getItem(`table-setting-${locale.value}-${router?.currentRoute?.value?.name}`);
   if (tableSet && tableSetting.value) {
     const storageCache = JSON.parse(tableSet);
     tableSetting.value = {
@@ -633,6 +668,7 @@ defineExpose({
   getSelectionData,
   getPagination,
   setPagination,
+  setSelectionData,
   setPaginationTheme,
   resetPaginationTheme,
   refresh,
@@ -670,6 +706,14 @@ defineExpose({
 
   .t-table__body {
     color: #63656e;
+
+    .t-table__cell--fixed-left {
+      line-height: 1;
+
+      .bk-checkbox {
+        vertical-align: middle;
+      }
+    }
   }
 
   .t-table__pagination {

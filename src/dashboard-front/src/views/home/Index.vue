@@ -83,32 +83,36 @@
         <section v-if="gatewaysList.length">
           <div class="table-header">
             <div
-              :class="featureFlagStore.isTenantMode ? 'of2' : 'of3'"
-              class="flex-grow-1"
+              class="flex-1 of2"
             >
               {{ t('网关名') }}
             </div>
             <template v-if="featureFlagStore.isTenantMode">
-              <div class="flex-grow-1 of1">
+              <div class="flex-1">
                 {{ t('租户模式') }}
               </div>
-              <div class="flex-grow-1 of1">
+              <div class="flex-1">
                 {{ t('租户 ID') }}
               </div>
             </template>
-            <div class="flex-grow-1 of1">
+            <div class="flex-1">
               {{ t('创建者') }}
             </div>
             <div
-              :class="featureFlagStore.isTenantMode ? 'of2' : 'of3'"
-              class="flex-grow-1"
+              class="flex-1 of2"
             >
               {{ t('环境列表') }}
             </div>
-            <div class="flex-grow-1 of1">
+            <div
+              v-if="enableGatewayOperationStatus"
+              class="flex-1"
+            >
+              {{ t('运营状态') }}
+            </div>
+            <div class="flex-1">
               {{ t('资源数量') }}
             </div>
-            <div class="flex-grow-1 of2">
+            <div class="flex-1 of2">
               {{ t('操作') }}
             </div>
           </div>
@@ -119,8 +123,7 @@
               class="table-item"
             >
               <div
-                class="flex-grow-1 flex items-center"
-                :class="featureFlagStore.isTenantMode ? 'of2' : 'of3'"
+                class="flex-1 flex items-center of2"
               >
                 <div
                   :class="item.status ? '' : 'deact'"
@@ -157,28 +160,37 @@
                 </BkTag>
               </div>
               <template v-if="featureFlagStore.isTenantMode">
-                <div class="flex-grow-1 of1">
+                <div class="flex-1">
                   {{ TENANT_MODE_TEXT_MAP[item.tenant_mode as string] || '--' }}
                 </div>
-                <div class="flex-grow-1 of1">
+                <div class="flex-1">
                   {{ item.tenant_id || '--' }}
                 </div>
               </template>
-              <div class="flex-grow-1 of1">
+              <div class="flex-1">
                 <span v-if="!featureFlagStore.isEnableDisplayName">{{ item.created_by }}</span>
                 <span v-else><bk-user-display-name :user-id="item.created_by" /></span>
               </div>
               <div
-                :class="featureFlagStore.isEnableDisplayName ? 'of2' : 'of3'"
-                class="env flex-grow-1"
+                :ref="makeSetEnvContainerRef(item.id)"
+                class="env flex-1 of2"
               >
-                <div class="flex">
+                <div
+                  class="flex"
+                  :style="{ 'flex-wrap': 'nowrap' }"
+                >
                   <span
                     v-for="(envItem, index) in item.stages"
                     :key="envItem.id"
+                    :ref="makeSetEnvTagRef(item.id, index)"
+                    :style="{
+                      display:
+                        index < (visibleTagCountMap[item.id] ?? DEFAULT_VISIBLE)
+                          ? 'inline-block'
+                          : 'none'
+                    }"
                   >
                     <BkTag
-                      v-if="index < 3"
                       class="environment-tag"
                     >
                       <i
@@ -189,59 +201,102 @@
                     </BkTag>
                   </span>
                   <BkTag
-                    v-if="item.stages.length > Number(item.tagOrder)"
-                    v-bk-tooltips="{ content: tipsContent(item?.labelTextData), theme: 'light', placement: 'bottom' }"
+                    v-if="item.stages.length > (visibleTagCountMap[item.id] ?? DEFAULT_VISIBLE)"
+                    :ref="makeSetMoreTagRef(item.id)"
+                    v-bk-tooltips="{
+                      content: tipsContent(getHiddenStages(item)),
+                      theme: 'light',
+                      placement: 'bottom'
+                    }"
                     class="tag-cls"
                   >
-                    +{{ item.stages.length - Number(item.tagOrder) }}
+                    +{{ item.stages.length - (visibleTagCountMap[item.id] ?? DEFAULT_VISIBLE) }}
                   </BkTag>
                 </div>
               </div>
               <div
-                class="flex-grow-1 of1 pl-4"
+                v-if="enableGatewayOperationStatus"
+                class="flex-1"
+              >
+                <span v-if="item.operation_status?.status === 'active'">{{ t('活跃') }}</span>
+                <div
+                  v-if="item.operation_status?.status === 'inactive'"
+                  class="flex items-center cursor-pointer inactive"
+                >
+                  <span
+                    v-bk-tooltips="{
+                      content: item.operation_status?.source === 'apigateway'
+                        ? t('网关过去 180 天没有任何调用量，请确认是否停用网关')
+                        : t('网关过去 180 天没有任何调用量，请确认是否下架网关对应的插件应用') }"
+                    class="line-height-20px"
+                  >
+                    {{ t('闲置') }}
+                  </span>
+                  <bk-button
+                    theme="primary"
+                    class="ml-8px inactive-btn"
+                    text
+                    @click="openTab(item.operation_status?.link)"
+                  >
+                    {{ item.operation_status?.source === 'apigateway' ? t('去停用') : t('去下架') }}
+                  </bk-button>
+                </div>
+              </div>
+              <div
+                class="flex-1 pl-4"
                 :class="[
                   { 'color-#3A84FF': item.hasOwnProperty('resource_count') }
                 ]"
               >
                 <template v-if="item.kind === 0">
                   {{ item.resource_count }}
-                <!--                <RouterLink -->
-                <!--                  :to="{ name: 'ResourceSetting', params: { id: item.id } }" -->
-                <!--                  target="_blank" -->
-                <!--                > -->
-                <!--                  <span :style="{ color: item.resource_count === 0 ? '#c4c6cc' : '#3a84ff' }"> -->
-                <!--                    {{ item.resource_count }} -->
-                <!--                  </span> -->
-                <!--                </RouterLink> -->
+                  <!--                <RouterLink -->
+                  <!--                  :to="{ name: 'ResourceSetting', params: { id: item.id } }" -->
+                  <!--                  target="_blank" -->
+                  <!--                > -->
+                  <!--                  <span :style="{ color: item.resource_count === 0 ? '#c4c6cc' : '#3a84ff' }"> -->
+                  <!--                    {{ item.resource_count }} -->
+                  <!--                  </span> -->
+                  <!--                </RouterLink> -->
                 </template>
                 <template v-else>
                   <span class="none">{{ item.resource_count }}</span>
                 </template>
               </div>
-              <div class="flex-grow-1 of2">
+              <div class="flex-1 of2">
+                <template v-if="item.status === 1">
+                  <BkButton
+                    text
+                    theme="primary"
+                    @click="() => handleGoPage('StageOverview', item)"
+                  >
+                    {{ t('环境概览') }}
+                  </BkButton>
+                  <BkButton
+                    text
+                    theme="primary"
+                    class="ml-20px"
+                    :disabled="item?.kind === 1"
+                    @click="() => handleGoPage('ResourceSetting', item)"
+                  >
+                    {{ t('资源配置') }}
+                  </BkButton>
+                  <BkButton
+                    text
+                    theme="primary"
+                    class="ml-20px"
+                    @click="() => handleGoPage('AccessLog', item)"
+                  >
+                    {{ t('流水日志') }}
+                  </BkButton>
+                </template>
                 <BkButton
+                  v-else
                   text
-                  theme="primary"
-                  @click="() => handleGoPage('StageOverview', item)"
+                  theme="danger"
+                  @click="() => handleGoPage('BasicInfo', item)"
                 >
-                  {{ t('环境概览') }}
-                </BkButton>
-                <BkButton
-                  text
-                  theme="primary"
-                  class="ml-20px"
-                  :disabled="item?.kind === 1"
-                  @click="() => handleGoPage('ResourceSetting', item)"
-                >
-                  {{ t('资源配置') }}
-                </BkButton>
-                <BkButton
-                  text
-                  theme="primary"
-                  class="ml-20px"
-                  @click="() => handleGoPage('AccessLog', item)"
-                >
-                  {{ t('流水日志') }}
+                  {{ t('删除网关') }}
                 </BkButton>
               </div>
             </div>
@@ -252,19 +307,33 @@
           class="empty-container"
         >
           <div class="table-header">
-            <div class="flex-grow-1 of3">
+            <div class="flex-1 of2">
               {{ t('网关名') }}
             </div>
-            <div class="flex-grow-1 of1">
+            <template v-if="featureFlagStore.isTenantMode">
+              <div class="flex-1">
+                {{ t('租户模式') }}
+              </div>
+              <div class="flex-1">
+                {{ t('租户 ID') }}
+              </div>
+            </template>
+            <div class="flex-1">
               {{ t('创建者') }}
             </div>
-            <div class="flex-grow-1 of3">
+            <div class="flex-1 of2">
               {{ t('环境列表') }}
             </div>
-            <div class="flex-grow-1 of1">
+            <div
+              v-if="enableGatewayOperationStatus"
+              class="flex-1"
+            >
+              {{ t('运营状态') }}
+            </div>
+            <div class="flex-1">
               {{ t('资源数量') }}
             </div>
-            <div class="flex-grow-1 of2">
+            <div class="flex-1 of2">
               {{ t('操作') }}
             </div>
           </div>
@@ -393,7 +462,6 @@ import { getGatewayList } from '@/services/source/gateway';
 import AgIcon from '@/components/ag-icon/Index.vue';
 import CreateGateway from '@/components/create-gateway/Index.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
-import type { IApiGateway } from '@/types/gateway';
 import GatewayEmpty from '@/images/gateway-empty.png';
 import GatewayEmpty2 from '@/images/gateway-empty2.png';
 
@@ -412,7 +480,6 @@ const { t } = useI18n();
 const router = useRouter();
 const featureFlagStore = useFeatureFlag();
 const envStore = useEnv();
-
 const filterKey = ref('updated_time');
 const filterNameData = ref({
   keyword: '',
@@ -442,10 +509,10 @@ const {
 } = useGatewaysList(filterNameData);
 
 const tableEmptyConf = ref<{
-  emptyType: string
+  emptyType: 'refresh' | 'empty' | 'search-empty' | 'searchEmpty' | undefined
   isAbnormal: boolean
 }>({
-  emptyType: '',
+  emptyType: undefined,
   isAbnormal: false,
 });
 
@@ -515,6 +582,139 @@ const steps = [
   },
 ];
 
+// 环境标签相关的引用和状态（按网关 id 存储）
+const envContainerRefs = reactive<Record<number, HTMLElement | null>>({});
+const envTagRefsMap = reactive<Record<number, (HTMLElement | undefined)[]>>({});
+const moreTagRefsMap = reactive<Record<number, HTMLElement | null>>({});
+const visibleTagCountMap = reactive<Record<number, number>>({});
+
+const DEFAULT_VISIBLE = 3; // 初始默认
+const MAX_VISIBLE_TAGS = 6; // 最大显示数量上限
+
+const setEnvContainerRef = (el: any, id: number) => {
+  envContainerRefs[id] = (el as HTMLElement) || null;
+};
+
+const setEnvTagRef = (el: any, id: number, index: number) => {
+  if (!envTagRefsMap[id]) {
+    envTagRefsMap[id] = [];
+  }
+  envTagRefsMap[id][index] = (el as HTMLElement) || undefined;
+};
+
+const setMoreTagRef = (el: any, id: number) => {
+  moreTagRefsMap[id] = (el as HTMLElement) || null;
+};
+
+const makeSetEnvTagRef = (id: number, index: number) => {
+  return (el: any) => setEnvTagRef(el, id, index);
+};
+
+const makeSetMoreTagRef = (id: number) => {
+  return (el: any) => setMoreTagRef(el, id);
+};
+
+const makeSetEnvContainerRef = (id: number) => {
+  return (el: any) => setEnvContainerRef(el, id);
+};
+
+// 防抖处理窗口大小变化
+let resizeTimer: number | null = null;
+const handleResize = () => {
+  if (resizeTimer) {
+    window.clearTimeout(resizeTimer);
+  }
+  resizeTimer = window.setTimeout(() => {
+    calculateVisibleTags();
+  }, 100);
+};
+
+const measureElementWidth = (el?: HTMLElement | null) => {
+  if (!el) return 0;
+  try {
+    if (el.offsetWidth && el.offsetWidth > 0) return el.offsetWidth;
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.style.visibility = 'hidden';
+    clone.style.position = 'absolute';
+    clone.style.display = 'inline-block';
+    clone.style.left = '-9999px';
+    clone.style.top = '-9999px';
+    document.body.appendChild(clone);
+    const w = clone.offsetWidth;
+    document.body.removeChild(clone);
+    return w || 0;
+  }
+  catch {
+    return el.offsetWidth || 0;
+  }
+};
+
+// 计算可见标签数量
+const calculateVisibleTags = () => {
+  const ids = Object.keys(envContainerRefs).map(k => Number(k));
+  if (!ids.length) return;
+
+  ids.forEach((id) => {
+    const container = envContainerRefs[id];
+    const tagEls = (envTagRefsMap[id] || []);
+    const moreEl = moreTagRefsMap[id];
+
+    if (!container || !tagEls.length) {
+      visibleTagCountMap[id] = 0;
+      return;
+    }
+
+    const containerWidth = container.offsetWidth;
+
+    // 测量每个标签的真实宽度（包含 margin 估算）
+    const rawMeasuredWidths = tagEls.map((el: HTMLElement | undefined) => el ? measureElementWidth(el) : 0);
+    const measuredWidths = rawMeasuredWidths.slice(0, MAX_VISIBLE_TAGS);
+    // 估计 +X 的宽度
+    const measuredMoreWidth = moreEl ? measureElementWidth(moreEl) : 30;
+
+    let totalTagWidth = 0;
+    let fitNoPlus = 0;
+    for (let i = 0; i < measuredWidths.length && fitNoPlus < MAX_VISIBLE_TAGS; i++) {
+      const tagWidth = measuredWidths[i] + 8;
+      if (totalTagWidth + tagWidth <= containerWidth) {
+        totalTagWidth += tagWidth;
+        fitNoPlus++;
+      }
+      else {
+        break;
+      }
+    }
+
+    // 如果所有标签都能显示或 fitNoPlus 已经能显示所有标签（<= MAX），直接使用 fitNoPlus
+    if (fitNoPlus >= tagEls.length) {
+      visibleTagCountMap[id] = Math.min(tagEls.length, MAX_VISIBLE_TAGS);
+    }
+    else {
+      // 预留 "+X" 的空间再计算
+      totalTagWidth = 0;
+      let fitWithPlus = 0;
+      for (let i = 0; i < measuredWidths.length && fitWithPlus < MAX_VISIBLE_TAGS; i++) {
+        const tagWidth = measuredWidths[i] + 8;
+        if (totalTagWidth + tagWidth + measuredMoreWidth <= containerWidth) {
+          totalTagWidth += tagWidth;
+          fitWithPlus++;
+        }
+        else {
+          break;
+        }
+      }
+
+      // 若 fitWithPlus 为 0，作为保守策略显示至少 1 个（避免只展示 +X）
+      if (fitWithPlus === 0 && tagEls.length > 0) {
+        visibleTagCountMap[id] = 1;
+      }
+      else {
+        visibleTagCountMap[id] = Math.min(fitWithPlus, MAX_VISIBLE_TAGS);
+      }
+    }
+  });
+};
+
 const copyright = computed(() => `Copyright © 2012-${new Date().getFullYear()} Tencent BlueKing. All Rights Reserved. V${envStore.env.BK_APIGATEWAY_VERSION}`);
 
 const progressImg = computed(() => {
@@ -522,6 +722,11 @@ const progressImg = computed(() => {
     return GatewayEmpty;
   }
   return GatewayEmpty2;
+});
+
+const enableGatewayOperationStatus = computed(() => {
+  const flags: any = featureFlagStore.flags || {};
+  return !!flags.ENABLE_GATEWAY_OPERATION_STATUS;
 });
 
 const isGuide = computed(() => {
@@ -532,10 +737,16 @@ const isGuide = computed(() => {
   return false;
 });
 
-watch(() => dataList.value, (val: IApiGateway[]) => {
-  gatewaysList.value = convertGatewaysList(val);
+watch(() => dataList.value, (val) => {
+  gatewaysList.value = convertGatewaysList(val as GatewayType[]);
   updateTableEmptyConfig();
 });
+
+watch(() => gatewaysList.value, () => {
+  nextTick(() => {
+    calculateVisibleTags();
+  });
+}, { deep: true });
 
 // 处理列表项
 const convertGatewaysList = (arr: GatewayType[]): ConvertedGatewayType[] => {
@@ -587,6 +798,10 @@ const handleGoPage = (routeName: string, gateway: GatewayType) => {
   });
 };
 
+const openTab = (link?: string) => {
+  window.open(link, '_blank');
+};
+
 // 列表排序
 const handleChange = (v: string) => {
   switch (v) {
@@ -619,6 +834,11 @@ const tipsContent = (data: any[]) => {
   ]);
 };
 
+const getHiddenStages = (item: ConvertedGatewayType) => {
+  const start = visibleTagCountMap[item.id] ?? DEFAULT_VISIBLE;
+  return item?.stages?.slice(start) || [];
+};
+
 const handleClearFilterKey = () => {
   filterNameData.value = {
     keyword: '',
@@ -642,11 +862,25 @@ const updateTableEmptyConfig = () => {
     tableEmptyConf.value.emptyType = 'empty';
     return;
   }
-  tableEmptyConf.value.emptyType = '';
+  tableEmptyConf.value.emptyType = undefined;
 };
 
 onMounted(() => {
   init();
+  window.addEventListener('resize', handleResize);
+  nextTick(() => {
+    calculateVisibleTags();
+    setTimeout(() => calculateVisibleTags(), 100);
+    setTimeout(() => calculateVisibleTags(), 300);
+  });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize);
+  if (resizeTimer) {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = null;
+  }
 });
 </script>
 
@@ -909,7 +1143,6 @@ onMounted(() => {
     height: 58px;
   }
 }
-
 .gateway-empty {
   height: calc(100vh - 110px);
   display: flex;
@@ -979,5 +1212,26 @@ onMounted(() => {
       }
     }
   }
+}
+.inactive {
+  line-height: 80px;
+  .inactive-btn {
+    display: none;
+  }
+  &:hover {
+    .inactive-btn {
+      display: inline-block;
+    }
+  }
+}
+.env {
+  overflow: hidden;
+  position: relative;
+}
+
+.flex {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
 }
 </style>

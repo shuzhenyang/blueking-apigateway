@@ -383,7 +383,7 @@
                   v-model:temp-public-config="tempPublicConfig"
                   action="add"
                   :table-data="tableDataToAdd"
-                  :keyword="filterInputAddClone"
+                  :keyword="filterInputAdd"
                   :doc-config="docConfig"
                   @show-row-doc="handleShowResourceDoc"
                   @show-row-plugin="handleShowPluginsSlider"
@@ -443,7 +443,7 @@
                   v-model:temp-public-config="tempPublicConfig"
                   action="update"
                   :table-data="tableDataToUpdate"
-                  :keyword="filterInputUpdateClone"
+                  :keyword="filterInputUpdate"
                   @show-row-doc="handleShowResourceDoc"
                   @show-row-plugin="handleShowPluginsSlider"
                   @show-row-edit="handleEdit"
@@ -1239,10 +1239,12 @@ const handleEditSubmit = (newResource: ILocalImportedResource) => {
 // 点击修改配置时，会唤出 SideSlider
 const handleEdit = (resourceRow: ILocalImportedResource) => {
   const _editingResource = tableData.value.find(data => data._localId === resourceRow._localId);
-  if (_editingResource) editingResource.value = {
-    ...editingResource.value,
-    ..._editingResource,
-  };
+  if (_editingResource) {
+    editingResource.value = {
+      ...editingResource.value,
+      ..._editingResource,
+    };
+  }
   isSliderShow.value = true;
 };
 

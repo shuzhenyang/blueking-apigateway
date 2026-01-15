@@ -234,7 +234,7 @@ const stageStore = useStage();
 // 选中的菜单
 const activeMenuKey = ref('StageOverview');
 const gatewayList = ref<GatewayItemType[]>([]);
-const openedKeys = ref<string[]>([]);
+const openedKeys = ref<string[]>(['StageManagement', 'ResourceManagement']);
 const needMenu = ref(true);
 const pageName = ref('');
 // 当前网关Id
@@ -336,7 +336,7 @@ const menuList = computed<IMenu[]>(() => [
   {
     name: 'MonitorAlarm',
     title: t('监控告警'),
-    icon: 'notification',
+    icon: 'gaojingjilu',
     enabled: featureFlagStore.flags.ENABLE_MONITOR,
     children: [
       {
@@ -358,16 +358,28 @@ const menuList = computed<IMenu[]>(() => [
     icon: 'zaixiandiaoshi',
   },
   {
+    name: 'MCP',
+    title: 'MCP',
+    icon: 'mcp-server',
+    enabled: true,
+    children: [
+      {
+        name: 'MCPServer',
+        enabled: true,
+        title: 'MCP Server',
+      },
+      {
+        name: 'MCPServerPermission',
+        title: t('MCP 权限审批'),
+        enabled: true,
+      },
+    ],
+  },
+  {
     name: 'BasicInfo',
     enabled: true,
     title: t('基本信息'),
     icon: 'jibenxinxi',
-  },
-  {
-    name: 'MCPServer',
-    enabled: true,
-    title: 'MCP Server',
-    icon: 'cardd',
   },
   {
     name: 'AuditLog',

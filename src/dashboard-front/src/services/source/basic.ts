@@ -51,10 +51,12 @@ export function getFeatureFlags(params: {
     ENABLE_RUN_DATA_METRICS: boolean
     ENABLE_SDK: boolean
     ENABLE_DISPLAY_NAME_RENDER: boolean
+    ENABLE_MCP_SERVER_PROMPT: boolean
     GATEWAY_APP_BINDING_ENABLED: boolean
     MENU_ITEM_ESB_API: boolean
     MENU_ITEM_ESB_API_DOC: boolean
     SYNC_ESB_TO_APIGW_ENABLED: boolean
+    ENABLE_GATEWAY_OPERATION_STATUS: boolean
   }>(`${path}/settings/feature-flags/`, params);
 }
 
@@ -63,23 +65,26 @@ export function getFeatureFlags(params: {
  */
 export function getEnv() {
   return http.get<{
+    BK_ANALYSIS_SCRIPT_SRC: string
+    BK_APIGATEWAY_VERSION: string
+    BK_APISIX_DOC_URL: string
+    BK_APISIX_URL: string
     BK_API_RESOURCE_URL_TMPL: string
     BK_APP_CODE: string
     BK_COMPONENT_API_URL: string
+    BK_DASHBOARD_COOKIE_DOMAIN: string
+    BK_DASHBOARD_CSRF_COOKIE_DOMAIN: string
     BK_DASHBOARD_CSRF_COOKIE_NAME: string
     BK_DASHBOARD_FE_URL: string
     BK_DASHBOARD_URL: string
     BK_DEFAULT_TEST_APP_CODE: string
-    BK_PAAS_APP_REPO_URL_TMPL: string
-    EDITION: string
-    BK_APISIX_URL: string
-    BK_APISIX_DOC_URL: string
-    BK_APIGATEWAY_VERSION: string
     BK_DOCS_URL_PREFIX: string
-    BK_USER_WEB_API_URL: string
     BK_LOGIN_URL: string
-    BK_ANALYSIS_SCRIPT_SRC: string
+    BK_PAAS_APP_REPO_URL_TMPL: string
+    BK_SHARED_RES_URL: string
+    BK_USER_WEB_API_URL: string
     CREATE_CHAT_API: string
+    EDITION: string
     SEND_CHAT_API: string
     HELPER: {
       name: string
@@ -105,6 +110,24 @@ export function getEnv() {
       USER_API: string
       UPGRADE_TO_113_TIP: string
       MCP_SERVER_PERMISSION_APPLY: string
+      PLUGIN_AI_PROXY: string
+      PLUGIN_AI_RATE_LIMITING: string
+      PLUGIN_API_BREAKER: string
+      PLUGIN_BK_ACCESS_TOKEN_SOURCE: string
+      PLUGIN_BK_CORS: string
+      PLUGIN_BK_HEADER_REWRITE: string
+      PLUGIN_BK_IP_RESTRICTION: string
+      PLUGIN_BK_MOCK: string
+      PLUGIN_BK_RATE_LIMIT: string
+      PLUGIN_BK_REQUEST_BODY_LIMIT: string
+      PLUGIN_BK_USERNAME_REQUIRED: string
+      PLUGIN_BK_USER_RESTRICTION: string
+      PLUGIN_FAULT_INJECTION: string
+      PLUGIN_PROXY_CACHE: string
+      PLUGIN_REDIRECT: string
+      PLUGIN_REQUEST_VALIDATION: string
+      PLUGIN_RESPONSE_REWRITE: string
+      PLUGIN_URI_BLOCKER: string
     }
   }>(`${path}/settings/env-vars/`);
 }
@@ -128,3 +151,8 @@ export function getTenantUsers(
  * 获取版本日志
  */
 export const getVersionLog = () => http.get('/version-log/');
+
+/**
+ * 将国际化语言设置保存到用户管理中
+ */
+export const saveUserLanguage = (url: string, params: { language: string }) => http.put(url, params);

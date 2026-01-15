@@ -20,6 +20,7 @@ import { useWindowSize } from '@vueuse/core';
 import { locale } from '@/locales';
 import { useFeatureFlag } from '@/stores';
 import type { ReturnRecordType } from '@/types/common';
+import router from '@/router';
 
 type ITableLimit = {
   allocatedHeight: number
@@ -122,7 +123,6 @@ function getTableSizeLineHeight(className: string, mode = 'bkui'): Record<string
  * @returns maxTableLimit → 最大展示条数   clientHeight → 剩余可视化最大高度
  */
 export function useMaxTableLimit(payload?: Partial<ITableLimit>) {
-  const route = useRoute();
   const featureFlagStore = useFeatureFlag();
   const viewportHeight = toValue(useWindowSize().height);
   // 默认已占位高度
@@ -136,7 +136,7 @@ export function useMaxTableLimit(payload?: Partial<ITableLimit>) {
   const noticeComH = featureFlagStore.isEnabledNotice ? 40 : 0;
   // 获取表格的最大可视化区域
   const clientHeight = viewportHeight - hasAllocatedHeight - noticeComH;
-  const name = payload?.className ?? route.name;
+  const name = payload?.className ?? router?.currentRoute?.value?.name;
   // topHead是指vxe-table根据不同表格大小动态设置了距离表头top
   const { lineH, topHead } = getTableSizeLineHeight(name as string, payload?.mode);
   // 优先获取自定义传入行高，默认设置不同大小表格的固定行高

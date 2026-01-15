@@ -18,35 +18,59 @@
 
 <template>
   <div>
-    <div class="top-bar flex-row align-items-center">
+    <div class="top-bar flex-row items-center">
       <AgIcon
         name="return-small"
         size="32"
         class="icon"
         @click="goBack"
       />
-      <span class="top-bar-title">
-        {{ mcpDetails?.name }}
-      </span>
+      <div class="flex items-center w-full">
+        <BkOverflowTitle
+          type="tips"
+          class="truncate color-#313238 text-16px max-w-1/2"
+        >
+          {{ mcpDetails?.title }}
+        </BkOverflowTitle>
+        <BkOverflowTitle
+          type="tips"
+          class="truncate color-#979ba5 text-14px ml-8px"
+        >
+          ({{ mcpDetails?.name }})
+        </BkOverflowTitle>
+      </div>
     </div>
 
     <div class="main">
       <div class="base-info">
-        <div class="header">
-          <div class="flex-row align-items-center">
-            <div class="title">
-              {{ mcpDetails?.name }}
+        <div class="pt-18px pb-12px flex items-center justify-between w-full header">
+          <div class="flex items-center flex-wrap gap-8px">
+            <div class="flex items-center max-w-[960px] min-w-0 title">
+              <BkOverflowTitle
+                type="tips"
+                class="truncate max-w-1/2"
+              >
+                {{ mcpDetails?.title }}
+              </BkOverflowTitle>
+              <BkOverflowTitle
+                type="tips"
+                class="truncate ml-8px"
+              >
+                ({{ mcpDetails?.name }})
+              </BkOverflowTitle>
             </div>
-            <BkTag
-              v-if="mcpDetails?.gateway?.is_official"
-              theme="success"
-              class="mr8"
-            >
-              {{ t('官方') }}
-            </BkTag>
-            <BkTag theme="info">
-              {{ mcpDetails?.stage?.name }}
-            </BkTag>
+            <div class="flex items-center flex-shrink-0">
+              <BkTag
+                v-if="mcpDetails?.gateway?.is_official"
+                theme="success"
+                class="mr-8px"
+              >
+                {{ t('官方') }}
+              </BkTag>
+              <BkTag theme="info">
+                {{ mcpDetails?.stage?.name }}
+              </BkTag>
+            </div>
           </div>
 
           <div class="permission-guide">
@@ -67,7 +91,7 @@
         <div class="content">
           <div class="info-item">
             <div class="label">
-              {{ t('访问地址') }}：
+              {{ t('访问地址') }}:
             </div>
             <div class="value">
               {{ mcpDetails?.url }}
@@ -81,7 +105,7 @@
           </div>
           <div class="info-item">
             <div class="label">
-              {{ t('描述') }}：
+              {{ t('描述') }}:
             </div>
             <div class="value">
               {{ mcpDetails?.description }}
@@ -89,7 +113,7 @@
           </div>
           <div class="info-item">
             <div class="label">
-              {{ t('标签') }}：
+              {{ t('标签') }}:
             </div>
             <div class="value">
               <BkTag
@@ -103,7 +127,7 @@
           </div>
           <div class="info-item">
             <div class="label">
-              {{ t('负责人') }}：
+              {{ t('负责人') }}:
             </div>
             <div class="value">
               <TenantUserSelector
@@ -134,7 +158,7 @@
           name="tools"
         >
           <template #label>
-            <div class="flex-row align-items-center">
+            <div class="flex-row items-center">
               {{ t('工具') }}
               <div
                 v-if="toolsCount > 0"
@@ -153,21 +177,68 @@
           </div>
         </BkTabPanel>
         <BkTabPanel
+          v-if="isEnablePrompt && promptCount > 0"
+          name="prompts"
+        >
+          <template #label>
+            <div class="flex-row items-center">
+              Prompts
+              <div
+                v-if="promptCount"
+                class="count"
+                :class="[active === 'prompts' ? 'on' : 'off']"
+              >
+                {{ promptCount }}
+              </div>
+            </div>
+          </template>
+          <div class="panel-content">
+            <ServerPrompts
+              :server="mcpDetails"
+              page="market"
+            />
+          </div>
+        </BkTabPanel>
+        <BkTabPanel
           name="guide"
         >
           <template #label>
-            <div class="flex-row align-items-center">
+            <div class="flex-row items-center">
               {{ t('使用指引') }}
             </div>
           </template>
           <div class="panel-content">
+            <div
+              v-if="isExistCustomGuide"
+              class="p-t-24px! p-r-24px! w-full text-align-right"
+            >
+              <BkButton
+                theme="primary"
+                text
+                @click="handleShowGuide"
+              >
+                <AgIcon
+                  name="wenjian"
+                  size="16"
+                  class="mr-8px"
+                />
+                {{ t('查看默认使用指引') }}
+              </BkButton>
+            </div>
             <Guideline
               :markdown-str="markdownStr"
+              :show-usage-guide="false"
+              page="market"
             />
           </div>
         </BkTabPanel>
       </BkTab>
     </div>
+
+    <DefaultMdGuideSlider
+      v-model:is-show="isShowGuideSlider"
+      :markdown-text="defaultMarkdownStr"
+    />
   </div>
 </template>
 
@@ -181,9 +252,11 @@ import AgIcon from '@/components/ag-icon/Index.vue';
 // import { useGetGlobalProperties } from '@/hooks';
 import { type IMarketplaceDetails, getMcpServerDetails } from '@/services/source/mcp-market';
 import ServerTools from '@/views/mcp-server/components/ServerTools.vue';
+import ServerPrompts from '@/views/mcp-server/components/ServerPrompts.vue';
 import Guideline from './components/GuideLine.vue';
 import EditMember from '@/views/basic-info/components/EditMember.vue';
 import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
+import DefaultMdGuideSlider from '@/views/mcp-market/components/DefaultMdGuideSlider.vue';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -195,12 +268,17 @@ const envStore = useEnv();
 
 const active = ref('tools');
 const toolsCount = ref<number>(0);
+const promptCount = ref(0);
 const mcpDetails = ref<IMarketplaceDetails>();
-const markdownStr = ref<string>('');
+const defaultMarkdownStr = ref('');
+const markdownStr = ref('');
+const isExistCustomGuide = ref(false);
+const isShowGuideSlider = ref(false);
 
 const mcpId = computed(() => {
   return route.params.id;
 });
+const isEnablePrompt = computed(() => featureFlagStore?.flags?.ENABLE_MCP_SERVER_PROMPT);
 
 const handleCopy = (str: string) => {
   copy(str);
@@ -212,9 +290,19 @@ const goBack = () => {
 
 const getDetails = async () => {
   const res = await getMcpServerDetails(mcpId.value as string);
-  mcpDetails.value = res;
-  toolsCount.value = res.tools_count;
-  markdownStr.value = res.guideline;
+  mcpDetails.value = res ?? {};
+  const { tools_count = 0, prompts_count = 0, guideline = '', user_custom_doc = '' } = mcpDetails.value;
+  toolsCount.value = tools_count;
+  promptCount.value = prompts_count;
+  [markdownStr.value, defaultMarkdownStr.value] = [guideline, guideline];
+  if (user_custom_doc) {
+    markdownStr.value = user_custom_doc;
+    isExistCustomGuide.value = user_custom_doc.length > 0;
+  }
+};
+
+const handleShowGuide = () => {
+  isShowGuideSlider.value = true;
 };
 
 watch(
@@ -229,9 +317,12 @@ watch(
 
 <style lang="scss" scoped>
 .top-bar {
+  position: sticky;
+  top: 0;
   height: 64px;
   padding: 0 24px;
-  background: #FFF;
+  background: #ffffff;
+  z-index: 9;
   box-shadow: 0 3px 4px 0 #0000000a;
 
   .icon {
@@ -262,17 +353,12 @@ watch(
     box-shadow: 0 2px 4px 0 #1919290d;
 
     .header {
-      display: flex;
-      height: 54px;
       border-bottom: 1px solid #EAEBF0;
-      align-items: center;
-      justify-content: space-between;
 
       .title {
         margin-right: 16px;
         font-size: 20px;
         font-weight: bold;
-        line-height: 54px;
         color: #313238;
       }
 
@@ -300,6 +386,7 @@ watch(
         .value {
           font-size: 14px;
           color: #313238;
+          margin-left: 8px;
 
           .icon {
             color: #3A84FF;
@@ -334,6 +421,7 @@ watch(
 
   :deep(.bk-tab-content) {
     padding: 0;
+    background-color: #ffffff;
   }
 
   .panel-content {

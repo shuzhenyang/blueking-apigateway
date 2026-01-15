@@ -77,9 +77,11 @@
                         :id="item.id"
                         :key="item.id"
                         :name="item.name"
-                        :disabled="item.status === 0"
                       >
-                        <span>{{ item.name }}<span v-if="item.status === 0">{{ t('（未发布）') }}</span></span>
+                        <span>{{ item.name }}
+                          <span v-if="item.publish_validate_msg">{{ `(${item.publish_validate_msg})` }}</span>
+                          <span v-else-if="item.status === 0">{{ t('（未发布）') }}</span>
+                        </span>
                       </BkOption>
                     </BkSelect>
                   </BkFormItem>
@@ -427,7 +429,7 @@ watch(
     if (val) {
       await getStageData();
       await getResourceVersions();
-      if (currentAssets?.id && currentAssets?.status !== 0) {
+      if (currentAssets?.id) {
         formData.stage_id = currentAssets.id;
         chooseAssets.value = currentAssets;
 
@@ -725,7 +727,7 @@ defineExpose({ showReleaseSideslider });
     }
 
     .operate1 {
-      padding: 8px 100px 24px;
+      padding: 8px 40px 24px;
     }
 
     .operate2 {

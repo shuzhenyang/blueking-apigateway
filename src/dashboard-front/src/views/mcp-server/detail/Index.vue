@@ -40,9 +40,20 @@
             {{ t('未启用') }}
           </BkTag>
         </div>
-        <span class="name">
-          {{ server.name }}
-        </span>
+        <div class="mt-8px flex items-center flex-col">
+          <BkOverflowTitle
+            type="tips"
+            class="text-16px truncate name"
+          >
+            {{ server?.title }}
+          </BkOverflowTitle>
+          <BkOverflowTitle
+            type="tips"
+            class="text-14px truncate name"
+          >
+            ({{ server?.name }})
+          </BkOverflowTitle>
+        </div>
       </div>
       <div class="info">
         <div class="column">
@@ -53,7 +64,7 @@
             <div class="value url">
               <p
                 v-bk-tooltips="server.url"
-                class="link"
+                class="truncate"
               >
                 {{ server.url || '--' }}
               </p>
@@ -75,8 +86,19 @@
             <div class="label">
               {{ `${t('描述')}：` }}
             </div>
-            <div class="value">
-              {{ server.description || '--' }}
+            <div
+              class="value description max-w-256px!"
+            >
+              <p
+                v-bk-tooltips="{
+                  content: server?.description,
+                  disabled: server?.description?.length < 1,
+                  extCls: 'max-w-480px'
+                }"
+                class="truncate"
+              >
+                {{ server.description || '--' }}
+              </p>
             </div>
           </div>
         </div>
@@ -94,11 +116,11 @@
           class="mr-10px"
           @click="handleSuspendToggle"
         >
-          {{ server.status === 1 ? t('停用') : t('启用') }}
+          {{ t(server.status === 1 ? '停用' : '启用') }}
         </BkButton>
         <BkDropdown
           v-model:is-show="showDropdown"
-          trigger="click"
+          trigger="hover"
         >
           <BkButton
             class="more-cls"
@@ -108,7 +130,7 @@
           </BkButton>
           <template #content>
             <BkDropdownMenu ext-cls="stage-more-actions">
-              <BkDropdownItem>
+              <BkDropdownItem @click="handleDelete">
                 <BkButton
                   v-bk-tooltips="{
                     content: t('请先停用再删除'),
@@ -116,7 +138,6 @@
                   }"
                   :disabled="server.status === 1"
                   text
-                  @click="handleDelete"
                 >
                   {{ t('删除') }}
                 </BkButton>
@@ -133,7 +154,7 @@
         type="card-tab"
       >
         <BkTabPanel
-          v-for="item in panels"
+          v-for="item in filteredPanels"
           :key="item.name"
           :name="item.name"
           render-directive="if"
@@ -156,13 +177,22 @@
               :server="server"
               @update-count="(count) => updateCount(count, item.name)"
             />
+            <ServerPrompts
+              v-if="item.name === 'prompts'"
+              :server="server"
+              @update-count="(count) => updateCount(count, item.name)"
+            />
             <AuthApplications
               v-if="item.name === 'auth'"
               :mcp-server-id="serverId"
             />
             <Guideline
               v-if="active === 'guide'"
+              v-model:is-exist-custom-guide="isExistCustomGuide"
+              show-usage-guide
               :markdown-str="markdownStr"
+              :gateway-id="gatewayId"
+              @guide-change="handleGuideChange"
             />
           </div>
         </BkTabPanel>
@@ -180,21 +210,22 @@
 import { copy } from '@/utils';
 import {
   deleteServer,
+  getCustomServerGuideDoc,
   getServer,
   getServerGuideDoc,
   patchServerStatus,
 } from '@/services/source/mcp-server';
-import ServerTools from '@/views/mcp-server/components/ServerTools.vue';
-import {
-  InfoBox,
-  Message,
-} from 'bkui-vue';
+import { Message } from 'bkui-vue';
+import { usePopInfoBox } from '@/hooks';
+import { useFeatureFlag, useGateway } from '@/stores';
+import { MCP_TAB_LIST } from '@/constants';
 import router from '@/router';
 import CreateSlider from '@/views/mcp-server/components/CreateSlider.vue';
 import AuthApplications from '@/views/mcp-server/components/AuthApplications.vue';
 import CustomTop from '@/views/mcp-server/components/CustomTop.vue';
 import Guideline from '@/views/mcp-market/components/GuideLine.vue';
-import { useGateway } from '@/stores';
+import ServerTools from '@/views/mcp-server/components/ServerTools.vue';
+import ServerPrompts from '@/views/mcp-server/components/ServerPrompts.vue';
 
 type MCPServerType = Awaited<ReturnType<typeof getServer>>;
 
@@ -205,6 +236,7 @@ const { gatewayId = 0 } = defineProps<IProps>();
 const { t } = useI18n();
 const route = useRoute();
 const gatewayStore = useGateway();
+const featureFlagStore = useFeatureFlag();
 
 const createSliderRef = ref();
 const serverId = ref(0);
@@ -224,27 +256,20 @@ const server = ref<MCPServerType>({
   },
 });
 const showDropdown = ref(false);
+const isExistCustomGuide = ref(false);
 const markdownStr = ref('');
 
 const active = ref('tools');
-const panels = ref([
-  {
-    name: 'tools',
-    label: t('工具'),
-    count: 0,
-  },
-  {
-    name: 'auth',
-    label: t('已授权应用'),
-    count: 0,
-  },
-  {
-    name: 'guide',
-    label: t('使用指引'),
-    count: 0,
-  },
-]);
+const panels = ref(MCP_TAB_LIST);
 const editingServerId = ref<number>();
+
+const isEnablePrompt = computed(() => featureFlagStore?.flags?.ENABLE_MCP_SERVER_PROMPT);
+const filteredPanels = computed(() => {
+  if (!isEnablePrompt.value) {
+    panels.value = panels.value.filter(item => !['prompts'].includes(item.name));
+  }
+  return panels.value.filter(item => item.show);
+});
 
 const fetchServer = async () => {
   server.value = await getServer(gatewayId, serverId.value);
@@ -255,14 +280,38 @@ const fetchGuide = async () => {
   markdownStr.value = content;
 };
 
+const fetchCustomGuide = async () => {
+  const res = await getCustomServerGuideDoc(gatewayId, serverId.value);
+  markdownStr.value = res?.content ?? '';
+  isExistCustomGuide.value = markdownStr.value.length > 0;
+};
+
+const handleUpdated = async () => {
+  await Promise.all([
+    fetchServer(),
+    fetchGuide(),
+    fetchCustomGuide(),
+  ]);
+  updateCount();
+};
+
+const handleGuideChange = (tabName: string) => {
+  const tabMap = {
+    default: () => {
+      return fetchGuide();
+    },
+    custom: () => {
+      return fetchCustomGuide();
+    },
+  };
+  return tabMap[tabName]?.();
+};
+
 watch(() => route.params, async () => {
   const { serverId: id } = route.params;
   if (id) {
     serverId.value = Number(id);
-    await Promise.all([
-      fetchServer(),
-      fetchGuide(),
-    ]);
+    handleUpdated();
   }
 }, {
   immediate: true,
@@ -280,6 +329,12 @@ watch(() => gatewayStore.currentGateway, (newGateway, oldGateway) => {
   });
 });
 
+watch(() => active.value, (tab: string) => {
+  if (['guide'].includes(tab)) {
+    handleGuideChange('default');
+  }
+});
+
 const handleEdit = () => {
   editingServerId.value = server.value.id;
   createSliderRef.value?.show();
@@ -295,10 +350,13 @@ const handleSuspendToggle = async () => {
     await fetchServer();
     return;
   }
-  InfoBox({
-    title: t('确定停用 {n}？', { n: server.value.name }),
-    infoType: 'warning',
-    subTitle: t('停用后，{n} 下所有工具不可访问，请确认！', { n: server.value.name }),
+  usePopInfoBox({
+    isShow: true,
+    type: 'warning',
+    title: t('确认停用 {n}？', { n: server.value.name }),
+    subTitle: t('停用后，{n} 下所有工具不可访问，请确认！', { n: server.name }),
+    confirmText: t('确认停用'),
+    cancelText: t('取消'),
     onConfirm: async () => {
       await patchServerStatus(gatewayId, server.value.id, { status: 0 });
       Message({
@@ -310,34 +368,45 @@ const handleSuspendToggle = async () => {
   });
 };
 
-const handleUpdated = async () => {
-  await Promise.all([
-    fetchServer(),
-    fetchGuide(),
-  ]);
-};
-
 const handleDelete = async () => {
-  InfoBox({
+  usePopInfoBox({
+    isShow: true,
+    type: 'warning',
     title: t('确定删除 {n}？', { n: server.value.name }),
-    infoType: 'danger',
     subTitle: t('删除后，{n} 不可恢复，请谨慎操作！', { n: server.value.name }),
+    confirmText: t('删除'),
+    cancelText: t('取消'),
+    confirmButtonTheme: 'danger',
     onConfirm: async () => {
       await deleteServer(gatewayId, server.value.id);
       Message({
         theme: 'success',
-        message: t('已删除'),
+        message: t('删除成功'),
       });
       router.replace({ name: 'MCPServer' });
     },
   });
 };
 
-const updateCount = (count: number, panelName: string) => {
-  const panel = panels.value.find(panel => panel.name === panelName);
-  if (panel) {
-    panel.count = count;
-  }
+/**
+ * 更新面板计数并控制prompts面板显隐
+ * @param count - 目标面板的自定义计数
+ * @param panelName - 目标面板名称
+ */
+const updateCount = (count?: number, panelName?: string) => {
+  const { tools_count, prompts } = server.value ?? {};
+  const panelCountMap = {
+    tools: () => tools_count ?? 0,
+    prompts: () => prompts?.length ?? 0,
+    [panelName]: () => count ?? 0,
+  };
+  panels.value.forEach((item) => {
+    const getCount = panelCountMap[item.name];
+    if (getCount) {
+      item.count = getCount?.();
+      item.show = getCount?.() < 1 && ['prompts'].includes(item.name) ? false : true;
+    }
+  });
 };
 </script>
 
@@ -347,16 +416,24 @@ const updateCount = (count: number, panelName: string) => {
   padding: 20px;
 
   .tab-wrapper {
+    :deep(.bk-tab-header) {
+      .bk-tab-header-item:last-child {
+        &::after {
+          display: none;
+        }
+      }
+    }
 
     :deep(.bk-tab-content) {
       padding: 0;
+      background-color: #ffffff;
     }
   }
 }
 
 .server-info {
   display: flex;
-  min-height: 128px;
+  min-height: 100px;
   padding: 24px;
   margin-bottom: 16px;
   background: #fff;
@@ -365,8 +442,8 @@ const updateCount = (count: number, panelName: string) => {
   .server-name {
     position: relative;
     display: flex;
-    height: 80px;
-    margin-right: 35px;
+    min-height: 100px;
+    margin-right: 16px;
     background-color: #f0f5ff;
     border-radius: 8px;
     padding-inline: 24px;
@@ -423,23 +500,14 @@ const updateCount = (count: number, panelName: string) => {
   }
 
   .name {
-    display: inline-block;
     padding: 0 3px;
-    overflow: hidden;
-    font-size: 16px;
     font-weight: 700;
     color: #3a84ff;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .info {
     display: flex;
     width: 300px;
-
-    .column {
-      transform: translateY(-8px);
-    }
 
     .apigw-form-item {
       display: flex;
@@ -453,16 +521,11 @@ const updateCount = (count: number, panelName: string) => {
         flex: 1;
         color: #313238;
 
-        &.url {
+        &.url,
+        &.description {
           display: flex;
           max-width: 230px;
           align-items: center;
-
-          .link {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-          }
 
           i {
             padding: 3px;

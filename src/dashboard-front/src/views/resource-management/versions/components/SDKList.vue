@@ -33,7 +33,7 @@
         <BkInput
           v-model="keyword"
           class="mx-10px"
-          :placeholder="t('请输入关键字或选择条件搜索')"
+          :placeholder="t('请输入 SDK 版本号，资源版本或语言')"
           @change="handleKeywordChange"
         />
       </div>
@@ -46,6 +46,7 @@
           resizable
           :api-method="getTableData"
           :columns="columns"
+          :max-limit-config="{ allocatedHeight: 267, mode: 'tdesign'}"
           @clear-filter="handleClearFilterKey"
         />
       </div>
@@ -69,6 +70,8 @@ import {
 import CreateSDK from './CreateSDK.vue';
 import type { PrimaryTableProps } from '@blueking/tdesign-ui';
 import AgTable from '@/components/ag-table/Index.vue';
+import EditMember from '@/views/basic-info/components/EditMember.vue';
+import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
 
 const emits = defineEmits<{ 'on-show-version': [version: string] }>();
 
@@ -119,9 +122,23 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     cell: (h, { row }) => (
       <div>
         {
-          featureFlagStore.isEnableDisplayName
-            ? <span><bk-user-display-name userId={row.created_by} /></span>
-            : <span>{ row.created_by }</span>
+          !featureFlagStore.isEnableDisplayName
+            ? (
+              <EditMember
+                mode="detail"
+                width="600px"
+                field="created_by"
+                content={[row?.created_by]}
+              />
+            )
+            : (
+              <TenantUserSelector
+                mode="detail"
+                width="600px"
+                field="created_by"
+                content={[row?.created_by]}
+              />
+            )
         }
       </div>
     ),

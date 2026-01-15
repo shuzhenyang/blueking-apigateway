@@ -39,7 +39,7 @@
       <div class="flex grow-1 justify-end">
         <BkInput
           v-model="filterData.keyword"
-          :placeholder="t('请输入版本号')"
+          :placeholder="t('搜索版本号')"
         />
       </div>
     </div>
@@ -48,9 +48,12 @@
         <AgTable
           ref="tableRef"
           v-model:table-data="tableData"
-          show-settings
+          :immediate="false"
           resizable
+          show-settings
           show-selection
+          :show-first-full-row="selections.length > 0"
+          :max-limit-config="{ allocatedHeight: 267, mode: 'tdesign'}"
           :api-method="getTableData"
           :columns="columns"
           @clear-filter="handleClearFilterKey"
@@ -133,6 +136,8 @@ import ExportResourceDialog from '../../components/ExportResourceDialog.vue';
 import { orderBy } from 'lodash-es';
 import type { PrimaryTableProps } from '@blueking/tdesign-ui';
 import AgTable from '@/components/ag-table/Index.vue';
+import EditMember from '@/views/basic-info/components/EditMember.vue';
+import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
 
 interface IProps { version?: string }
 
@@ -191,7 +196,7 @@ const diffSourceId = ref();
 const diffTargetId = ref();
 const resourceDetailShow = ref(false);
 
-const apigwId = computed(() => +route.params.id);
+const apigwId = computed(() => gatewayStore.apigwId);
 
 const columns = computed<PrimaryTableProps['columns']>(() => [
   {
@@ -210,6 +215,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'released_stages',
     title: t('生效环境'),
+    ellipsis: true,
     cell: (h, { row }) =>
       <span>{ row.released_stages?.map((item: any) => item.name).join(', ') || '--' }</span>,
   },
@@ -244,9 +250,23 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     cell: (h, { row }) => (
       <div>
         {
-          featureFlagStore.isEnableDisplayName
-            ? <span><bk-user-display-name userId={row.created_by} /></span>
-            : <span>{ row.created_by }</span>
+          !featureFlagStore.isEnableDisplayName
+            ? (
+              <EditMember
+                mode="detail"
+                width="600px"
+                field="created_by"
+                content={[row?.created_by]}
+              />
+            )
+            : (
+              <TenantUserSelector
+                mode="detail"
+                width="600px"
+                field="created_by"
+                content={[row?.created_by]}
+              />
+            )
         }
       </div>
     ),
@@ -327,19 +347,32 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
 watch(
   selections,
   () => {
-    if (selections.value.length === 1 || selections.value.length === 2) {
-      diffDisabled.value = false;
-    }
-    else {
-      diffDisabled.value = true;
-    }
+    diffDisabled.value = ![1, 2].includes(selections.value.length);
   },
   { deep: true },
 );
 
 watch(filterData, () => {
-  tableRef.value!.fetchData(filterData.value);
-}, { deep: true });
+  nextTick(() => {
+    tableRef.value!.fetchData(filterData.value);
+  });
+}, {
+  deep: true,
+  immediate: true,
+});
+
+watch(
+  () => route.query,
+  () => {
+    if (route.query?.version) {
+      filterData.value.keyword = route.query.version as string;
+    }
+  },
+  {
+    immediate: true,
+    deep: true,
+  },
+);
 
 const getTableData = async (params: Record<string, any> = {}) => getVersionList(apigwId.value, params);
 

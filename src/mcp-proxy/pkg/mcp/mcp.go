@@ -90,39 +90,119 @@ func LoadMCPServer(ctx context.Context, mcpProxy *proxy.MCPProxy) error {
 	if err != nil {
 		return err
 	}
-
 	activeMcpServer := make(map[string]struct{})
 	for _, server := range servers {
 		activeMcpServer[server.Name] = struct{}{}
-		conf, err := GetMCPServerConfig(ctx, server)
+		// 查看每个mcp server当前生效的资源版本
+		release, err := biz.GetRelease(ctx, server.GatewayID, server.StageID)
 		if err != nil {
-			logging.GetLogger().Errorf("get mcp server[name:%s] openapi file error: %v", server.Name, err)
+			logging.GetLogger().Errorf("get mcp server[%s] release error: %v", server.Name, err)
 			continue
 		}
-		if !mcpProxy.IsMCPServerExist(server.Name) {
-			err = mcpProxy.AddMCPServerFromOpenApiSpec(server.Name, conf.openapiFileData, server.ResourceNames)
+		wouldReloadOpenapiSpec := true
+		// 判断mcp server是否已经存在
+		if mcpProxy.IsMCPServerExist(server.Name) {
+			mcpServer := mcpProxy.GetMCPServer(server.Name)
+			// 检查协议类型是否发生变化，如果变化需要删除旧的 MCPServer 并重新创建
+			if mcpServer.GetProtocolType() != server.GetProtocolType() {
+				logging.GetLogger().Infof(
+					"mcp server[%s] protocol type changed from %s to %s, will recreate",
+					server.Name, mcpServer.GetProtocolType(), server.GetProtocolType())
+				mcpProxy.DeleteMCPServer(server.Name)
+				// 删除后需要重新加载 openapi spec
+				wouldReloadOpenapiSpec = true
+			} else if mcpServer.GetResourceVersionID() == release.ResourceVersionID {
+				// 判断资源版本是否变化
+				// 检查 resource_names 是否有新增的工具
+				currentTools := mcpServer.GetTools()
+				hasNewTools := false
+				for _, resourceName := range server.ResourceNames {
+					if !arrutil.Contains(currentTools, resourceName) {
+						hasNewTools = true
+						break
+					}
+				}
+				if hasNewTools {
+					logging.GetLogger().Infof(
+						"mcp server[%s] resource_names changed, will reload openapi spec", server.Name)
+					wouldReloadOpenapiSpec = true
+				} else {
+					logging.GetLogger().Debugf("mcp server[%s] version unchanged, skip reload yaml", server.Name)
+					wouldReloadOpenapiSpec = false
+				}
+			}
+		}
+
+		var conf *Config
+
+		if wouldReloadOpenapiSpec {
+			// 传入 release 避免重复查询
+			conf, err = GetMCPServerConfigWithRelease(ctx, server, release)
+			if err != nil {
+				logging.GetLogger().Errorf("get mcp server[name:%s] openapi file error: %v", server.Name, err)
+				continue
+			}
+		}
+
+		// 如果mcp server不存在，添加mcp server
+		if !mcpProxy.IsMCPServerExist(server.Name) && conf != nil {
+			err = mcpProxy.AddMCPServerFromOpenAPISpec(server.Name,
+				conf.resourceVersion, conf.openapiFileData, server.ResourceNames, server.GetProtocolType())
 			if err != nil {
 				logging.GetLogger().Errorf("add mcp server[name:%s] error: %v", server.Name, err)
 				continue
 			}
-			logging.GetLogger().Infof("add  mcp server[%s] success", server.Name)
+			// 添加日志中间件
+			mcpServer := mcpProxy.GetMCPServer(server.Name)
+			if mcpServer != nil {
+				AddLoggingMiddleware(mcpServer.GetServer(), server.Name)
+			}
+			// 加载并注册 Prompts
+			prompts := loadMCPServerPrompts(ctx, server.ID)
+			if len(prompts) > 0 {
+				mcpProxy.RegisterPromptsToMCPServer(server.Name, prompts)
+				logging.GetLogger().Infof("registered %d prompts for mcp server[%s]", len(prompts), server.Name)
+			}
+			logging.GetLogger().Infof("add mcp server[%s] protocol:%s, tool:%d, prompt:%d success",
+				server.Name, server.GetProtocolType(), len(server.ResourceNames), len(prompts))
 			continue
 		}
+
+		// 如果mcp server已经存在，判断mcp server的工具是否变化
 		mcpServer := mcpProxy.GetMCPServer(server.Name)
+		if mcpServer == nil {
+			logging.GetLogger().Warnf("mcp server[%s] does not exist, skip tool cleanup", server.Name)
+			continue
+		}
+
+		var toolUpdated bool
 		for _, tool := range mcpServer.GetTools() {
 			// 如果当前mcp server的工具不在当前生效的资源列表中，删除该工具
 			if !arrutil.Contains(server.ResourceNames, tool) {
-				mcpServer.UnregisterTool(tool)
+				mcpServer.RemoveTool(tool)
+				toolUpdated = true
 				continue
 			}
 		}
-		// 更新mcp server
-		err = mcpProxy.UpdateMCPServerFromOpenApiSpec(mcpServer, server.Name, conf.openapiFileData,
-			server.ResourceNames)
-		if err != nil {
-			return err
+
+		var resourceVersionUpdated bool
+		// 如果资源版本发生变化，更新mcp server
+		if wouldReloadOpenapiSpec && conf != nil {
+			// 更新mcp server
+			err = mcpProxy.UpdateMCPServerFromOpenApiSpec(mcpServer, server.Name, conf.resourceVersion,
+				conf.openapiFileData, server.ResourceNames)
+			if err != nil {
+				return err
+			}
+			resourceVersionUpdated = true
 		}
-		logging.GetLogger().Infof("update mcp server[%s] success", server.Name)
+
+		// 更新 Prompts（每次都检查更新）
+		prompts := loadMCPServerPrompts(ctx, server.ID)
+		mcpProxy.UpdateMCPServerPrompts(server.Name, prompts)
+		logging.GetLogger().Infof(
+			"updated prompts:%d, tools:%v, resourceVersion:%v for mcp server[%s]",
+			len(prompts), toolUpdated, resourceVersionUpdated, server.Name)
 	}
 	// 删除已经不存在的mcp server
 	for _, server := range mcpProxy.GetActiveMCPServerNames() {
@@ -134,13 +214,12 @@ func LoadMCPServer(ctx context.Context, mcpProxy *proxy.MCPProxy) error {
 	return nil
 }
 
-// GetMCPServerConfig ...
-func GetMCPServerConfig(ctx context.Context, server *model.MCPServer) (*Config, error) {
-	// 查看每个mcp server当前生效的资源版本
-	release, err := biz.GetRelease(ctx, server.GatewayID, server.StageID)
-	if err != nil {
-		return nil, err
-	}
+// GetMCPServerConfigWithRelease 使用已有的 release 信息获取配置，避免重复查询
+func GetMCPServerConfigWithRelease(
+	ctx context.Context,
+	server *model.MCPServer,
+	release *model.Release,
+) (*Config, error) {
 	// 根据release查找当前生效的资源版本的openapi文件
 	openapiFile, err := biz.GetOpenapiGatewayResourceVersionSpec(ctx, server.GatewayID, release.ResourceVersionID)
 	if err != nil {
@@ -173,4 +252,26 @@ func GetMCPServerConfig(ctx context.Context, server *model.MCPServer) (*Config, 
 		resourceVersion: release.ResourceVersionID,
 		openapiFileData: openapiFileData,
 	}, nil
+}
+
+// loadMCPServerPrompts 加载 MCP Server 的 Prompts 配置
+func loadMCPServerPrompts(ctx context.Context, mcpServerID int) []*proxy.PromptConfig {
+	prompts, err := biz.GetMCPServerPrompts(ctx, mcpServerID)
+	if err != nil {
+		logging.GetLogger().Errorf("get mcp server[id:%d] prompts error: %v", mcpServerID, err)
+		return []*proxy.PromptConfig{}
+	}
+	if len(prompts) == 0 {
+		return []*proxy.PromptConfig{}
+	}
+
+	result := make([]*proxy.PromptConfig, 0, len(prompts))
+	for _, p := range prompts {
+		result = append(result, &proxy.PromptConfig{
+			Name:        p.Code,
+			Description: p.Name,
+			Content:     p.Content,
+		})
+	}
+	return result
 }

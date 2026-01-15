@@ -118,7 +118,7 @@
                 :api-base-url="envStore.tenantUserDisplayAPI"
                 multiple
                 :tenant-id="userStore.info.tenant_id"
-                @change="handleMemberChange"
+                @change="handleTenantUserChange"
               />
               <div
                 v-if="isShowMemberError"
@@ -374,12 +374,14 @@
 <script lang="ts" setup>
 import { getEnv } from '@/services/source/basic.ts';
 import {
+  checkNameAvailable,
   createGateway,
   getGuideDocs,
   patchGateway,
 } from '@/services/source/gateway.ts';
 import { Form, Message } from 'bkui-vue';
 import { cloneDeep } from 'lodash-es';
+import type { IFormMethod } from '@/types/common';
 import MemberSelector from '@/components/member-selector';
 import BkUserSelector from '@blueking/bk-user-selector';
 import bareGit from '@/images/bare_git.png';
@@ -394,11 +396,6 @@ import AgIcon from '@/components/ag-icon/Index.vue';
 import AgSideslider from '@/components/ag-sideslider/Index.vue';
 
 type ParamType = Parameters<typeof patchGateway>[1];
-
-type FormMethod = {
-  validate: () => void
-  clearValidate: () => void
-};
 
 interface IProps { initData?: ParamType }
 
@@ -422,7 +419,7 @@ const userStore = useUserInfo();
 const featureFlagStore = useFeatureFlag();
 const envStore = useEnv();
 
-const formRef = ref<InstanceType<typeof Form> & FormMethod>();
+const formRef = ref<InstanceType<typeof Form> & IFormMethod>();
 const formData = ref<ParamType>({
   name: '',
   description: '',
@@ -466,6 +463,7 @@ const defaultFormData = ref({
   },
 });
 
+const isNameAvailable = ref(true);
 const rules = {
   'name': [
     {
@@ -491,6 +489,23 @@ const rules = {
       message: () => formData.value.kind === 0
         ? t('由小写字母、数字、连接符（-）组成，首字符必须是小写字母，长度大于3小于30个字符')
         : t('只能包含小写字母(a-z)、数字(0-9)和半角连接符(-)，长度在 3-16 之间'),
+      trigger: 'blur',
+    },
+    {
+      validator: async (value: string) => {
+        try {
+          if (!value) return true;
+
+          const response = await checkNameAvailable({ name: value });
+          isNameAvailable.value = response?.is_available;
+          return isNameAvailable.value;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        catch (_) {
+          return false;
+        }
+      },
+      message: t('网关名已被占用'),
       trigger: 'blur',
     },
   ],
@@ -672,6 +687,11 @@ const handleMemberChange = (member: string[]) => {
   isShowMemberError.value = !member.length;
 };
 
+const handleTenantUserChange = (members: { id: string }[]) => {
+  formData.value.maintainers = members.map(member => member.id);
+  isShowMemberError.value = !members.length;
+};
+
 const showGuide = async () => {
   const data = await getGuideDocs(newGateway.value?.id);
   markdownHtml.value = md.render(data.content);
@@ -706,6 +726,10 @@ const handleTenantModeChange = (tenant_mode: string) => {
 const handleConfirmCreate = async () => {
   try {
     await formRef.value?.validate();
+
+    if (!isNameAvailable.value) {
+      return;
+    }
 
     if (!formData.value.maintainers.length) {
       return;
@@ -921,7 +945,9 @@ const handleCancel = () => {
 }
 
 .member-selector-form {
+
   :deep(.bk-form-label) {
+
     &::after {
       position: absolute;
       top: 0;
@@ -933,6 +959,7 @@ const handleCancel = () => {
   }
 
   &.is-error {
+
     :deep(.bk-tag-input-trigger),
     :deep(.tags-container) {
       border-color: #ea3636;

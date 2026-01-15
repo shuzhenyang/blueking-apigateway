@@ -17,7 +17,7 @@
  */
 
 <template>
-  <Top />
+  <Top @retry="handleRetry" />
   <BkResizeLayout
     class="content-resize"
     collapsible
@@ -84,12 +84,12 @@
                       @click="() => handleShowDoc(component)"
                     >
                       <p
-                        v-dompurify-html="hightlight(component.name)"
+                        v-bk-xss-html="hightlight(component.name)"
                         v-bk-overflow-tips
                         class="name"
                       />
                       <p
-                        v-dompurify-html="hightlight(component.description) || t('暂无描述')"
+                        v-bk-xss-html="hightlight(component.description) || t('暂无描述')"
                         v-bk-overflow-tips
                         class="label"
                       />
@@ -637,7 +637,7 @@ watch(() => route, () => {
 }, { immediate: true });
 
 watch(() => gatewayStore.currentGateway, () => {
-  router.replace({ query: null });
+  router.replace({ query: undefined });
 }, { deep: true });
 
 watch(isShowDoc, () => {
@@ -1054,6 +1054,67 @@ const openTab = (name?: string) => {
     },
   });
   window.open(routeData.href, '_blank');
+};
+
+const handleRetry = (row: Record<string, any>) => {
+  const {
+    path_params,
+    query_params,
+    headers,
+    body,
+  } = row.request;
+  const { resource_name } = row;
+
+  const pathList: any[] = [];
+  Object.keys(path_params)?.forEach((key: string) => {
+    pathList.push({
+      name: key,
+      value: path_params[key],
+    });
+  });
+
+  const queryList: any[] = [];
+  Object.keys(query_params)?.forEach((key: string) => {
+    queryList.push({
+      name: key,
+      value: query_params[key],
+    });
+  });
+
+  const headersList: any[] = [];
+  Object.keys(headers)?.forEach((key: string) => {
+    headersList.push({
+      name: key,
+      value: headers[key],
+    });
+  });
+
+  payloadType.pathPayload = pathList;
+  payloadType.queryPayload = queryList;
+  payloadType.headersPayload = headersList;
+  payloadType.rawPayload = JSON.parse(body || '{}');
+
+  payloadType.priorityPath = [];
+  payloadType.fromDataPayload = [];
+
+  if (resource_name === curResource.value?.name) {
+    return;
+  }
+
+  for (const key of Object.keys(resourceGroup.value)) {
+    const cur = resourceGroup.value[key];
+    const match = cur?.resources?.find((item: any) => {
+      return item.name === resource_name;
+    });
+    if (match) {
+      activeName.value = key;
+      curResource.value = match;
+      curComponentName.value = curResource.value?.name;
+      break;
+    }
+  }
+  responseContentRef.value?.setInit();
+  response.value = {};
 };
 
 const init = async () => {

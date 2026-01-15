@@ -264,11 +264,12 @@
 import { cloneDeep, isEqual } from 'lodash-es';
 import { Form, Message } from 'bkui-vue';
 import { useAccessLog } from '@/stores';
+import type { IFormMethod } from '@/types/common';
 import {
   type IComponentItem,
   addComponent,
   updateComponent,
-} from '@/services/source/componentManagement';
+} from '@/services/source/component-management.ts';
 import { type ISystemItem } from '@/services/source/system';
 import AgSideSlider from '@/components/ag-sideslider/Index.vue';
 import RenderConfig from './RenderConfig.vue';
@@ -280,11 +281,6 @@ type ISliderParams = {
 };
 
 type IDetailData = { detailData: IComponentItem };
-
-type FormMethod = {
-  validate: () => void
-  clearValidate: () => void
-};
 
 interface IProps {
   sliderParams?: ISliderParams
@@ -316,7 +312,7 @@ const emits = defineEmits<Emits>();
 const accessLogStore = useAccessLog();
 const { t } = useI18n();
 
-const componentFormRef = ref<InstanceType<typeof Form> & FormMethod>();
+const componentFormRef = ref<InstanceType<typeof Form> & IFormMethod>();
 const configRef = ref<InstanceType<typeof RenderConfig> & { getData: () => void }>();
 const submitLoading = ref(false);
 const methodList = ref(accessLogStore.methodList);
@@ -494,11 +490,12 @@ const handleCancel = () => {
 };
 </script>
 
-<style lang="scss" setup>
+<style lang="scss">
 .apigw-access-manager-slider-cls {
+
   .tips {
-    line-height: 24px;
     font-size: 12px;
+    line-height: 24px;
     color: #63656e;
 
     i {
@@ -510,18 +507,17 @@ const handleCancel = () => {
 
   .timeout-append {
     width: 50px;
-    line-height: 32px;
     font-size: 12px;
+    line-height: 32px;
     text-align: center;
   }
 
   .ag-tip {
-    color: #63656e;
-    line-height: 16px;
     clear: both;
-    font-weight: normal;
     font-size: 12px;
     font-weight: 400;
+    line-height: 16px;
+    color: #63656e;
   }
 }
 </style>

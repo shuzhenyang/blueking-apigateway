@@ -124,6 +124,7 @@
                     <BkTag
                       v-for="item in formData.labels"
                       :key="item.id"
+                      class="mr-4px"
                     >{{ item.name }}</BkTag>
                   </template>
                   <span v-else>--</span>
@@ -828,7 +829,7 @@
         </div>
         <div>
           <ResponseParams
-            v-if="Object.keys(formData.schema?.responses || {}).length"
+            v-if="Object.keys(formData.openapi_schema?.responses || {}).length"
             :detail="formData"
             readonly
           />
@@ -877,7 +878,7 @@ import {
   getResourceDetail,
   updateResources,
 } from '@/services/source/resource';
-import { getBackendServiceDetail, getBackendServiceList } from '@/services/source/backendServices';
+import { getBackendServiceDetail, getBackendServiceList } from '@/services/source/backend-services.ts';
 import { getGatewayLabels } from '@/services/source/gateway';
 import { Message } from 'bkui-vue';
 import { copy } from '@/utils';

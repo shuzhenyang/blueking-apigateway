@@ -16,7 +16,6 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import { t } from '@/locales';
-
 // 方法名称
 export const HTTP_METHODS = [
   {
@@ -149,3 +148,52 @@ paths:
         descriptionEn: None
       `,
 };
+
+// 使用指引
+export const USAGE_GUIDE_LIST = [
+  {
+    label: t('默认使用指引'),
+    value: 'default',
+  },
+  {
+    label: t('自定义使用指引'),
+    value: 'custom',
+  },
+];
+
+// MCPSever连接方式
+export const MCP_PROTOCOL_TYPE = [
+  {
+    label: 'Streamable HTTP',
+    value: 'streamable_http',
+  },
+  {
+    label: 'SSE',
+    value: 'sse',
+  },
+];
+
+export const MCP_TAB_LIST = [
+  {
+    name: 'tools',
+    label: t('工具'),
+  },
+  {
+    name: 'prompts',
+    label: 'Prompts',
+  },
+  {
+    name: 'auth',
+    label: t('已授权应用'),
+  },
+  {
+    name: 'guide',
+    label: t('使用指引'),
+  },
+].map((item) => {
+  return {
+    ...item,
+    count: 0,
+    show: true,
+  };
+});

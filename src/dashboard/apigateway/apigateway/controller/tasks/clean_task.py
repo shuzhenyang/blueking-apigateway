@@ -21,11 +21,15 @@ from datetime import timedelta
 from celery import shared_task
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
+from django.db.models import Count
 from django.utils import timezone
 
 from apigateway.apps.api_debug.models import APIDebugHistory
-from apigateway.apps.support.models import ResourceDocVersion
-from apigateway.core.models import PublishEvent, Release
+from apigateway.apps.metrics.models import StatisticsAppRequestByDay, StatisticsGatewayRequestByDay
+from apigateway.apps.monitor.models import AlarmRecord
+from apigateway.apps.support.models import ReleasedResourceDoc, ResourceDocVersion
+from apigateway.core.constants import ResourceVersionSchemaEnum
+from apigateway.core.models import PublishEvent, Release, ReleasedResource, ResourceVersion
 
 logger = logging.getLogger(__name__)
 
@@ -92,4 +96,114 @@ def delete_old_debug_history():
 
     count, _ = APIDebugHistory.objects.filter(id__in=ids_to_delete).delete()
 
-    logger.info("deleted %s debug older than %s", count, delete_end_time)
+    logger.info("deleted %s debug history older than %s", count, delete_end_time)
+
+
+@shared_task(ignore_result=True)
+def delete_old_alarm_records():
+    """清理 6 个月前的告警记录"""
+    logger.info("begin clean alarm old records")
+    delete_end_time = timezone.now() - relativedelta(months=6) - relativedelta(days=1)
+
+    alarm_records_to_delete = AlarmRecord.objects.filter(created_time__lte=delete_end_time)[:1000]
+    ids_to_delete = list(alarm_records_to_delete.values_list("id", flat=True))
+
+    count, _ = AlarmRecord.objects.filter(id__in=ids_to_delete).delete()
+
+    logger.info("deleted %s alarm records older than %s", count, delete_end_time)
+
+
+@shared_task(ignore_result=True)
+def delete_legacy_resource_version():
+    """清理旧的 (v1) 资源版本
+    1. gateway has more than 30 resource versions
+    2. resource version created time < 3 years ago
+    3. resource version's schema version is v1
+    4. resource version is not used in Release
+
+    当前风险较小，因为只处理大于 30 个版本的对应 v1 版本的 resource version
+    - 如果想要彻底删掉所有的 v1 版本 resource version，需要重新评估改动这个清理任务的逻辑
+    - 如果要清理 v2 版本的 resource version，需要重新评估风险，制定清理策略，另外写一个清理任务
+    """
+
+    logger.info("begin clean legacy resource version")
+
+    delete_end_time = timezone.now() - relativedelta(years=3) - relativedelta(days=1)
+
+    # having count > 30
+    gateway_ids = (
+        ResourceVersion.objects.values("gateway_id")
+        .annotate(count=Count("id"))
+        .filter(count__gt=30)
+        .values_list("gateway_id", flat=True)
+    )
+
+    legacy_resource_version_ids = list(
+        ResourceVersion.objects.filter(
+            gateway_id__in=gateway_ids,
+            schema_version=ResourceVersionSchemaEnum.V1.value,
+            created_time__lt=delete_end_time,
+        ).values_list("id", flat=True)
+    )
+
+    # check not used in Release
+    used_legacy_resource_version_ids = list(
+        Release.objects.filter(resource_version_id__in=legacy_resource_version_ids).values_list(
+            "resource_version_id", flat=True
+        )
+    )
+
+    # only get the top 30 for each time
+    to_delete_legacy_resource_version_ids = list(
+        set(legacy_resource_version_ids) - set(used_legacy_resource_version_ids)
+    )
+    to_delete_legacy_resource_version_ids = sorted(to_delete_legacy_resource_version_ids)[:30]
+
+    if not to_delete_legacy_resource_version_ids:
+        logger.info("no legacy resource version to delete, done")
+        return
+
+    logger.info("to delete legacy resource version ids: %s", to_delete_legacy_resource_version_ids)
+
+    # delete the related records
+    ReleasedResourceDoc.objects.filter(resource_version_id__in=to_delete_legacy_resource_version_ids).delete()
+    ReleasedResource.objects.filter(resource_version_id__in=to_delete_legacy_resource_version_ids).delete()
+
+    # delete the resource version
+    ResourceVersion.objects.filter(id__in=to_delete_legacy_resource_version_ids).delete()
+
+
+@shared_task(ignore_result=True)
+def delete_old_stats_records():
+    """清理旧的统计记录
+    1. two tables: metrics_stats_api_request_by_day, metrics_stats_app_request_by_day
+    2. delete records 5 years ago
+    3. max 10000 records per time
+    """
+    logger.info("begin clean old stats records")
+
+    max_records_per_time = 10000
+
+    delete_end_time = timezone.now() - relativedelta(years=5) - relativedelta(days=1)
+
+    stats_api_ids_to_delete = list(
+        StatisticsGatewayRequestByDay.objects.filter(start_time__lte=delete_end_time)
+        .order_by("start_time")
+        .values_list("id", flat=True)[:max_records_per_time]
+    )
+
+    if stats_api_ids_to_delete:
+        count, _ = StatisticsGatewayRequestByDay.objects.filter(id__in=stats_api_ids_to_delete).delete()
+
+        logger.info("deleted metrics_stats_api_request_by_day %s stats records older than %s", count, delete_end_time)
+
+    stats_app_ids_to_delete = list(
+        StatisticsAppRequestByDay.objects.filter(start_time__lte=delete_end_time)
+        .order_by("start_time")
+        .values_list("id", flat=True)[:max_records_per_time]
+    )
+
+    if stats_app_ids_to_delete:
+        count, _ = StatisticsAppRequestByDay.objects.filter(id__in=stats_app_ids_to_delete).delete()
+
+        logger.info("deleted metrics_stats_app_request_by_day %s stats records older than %s", count, delete_end_time)

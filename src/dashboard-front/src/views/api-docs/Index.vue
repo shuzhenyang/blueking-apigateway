@@ -327,6 +327,23 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
               )
               : ''
           }
+          {
+            row.is_deprecated
+              ? (
+                <bk-tag
+                  v-bk-tooltips={{
+                    content: row.deprecated_note,
+                    placement: 'top',
+                    disabled: !row.deprecated_note,
+                    extCls: 'max-w-200px',
+                  }}
+                  theme="danger"
+                >
+                  deprecated
+                </bk-tag>
+              )
+              : ''
+          }
         </div>
       );
     },
@@ -872,6 +889,12 @@ $primary-color: #3a84ff;
         }
       }
     }
+  }
+}
+
+.docs-list {
+  :deep(.t-table__content) {
+    max-height: 652px !important;
   }
 }
 </style>

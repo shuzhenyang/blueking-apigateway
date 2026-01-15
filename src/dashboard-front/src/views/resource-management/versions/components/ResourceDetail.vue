@@ -48,10 +48,11 @@
                     :class="[
                       currentSource.name === item.name ? 'active' : '',
                     ]"
+                    :data-resource-id="item.id"
                     @click="() => changeCurrentSource(item)"
                   >
                     <BkOverflowTitle type="tips">
-                      <span v-dompurify-html="renderTitle(item.name)" />
+                      <span v-bk-xss-html="renderTitle(item.name)" />
                     </BkOverflowTitle>
                   </div>
                 </template>
@@ -74,7 +75,10 @@
                 </BkException>
               </div>
             </div>
-            <div class="sideslider-rg">
+            <div
+              ref="resource-collapse-wrapper"
+              class="sideslider-rg"
+            >
               <div class="sideslider-rg-version-collapse">
                 <BkCollapse
                   v-model="activeIndex"
@@ -99,8 +103,13 @@
                     :class="`source-${source.name}`"
                     class="mb-12px"
                   >
-                    <span>
-                      <BkTag :theme="getMethodsTheme(source.method)">{{ source.method }}</BkTag>
+                    <span
+                      :data-name="`resource-${source.name}`"
+                      :data-id="source.id"
+                    >
+                      <BkTag :theme="getMethodsTheme(source.method)">
+                        {{ source.method }}
+                      </BkTag>
                       <span class="log-name">{{ source.name }}</span>
                     </span>
                     <template #content>
@@ -398,16 +407,21 @@
                         >
                           <BkRow>
                             <BkCol :span="4">
-                              <label class="ag-key">{{ t("文档更新时间") }}:</label>
+                              <label class="ag-key">{{ t('中文文档更新时间') }}:</label>
                             </BkCol>
                             <BkCol :span="10">
                               <div class="ag-value">
-                                <template v-if="localLanguage === 'en'">
-                                  {{ source?.doc_updated_time?.en || "--" }}
-                                </template>
-                                <template v-else>
-                                  {{ source?.doc_updated_time?.zh || "--" }}
-                                </template>
+                                {{ source?.doc_updated_time?.zh || '--' }}
+                              </div>
+                            </BkCol>
+                          </BkRow>
+                          <BkRow>
+                            <BkCol :span="4">
+                              <label class="ag-key">{{ t('英文文档更新时间') }}:</label>
+                            </BkCol>
+                            <BkCol :span="10">
+                              <div class="ag-value">
+                                {{ source?.doc_updated_time?.en || '--' }}
                               </div>
                             </BkCol>
                           </BkRow>
@@ -447,7 +461,7 @@ import { getMethodsTheme } from '@/utils';
 import ConfigDisplayTable from '@/components/plugin-manage/ConfigDisplayTable.vue';
 import RequestParams from '../../components/request-params/Index.vue';
 import ResponseParams from '../../components/response-params/Index.vue';
-import { locale } from '@/locales';
+import { useScroll } from '@vueuse/core';
 
 interface IProps {
   id: number | undefined
@@ -474,7 +488,34 @@ const keywords = ref('');
 const renderIsShow = ref(false);
 const isLoading = ref(false);
 
-const localLanguage = locale || 'zh-cn';
+const resourceCollapseWrapper = useTemplateRef('resource-collapse-wrapper');
+
+useScroll(resourceCollapseWrapper, {
+  onStop: () => {
+    const panelEls = Array.from(document.querySelectorAll('.sideslider-rg-version-collapse [data-name^="resource-"]'));
+    let topPanel = panelEls.find((el) => {
+      const top = el.getBoundingClientRect().top;
+      return top > 52 && top < window.innerHeight;
+    });
+    if (!topPanel) {
+      topPanel = panelEls.reverse().find(el => el.getBoundingClientRect().top < 0);
+    }
+    if (topPanel) {
+      const id = topPanel.dataset.id;
+      const topResource = info.value.resources.find(item => item.id === Number(id));
+      if (topResource) {
+        currentSource.value = topResource;
+        const listItem = document.querySelector(`.sideslider-lf-li[data-resource-id="${id}"]`);
+        if (listItem) {
+          listItem.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }
+    }
+  },
+});
 
 // 网关id
 const apigwId = computed(() => +route.params.id);
@@ -519,9 +560,6 @@ const getInfo = async () => {
     if (item?.proxy?.config) {
       if (typeof item?.proxy?.config === 'string') {
         item.proxy.config = JSON.parse(item?.proxy?.config);
-      }
-      else {
-        // item.proxy.config = {};
       }
     }
   });
@@ -717,6 +755,10 @@ const handleHidden = () => {
     line-height: 36px;
     color: #63656E;
     background-color: #f0f1f5;
+
+    .bk-collapse-icon {
+      top: 9px !important;
+    }
   }
 
   .bk-collapse-content {

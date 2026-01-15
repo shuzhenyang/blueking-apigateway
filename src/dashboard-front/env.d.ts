@@ -29,14 +29,20 @@ declare module '@blueking/login-modal' {
 
 declare module '@blueking/release-note';
 
+declare module '@blueking/xss-filter';
+
 declare interface Window {
   BKANALYSIS?: { init: (params: { siteName: string }) => void }
   BK_DASHBOARD_URL: string
+  BK_SITE_PATH: string
+  BK_STATIC_URL: string
 }
 
 declare global {
   var runtimeEnv: RuntimeEnv;
   var BK_DASHBOARD_URL: string;
+  var BK_SITE_PATH: string;
+  var BK_STATIC_URL: string;
 }
 
 export type RuntimeEnv = { BK_DASHBOARD_URL: string };

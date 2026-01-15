@@ -43,7 +43,10 @@
             </main>
           </header>
           <!--  API 列表  -->
-          <main class="tool-list custom-scroll-bar">
+          <main
+            class="tool-list custom-scroll-bar"
+            :style="{ height: setSideMaxH }"
+          >
             <template v-if="filteredToolList.length">
               <BkCollapse
                 v-model="activeGroupPanelNames"
@@ -74,12 +77,32 @@
                       @click="handleToolClick(tool.id, tool.name)"
                     >
                       <header
-                        v-dompurify-html="getHighlightedHtml(tool.name)"
-                        class="tool-item-name"
+                        v-bk-xss-html="getHighlightedHtml(tool.tool_name || tool.name)"
+                        v-bk-tooltips="{
+                          placement:'top',
+                          content: `${t('名称')}: ${tool.tool_name || tool.name}
+                            ${t('描述')}: ${tool.description}`,
+                          disabled: !tool.isOverflow,
+                          extCls: 'max-w-480px',
+                          delay: 0
+                        }"
+                        class="truncate color-#4d4f56 tool-item-name"
+                        @mouseenter="(e: MouseEvent) => handleToolMouseenter(e, tool)"
+                        @mouseleave="() => handleToolMouseleave(tool)"
                       />
                       <main
-                        v-dompurify-html="getHighlightedHtml(tool.description)"
-                        class="tool-item-desc"
+                        v-bk-xss-html="getHighlightedHtml(tool.description)"
+                        v-bk-tooltips="{
+                          placement:'top',
+                          content: `${t('名称')}: ${tool.tool_name || tool.name}
+                          ${t('描述')}: ${tool.description}`,
+                          disabled: !tool.isOverflow,
+                          extCls: 'max-w-480px',
+                          delay: 0
+                        }"
+                        class="truncate color-#979ba5 tool-item-desc"
+                        @mouseenter="(e: MouseEvent) => handleToolMouseenter(e, tool)"
+                        @mouseleave="() => handleToolMouseleave(tool)"
                       />
                     </article>
                   </template>
@@ -98,18 +121,27 @@
       </template>
       <!--  中间栏，当前 API 文档内容  -->
       <template #main>
-        <div class="main-content-wrap">
+        <div
+          class="main-content-wrap"
+          :style="{ height: setMainMaxH }"
+        >
           <template v-if="selectedTool">
             <header class="tool-name">
-              <div class="truncate name">
-                {{ selectedTool.name }}
-              </div>
-              <div class="desc">
-                （{{ selectedTool.description }}）
+              <div
+                v-bk-tooltips="{
+                  content: selectedTool.tool_name || selectedTool.name,
+                  disabled: selectedTool.tool_name
+                    ? selectedTool.tool_name.length <= 30
+                    : selectedTool.name.length <= 30
+                }"
+                class="name"
+              >
+                {{ truncate(selectedTool.tool_name || selectedTool.name) }}
               </div>
               <BkButton
                 theme="primary"
                 text
+                class="ml-16px"
                 @click="handleNavDocDetail"
               >
                 <AgIcon
@@ -120,6 +152,13 @@
                 {{ t('查看文档详情') }}
               </BkButton>
             </header>
+            <div class="pl-40px pr-40px mb-16px">
+              <AgDescription class="color-#979ba5 break-all gap-4px">
+                <template #description>
+                  {{ selectedTool?.description }}
+                </template>
+              </AgDescription>
+            </div>
             <article class="tool-basics">
               <section class="basic-cell">
                 <span>
@@ -164,11 +203,6 @@
           </template>
           <!--  API markdown 文档  -->
           <article class="tool-detail-content">
-            <!-- <div
-              id="toolDocMarkdown"
-              v-dompurify-html="selectedToolMarkdownHtml"
-              class="ag-markdown-view"
-              /> -->
             <div class="schema-wrapper">
               <article class="schema-group">
                 <h3 class="title mt-0!">
@@ -211,7 +245,7 @@
 import TableEmpty from '@/components/table-empty/Index.vue';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
 import { useRouteParams } from '@vueuse/router';
-import { useGateway } from '@/stores';
+import { useFeatureFlag, useGateway } from '@/stores';
 import {
   type IMCPServerTool,
   getServer,
@@ -225,6 +259,8 @@ import hljs from 'highlight.js';
 import AgIcon from '@/components/ag-icon/Index.vue';
 import ResponseParams from '@/views/resource-management/components/response-params/Index.vue';
 import RequestParams from '@/views/resource-management/components/request-params/Index.vue';
+import AgDescription from '@/components/ag-description/Index.vue';
+import { truncate } from 'lodash-es';
 
 type MCPServerType = Awaited<ReturnType<typeof getServer>>;
 
@@ -243,6 +279,7 @@ const router = useRouter();
 // 网关id
 const gatewayId = useRouteParams('id', 0, { transform: Number });
 const gatewayStore = useGateway();
+const featureFlagStore = useFeatureFlag();
 
 const md = new MarkdownIt({
   linkify: false,
@@ -276,16 +313,17 @@ const isLoading = ref(false);
 
 const filteredToolList = computed(() => {
   const regex = new RegExp(keyword.value, 'i');
-  return toolList.value.filter(tool => regex.test(tool.name) || regex.test(tool.description));
+  return toolList.value.filter((tool) => {
+    const searchName = tool.tool_name || tool.name;
+    return regex.test(searchName) || regex.test(tool.description);
+  });
 });
-
 // tool 分类列表
 const toolGroupList = computed(() => {
   return filteredToolList.value?.reduce((groupList, tool) => {
     if (tool.labels[0]) {
       const { id, name } = tool.labels[0];
       const group = groupList.find(item => item.id === id);
-
       if (group) {
         group.toolList.push(tool);
       }
@@ -318,17 +356,21 @@ const toolGroupList = computed(() => {
     toolList: typeof toolList.value
   }[]);
 });
-
-// watch(() => route.query, async () => {
-//   if (route.query?.tool_name) {
-//     selectedToolName.value = route.query.tool_name as string;
-//     selectedTool.value = toolList.value.find(tool => tool.name === selectedToolName.value) ?? null;
-//
-//     if (selectedTool.value) {
-//       await getDoc();
-//     }
-//   }
-// }, { deep: true });
+const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
+const setSideMaxH = computed(() => {
+  if (page === 'market') {
+    return '100%';
+  }
+  const offsetH = isShowNoticeAlert.value ? 516 : 476;
+  return `calc(100vh - ${offsetH}px)`;
+});
+const setMainMaxH = computed(() => {
+  if (page === 'market') {
+    return '100%';
+  }
+  const offsetH = isShowNoticeAlert.value ? 410 : 370;
+  return `calc(100vh - ${offsetH}px)`;
+});
 
 watch(() => server, () => {
   fetchToolList();
@@ -483,6 +525,17 @@ const handleNavDocDetail = () => {
   window.open(routeData.href, '_blank');
 };
 
+const handleToolMouseenter = (e: MouseEvent, row: IMCPServerTool) => {
+  const cell = (e.target as HTMLElement).closest('.truncate');
+  if (cell) {
+    row.isOverflow = cell.scrollWidth > cell.offsetWidth;
+  };
+};
+
+const handleToolMouseleave = (row: IMCPServerTool) => {
+  delete row.isOverflow;
+};
+
 onMounted(() => {
   fetchToolList();
 });
@@ -493,7 +546,6 @@ onMounted(() => {
 @use "sass:color";
 
 $primary-color: #3a84ff;
-// $code-bc: #1e1e1e;
 $code-bc: #f6f8fa;
 $code-color: #63656e;
 
@@ -505,7 +557,8 @@ $code-color: #63656e;
   .left-aside-wrap {
     width: auto;
     min-width: 290px;
-    background-color: #fff;
+    height: 100%;
+    background-color: #ffffff;
     border-radius: 2px;
     box-shadow: 0 2px 4px 0 #1919290d;
 
@@ -524,8 +577,7 @@ $code-color: #63656e;
     }
 
     .tool-list {
-      height: calc(100vh - 468px);
-      overflow-y: scroll;
+      overflow-y: auto;
 
       .tool-group-collapse {
         max-height: 100%;
@@ -596,22 +648,8 @@ $code-color: #63656e;
 
         .tool-item-name,
         .tool-item-desc {
-          display: -webkit-box;
-          overflow: hidden;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 1;
-        }
-
-        .tool-item-name {
           font-size: 12px;
           line-height: 20px;
-          color: #4d4f56;
-        }
-
-        .tool-item-desc {
-          font-size: 12px;
-          line-height: 20px;
-          color: #979ba5;
         }
 
         &:hover,
@@ -635,9 +673,8 @@ $code-color: #63656e;
   }
 
   .main-content-wrap {
-    height: calc(100vh - 354px);
     overflow-y: auto;
-    background-color: #fff;
+    background-color: #ffffff;
 
     .tool-name,
     .tool-basics,
@@ -658,12 +695,6 @@ $code-color: #63656e;
         font-weight: 700;
         line-height: 22px;
         color: #313238;
-      }
-
-      .desc {
-        font-size: 12px;
-        line-height: 20px;
-        color: #979ba5;
       }
     }
 

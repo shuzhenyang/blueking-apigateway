@@ -16,18 +16,26 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import datetime
+import json
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils.translation import gettext as _
 
 from apigateway.apps.mcp_server.constants import (
     MCPServerAppPermissionApplyExpireDaysEnum,
     MCPServerAppPermissionApplyStatusEnum,
+    MCPServerExtendTypeEnum,
     MCPServerStatusEnum,
 )
-from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission, MCPServerAppPermissionApply
+from apigateway.apps.mcp_server.models import (
+    MCPServer,
+    MCPServerAppPermission,
+    MCPServerAppPermissionApply,
+    MCPServerExtend,
+)
 from apigateway.apps.permission.constants import GrantTypeEnum
 from apigateway.apps.permission.models import AppResourcePermission
 from apigateway.biz.released_resource import ReleasedResourceData, ReleasedResourceHandler
@@ -38,6 +46,8 @@ from apigateway.biz.resource_doc import ResourceDocHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
+from apigateway.common.tenant.user_credentials import UserCredentials
+from apigateway.components import bkaidev
 from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
 from apigateway.core.models import Gateway, Release, Resource
 from apigateway.utils.time import NeverExpiresTime, now_datetime
@@ -50,6 +60,18 @@ class MCPServerHandler:
     def get_tools_resources_and_labels(
         gateway_id: int, stage_name: str, resource_names: List[str]
     ) -> Tuple[List[ReleasedResourceData], Dict[int, List]]:
+        """获取工具资源列表、标签
+
+        Args:
+            gateway_id: 网关 ID
+            stage_name: 环境名称
+            resource_names: 资源名称列表，支持 resource_name@tool_name 格式
+
+        Returns:
+            (tool_resources, labels) 元组
+            - tool_resources: 资源数据列表
+            - labels: 资源标签映射
+        """
         tool_resource_names = set(resource_names)
 
         stage_released_resources = ReleasedResourceHandler.get_public_released_resource_data_list(
@@ -246,6 +268,141 @@ class MCPServerHandler:
 
         queryset.update(status=MCPServerStatusEnum.INACTIVE.value)
 
+    # ========== Prompts 相关方法 ==========
+
+    @staticmethod
+    def fetch_remote_prompts(user_credentials: UserCredentials) -> List[Dict[str, Any]]:
+        """从 BKAIDev 平台获取 prompts 列表
+
+        Args:
+            user_credentials: 用于平台鉴权
+
+        Returns:
+            prompts 列表
+        """
+        return bkaidev.fetch_prompts_list(user_credentials=user_credentials)
+
+    @staticmethod
+    def get_prompts(mcp_server_id: int) -> List[Dict[str, Any]]:
+        """获取 MCPServer 已关联的 prompts 配置
+
+        Args:
+            mcp_server_id: MCPServer ID
+
+        Returns:
+            prompts 列表
+        """
+        extend = MCPServerExtend.objects.filter(
+            mcp_server_id=mcp_server_id,
+            type=MCPServerExtendTypeEnum.PROMPTS.value,
+        ).first()
+
+        if not extend or not extend.content:
+            return []
+
+        try:
+            return json.loads(extend.content)
+        except json.JSONDecodeError:
+            logger.exception("Failed to parse prompts content for mcp_server_id=%s", mcp_server_id)
+            return []
+
+    @staticmethod
+    def save_prompts(mcp_server_id: int, prompts: List[Dict[str, Any]], username: str) -> None:
+        """保存 MCPServer 的 prompts 配置
+
+        Args:
+            mcp_server_id: MCPServer ID
+            prompts: prompts 列表
+            username: 操作用户名
+        """
+        content = json.dumps(prompts, ensure_ascii=False)
+
+        extend, created = MCPServerExtend.objects.get_or_create(
+            mcp_server_id=mcp_server_id,
+            type=MCPServerExtendTypeEnum.PROMPTS.value,
+            defaults={
+                "content": content,
+                "created_by": username,
+                "updated_by": username,
+            },
+        )
+
+        if not created:
+            extend.content = content
+            extend.updated_by = username
+            extend.save(update_fields=["content", "updated_by"])
+
+    @staticmethod
+    def delete_prompts(mcp_server_id: int) -> None:
+        """删除 MCPServer 的 prompts 配置
+
+        Args:
+            mcp_server_id: MCPServer ID
+        """
+        MCPServerExtend.objects.filter(
+            mcp_server_id=mcp_server_id,
+            type=MCPServerExtendTypeEnum.PROMPTS.value,
+        ).delete()
+
+    @staticmethod
+    def get_prompts_count(mcp_server_id: int) -> int:
+        """获取 MCPServer 已关联的 prompts 数量
+
+        Args:
+            mcp_server_id: MCPServer ID
+
+        Returns:
+            prompts 数量
+        """
+        prompts = MCPServerHandler.get_prompts(mcp_server_id)
+        return len(prompts)
+
+    @staticmethod
+    def get_prompts_count_map(mcp_server_ids: List[int]) -> Dict[int, int]:
+        """批量获取 MCPServer 的 prompts 数量
+
+        Args:
+            mcp_server_ids: MCPServer ID 列表
+
+        Returns:
+            {mcp_server_id: prompts_count} 映射
+        """
+        extends = MCPServerExtend.objects.filter(
+            mcp_server_id__in=mcp_server_ids,
+            type=MCPServerExtendTypeEnum.PROMPTS.value,
+        )
+
+        prompts_count_map: Dict[int, int] = dict.fromkeys(mcp_server_ids, 0)
+        for extend in extends:
+            if extend.content:
+                try:
+                    prompts = json.loads(extend.content)
+                    prompts_count_map[extend.mcp_server_id] = len(prompts)
+                except json.JSONDecodeError:
+                    logger.exception("Failed to parse prompts content for mcp_server_id=%s", extend.mcp_server_id)
+
+        return prompts_count_map
+
+    @staticmethod
+    def get_user_custom_doc(mcp_server_id: int) -> str:
+        """获取 MCPServer 的用户自定义文档
+
+        Args:
+            mcp_server_id: MCPServer ID
+
+        Returns:
+            用户自定义文档内容，如果不存在则返回空字符串
+        """
+        extend = MCPServerExtend.objects.filter(
+            mcp_server_id=mcp_server_id,
+            type=MCPServerExtendTypeEnum.USER_CUSTOM_DOC.value,
+        ).first()
+
+        if not extend or not extend.content:
+            return ""
+
+        return extend.content
+
 
 class MCPServerPermissionHandler:
     @staticmethod
@@ -310,6 +467,6 @@ class MCPServerPermissionHandler:
             queryset = queryset.filter(status=apply_status)
 
         if query:
-            queryset = queryset.filter(mcp_server__name__icontains=query)
+            queryset = queryset.filter(Q(mcp_server__name__icontains=query) | Q(mcp_server__title__icontains=query))
 
         return queryset

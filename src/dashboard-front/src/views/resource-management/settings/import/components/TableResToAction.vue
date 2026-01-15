@@ -164,6 +164,7 @@
       fixed="right"
       prop="act"
       width="150"
+      :show-overflow-tooltip="false"
     >
       <template #default="{ row }: { row: ILocalImportedResource }">
         <div class="flex gap-12px">
@@ -187,7 +188,7 @@
     </BkTableColumn>
     <template #empty>
       <TableEmpty
-        :keyword="keyword"
+        :empty-type="keyword ? 'search-empty' : 'empty'"
         @clear-filter="handleClearFilter"
       />
     </template>

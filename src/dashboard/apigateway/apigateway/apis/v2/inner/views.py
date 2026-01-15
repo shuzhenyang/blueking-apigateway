@@ -476,15 +476,19 @@ class MCPServerPermissionListApi(generics.ListAPIView):
                     "mcp_server": {
                         "id": obj.id,
                         "name": obj.name,
+                        "title": obj.title or obj.name,
                         "description": obj.description,
                         "tools_count": obj.tools_count,
                         "tool_names": obj.resource_names,
+                        "protocol_type": obj.protocol_type,
                     },
                     "permission": {
                         "status": permission_status,
                         "action": action,
                         "expires_in": None,
                         "handled_by": [handled_by] if handled_by else obj.gateway.maintainers,
+                        "mcp_server_id": obj.id,
+                        "gateway_id": obj.gateway_id,
                     },
                 }
             )
@@ -498,7 +502,7 @@ class MCPServerPermissionListApi(generics.ListAPIView):
     decorator=swagger_auto_schema(
         operation_description="MCPServer 申请权限/批量申请权限",
         request_body=serializers.MCPServerAppPermissionApplyCreateInputSLZ,
-        responses={status.HTTP_201_CREATED: ""},
+        responses={status.HTTP_200_OK: serializers.MCPServerAppPermissionApplyCreateOutputSLZ(many=True)},
         tags=["OpenAPI.V2.Inner"],
     ),
 )
@@ -512,14 +516,21 @@ class MCPServerAppPermissionApplyCreateApi(generics.CreateAPIView):
 
         data = slz.validated_data
 
-        MCPServerPermissionHandler.create_apply(
+        queryset = MCPServerPermissionHandler.create_apply(
             data["target_app_code"],
             data["mcp_server_ids"],
             data["reason"],
             data["applied_by"],
         )
 
-        return OKJsonResponse(status=status.HTTP_201_CREATED)
+        if queryset.count() == 0:
+            raise error_codes.NOT_FOUND.format(
+                "请检查对应 mcp server /环境/网关是否都已启用。",
+                replace=True,
+            )
+
+        output_slz = serializers.MCPServerAppPermissionApplyCreateOutputSLZ(queryset, many=True)
+        return OKJsonResponse(status=status.HTTP_200_OK, data=output_slz.data)
 
 
 @method_decorator(
@@ -549,15 +560,19 @@ class MCPServerAppPermissionListApi(generics.ListAPIView):
                 "mcp_server": {
                     "id": obj.mcp_server_id,
                     "name": obj.mcp_server.name,
+                    "title": obj.mcp_server.title or obj.mcp_server.name,
                     "description": obj.mcp_server.description,
                     "tools_count": obj.mcp_server.tools_count,
                     "tool_names": obj.mcp_server.resource_names,
+                    "protocol_type": obj.mcp_server.protocol_type,
                 },
                 "permission": {
                     "status": MCPServerPermissionStatusEnum.OWNED.value,
                     "action": "",
                     "expires_in": None,
                     "handled_by": [obj.handled_by],
+                    "mcp_server_id": obj.mcp_server_id,
+                    "gateway_id": obj.mcp_server.gateway_id,
                 },
             }
             for obj in queryset
@@ -600,9 +615,12 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
                 "mcp_server": {
                     "id": obj.mcp_server_id,
                     "name": obj.mcp_server.name,
+                    "title": obj.mcp_server.title or obj.mcp_server.name,
                     "description": obj.mcp_server.description,
                     "tools_count": obj.mcp_server.tools_count,
                     "tool_names": obj.mcp_server.resource_names,
+                    "protocol_type": obj.mcp_server.protocol_type,
+                    "gateway_id": obj.mcp_server.gateway_id,  # 添加 gateway_id 用于构建审批 URL
                 },
                 "record": {
                     "id": obj.id,
@@ -615,6 +633,8 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
                     "comment": obj.comment,
                     "reason": obj.reason,
                     "expire_days": obj.expire_days,
+                    "mcp_server_id": obj.mcp_server_id,  # 添加 mcp_server_id 用于构建审批 URL
+                    "gateway_id": obj.mcp_server.gateway_id,  # 在 record 中也添加 gateway_id
                 },
             }
             for obj in queryset
@@ -659,9 +679,12 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
             "mcp_server": {
                 "id": instance.mcp_server_id,
                 "name": instance.mcp_server.name,
+                "title": instance.mcp_server.title or instance.mcp_server.name,
                 "description": instance.mcp_server.description,
                 "tools_count": instance.mcp_server.tools_count,
                 "tool_names": instance.mcp_server.resource_names,
+                "protocol_type": instance.mcp_server.protocol_type,
+                "gateway_id": instance.mcp_server.gateway_id,  # 添加 gateway_id 用于构建审批 URL
             },
             "record": {
                 "id": instance.id,
@@ -676,6 +699,8 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
                 "comment": instance.comment,
                 "reason": instance.reason,
                 "expire_days": instance.expire_days,
+                "mcp_server_id": instance.mcp_server_id,  # 添加 mcp_server_id 用于构建审批 URL
+                "gateway_id": instance.mcp_server.gateway_id,  # 在 record 中也添加 gateway_id
             },
         }
 

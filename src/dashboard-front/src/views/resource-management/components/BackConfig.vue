@@ -252,7 +252,7 @@ import { useGateway } from '@/stores';
 import {
   getBackendServiceDetail,
   getBackendServiceList,
-} from '@/services/source/backendServices.ts';
+} from '@/services/source/backend-services.ts';
 import { backendsPathCheck } from '@/services/source/resource.ts';
 // import mitt from '@/common/event-bus';
 import AddBackendService from '@/views/backend-services/components/AddBackendService.vue';
@@ -326,7 +326,7 @@ const rules = {
       trigger: 'blur',
     },
     {
-      validator: (value: string) => /^\/[\w{}/.-]*$/.test(value),
+      validator: (value: string) => /^\/[\w{}/.!-]*$/.test(value),
       message: t('斜线(/)开头的合法URL路径，不包含http(s)开头的域名'),
       trigger: 'blur',
     },

@@ -127,6 +127,7 @@
             </BkTableColumn>
             <BkTableColumn
               :label="t('申请人')"
+              :show-overflow-tooltip="false"
               prop="applied_by"
             >
               <template #default="{ row }">
@@ -346,13 +347,17 @@ const rules = reactive({
 });
 
 const getMcpList = async () => {
-  const res = await getServers(gatewayStore.currentGateway!.id!);
+  const page = {
+    offset: 0,
+    limit: 1000,
+  };
+  const res = await getServers(gatewayStore.apigwId, page);
   mcpList.value = res.results;
 };
 getMcpList();
 
 const getApplicant = async () => {
-  const response = await getMcpPermissionsApplicant(gatewayStore.currentGateway!.id!, filterData.value.mcp_server_id);
+  const response = await getMcpPermissionsApplicant(gatewayStore.apigwId, filterData.value.mcp_server_id);
   applicantList.value = response?.applicants || [];
 };
 
@@ -451,7 +456,7 @@ const handleSubmitApprove = async () => {
 
     await approveForm.value?.validate();
     await updateMcpPermissions(
-      gatewayStore.currentGateway!.id!,
+      gatewayStore.apigwId,
       filterData.value.mcp_server_id,
       curAction.value.id,
       curAction.value,

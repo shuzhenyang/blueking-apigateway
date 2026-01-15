@@ -25,7 +25,11 @@ from pydantic import TypeAdapter
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
-from apigateway.apps.mcp_server.constants import MCPServerAppPermissionGrantTypeEnum, MCPServerStatusEnum
+from apigateway.apps.mcp_server.constants import (
+    MCPServerAppPermissionGrantTypeEnum,
+    MCPServerProtocolTypeEnum,
+    MCPServerStatusEnum,
+)
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission
 from apigateway.apps.permission.constants import FormattedGrantDimensionEnum, GrantDimensionEnum
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
@@ -681,8 +685,21 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
     resource_names = serializers.ListField(
         child=serializers.CharField(), required=True, help_text="MCPServer 资源名称列表"
     )
+    tool_names = serializers.ListField(
+        child=serializers.CharField(), required=False, help_text="MCPServer 工具名称列表, 默认等于 resource_names"
+    )
     name = serializers.CharField(required=True, help_text="MCPServer 名称", max_length=64)
+    description = serializers.CharField(required=True, allow_blank=False, help_text="MCPServer 描述")
+    title = serializers.CharField(
+        required=False, allow_blank=True, help_text="MCPServer 中文名/显示名称", max_length=128
+    )
     status = serializers.ChoiceField(help_text="MCPServer 状态", choices=MCPServerStatusEnum.get_choices())
+    protocol_type = serializers.ChoiceField(
+        choices=MCPServerProtocolTypeEnum.get_choices(),
+        required=False,
+        default=MCPServerProtocolTypeEnum.SSE.value,
+        help_text="MCPServer 协议类型",
+    )
     target_app_codes = serializers.ListSerializer(
         help_text="主动授权的app_code", child=serializers.CharField(), allow_empty=True, default=list, required=False
     )
@@ -691,12 +708,15 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         model = MCPServer
         fields = (
             "name",
+            "title",
             "description",
             "is_public",
             "stage_id",
             "labels",
             "resource_names",
+            "tool_names",
             "status",
+            "protocol_type",
             "target_app_codes",
         )
         lookup_field = "id"
@@ -720,14 +740,37 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
 
     def create(self, validated_data):
         self._fill_data(validated_data)
-        instance = super().create(validated_data)
-        self._sync_permission(instance.id, validated_data.get("target_app_codes", []))
+
+        resource_names = validated_data.pop("resource_names", None)
+        tool_names = validated_data.pop("tool_names", None)
+        if not tool_names:
+            tool_names = resource_names
+
+        target_app_codes = validated_data.pop("target_app_codes", [])
+
+        instance = MCPServer(**validated_data)
+        if resource_names is not None:
+            instance.update_resource_names(resource_names, tool_names)
+        instance.save()
+
+        self._sync_permission(instance.id, target_app_codes)
         return instance
 
     def update(self, instance, validated_data):
         self._fill_data(validated_data)
+
+        resource_names = validated_data.pop("resource_names", None)
+        tool_names = validated_data.pop("tool_names", None)
+        if not tool_names:
+            tool_names = resource_names
+
+        target_app_codes = validated_data.pop("target_app_codes", [])
+
         instance = super().update(instance, validated_data)
-        self._sync_permission(instance.id, validated_data.get("target_app_codes", []))
+        instance.update_resource_names(resource_names, tool_names)
+        instance.save()
+
+        self._sync_permission(instance.id, target_app_codes)
         return instance
 
 

@@ -101,7 +101,7 @@
                     <BkFormItem
                       :label="t('版本类型')"
                       property="version"
-                      required
+                      class="required-tag"
                     >
                       <BkRadioGroup
                         v-model="semVerType"
@@ -537,7 +537,7 @@ defineExpose({ showReleaseSideslider });
     }
 
     .operate1 {
-      padding: 8px 100px 24px;
+      padding: 8px 40px 24px;
     }
 
     .operate2 {
@@ -631,6 +631,19 @@ defineExpose({ showReleaseSideslider });
       margin-top: 24px;
       text-align: center;
     }
+  }
+}
+
+.required-tag {
+  position: relative;
+  &::before {
+    position: absolute;
+    top: 0;
+    left: 56px;
+    width: 14px;
+    color: #ea3636;
+    text-align: center;
+    content: "*";
   }
 }
 </style>

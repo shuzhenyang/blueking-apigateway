@@ -143,7 +143,6 @@ const activeIndex = ref(0);
 const userLoaded = ref(false);
 const showNoticeAlert = ref(false);
 const enableShowNotice = ref(false);
-const noticeApi = ref(`${envStore.env.BK_DASHBOARD_URL}/backend/notice/announcements/`);
 const curLeavePageData = ref({});
 
 const bkuiLocale = computed(() => {
@@ -156,6 +155,8 @@ const bkuiLocale = computed(() => {
 const apigwId = computed(() => {
   return route.params.id;
 });
+
+const noticeApi = computed(() => `${envStore.env.BK_DASHBOARD_FE_URL}/backend/notice/announcements/`);
 
 const menuList: IHeaderNav[] = [
   {
@@ -192,6 +193,13 @@ const menuList: IHeaderNav[] = [
     url: 'McpMarket',
     enabled: true,
     link: '',
+  },
+  {
+    name: t('微网关'),
+    id: 6,
+    url: envStore.env.BK_APISIX_URL,
+    enabled: envStore.env.EDITION === 'te',
+    link: envStore.env.BK_APISIX_URL,
   },
 ];
 
@@ -294,7 +302,7 @@ const getRouteData = (routeName: string, index: number, link: string) => {
 
 const handleNavClick = (url: string, index: number, link: string = '') => {
   // 禁止重复点击
-  if (index === activeIndex.value && url !== 'Home') {
+  if (index === activeIndex.value && !['Home', 'McpMarket'].includes(url)) {
     return;
   }
   getRouteData(url, index, link);
@@ -393,6 +401,7 @@ const handleShowAlertChange = (isShowNotice: boolean) => {
     }
 
     &.PlatformToolsToolbox-navigation-content {
+
       :deep(.bk-navigation-wrapper) {
 
         .container-content,
