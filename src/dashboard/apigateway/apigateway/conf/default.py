@@ -559,6 +559,22 @@ BKAIDEV_API_TIMEOUT = env.int("BKAIDEV_API_TIMEOUT", 30)
 # 是否启用 Mock 模式（第三方 API 未就绪时使用）
 BKAIDEV_USE_MOCK = env.bool("BKAIDEV_USE_MOCK", False)
 
+# AIDEV 平台配置（配置了 AIDEV_AGENT_CREATE_URL 则启用 AIDev）
+AIDEV_AGENT_CREATE_URL = env.str("AIDEV_AGENT_CREATE_URL", "")
+
+# MCP Server 配置工具列表
+MCP_CONFIG_AGENT_CLIENTS = [
+    {"name": "codebuddy", "display_name": "CodeBuddy"},
+    {"name": "cursor", "display_name": "Cursor"},
+    {"name": "claude", "display_name": "Claude"},
+    {"name": "vscode", "display_name": "VSCode"},
+]
+
+# 如果配置了 AIDEV_AGENT_CREATE_URL，则添加 AIDev 到配置列表
+if AIDEV_AGENT_CREATE_URL:
+    MCP_CONFIG_AGENT_CLIENTS.append({"name": "aidev", "display_name": "AIDev"})
+
+
 # ==============================================================================
 # 网关全局配置
 # ==============================================================================
@@ -917,7 +933,7 @@ DEFAULT_FEATURE_FLAG = {
     "ENABLE_BK_NOTICE": ENABLE_BK_NOTICE,
     # 是否开启多租户模式
     "ENABLE_MULTI_TENANT_MODE": ENABLE_MULTI_TENANT_MODE,
-    # 是否开启网关AI相关功能
+    # 是否开启网关 AI 相关功能
     "ENABLE_AI_COMPLETION": AI_OPEN_API_BASE_URL != "",
     # 前端是否渲染 display_name
     "ENABLE_DISPLAY_NAME_RENDER": (
@@ -927,6 +943,8 @@ DEFAULT_FEATURE_FLAG = {
     "ENABLE_GATEWAY_OPERATION_STATUS": env.bool("FEATURE_FLAG_ENABLE_GATEWAY_OPERATION_STATUS", False),
     # 是否启用 MCP Prompt 功能
     "ENABLE_MCP_SERVER_PROMPT": env.bool("FEATURE_FLAG_ENABLE_MCP_SERVER_PROMPT", False),
+    # 是否启用健康检查
+    "ENABLE_HEALTH_CHECK": env.bool("FEATURE_FLAG_ENABLE_HEALTH_CHECK", False),
 }
 
 # 用户功能开关，将与 DEFAULT_FEATURE_FLAG 合并
