@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -53,6 +53,13 @@ adapter = requests.adapters.HTTPAdapter(
 )
 session.mount("https://", adapter)
 session.mount("http://", adapter)
+
+
+def _get_json_response(resp):
+    try:
+        return resp.json() if resp.content else {}
+    except ValueError:
+        return {}
 
 
 def _http_request(
@@ -157,8 +164,8 @@ def _http_request(
         # record for /metrics
         latency = int((time.time() - st) * 1000)
 
-        # greater than 100ms
-        if latency > 100:
+        # greater than 200ms
+        if latency > 200:
             logger.warning(
                 "http slow request! %s %s, request_id: %s, latency: %dms",
                 method,
@@ -183,7 +190,9 @@ def _http_request(
                 "error": (
                     f"status_code is {resp.status_code}, not 2xx! "
                     f"{method} {urlparse(url).path}, request_id={request_id}, resp.body={content}"
-                )
+                ),
+                "status_code": resp.status_code,
+                "response_data": _get_json_response(resp),
             }
 
         logger.debug(

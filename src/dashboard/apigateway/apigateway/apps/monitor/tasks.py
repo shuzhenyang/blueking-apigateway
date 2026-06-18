@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -33,18 +33,18 @@ from apigateway.apps.monitor.constants import (
     NoticeWayEnum,
 )
 from apigateway.apps.monitor.models import AlarmRecord
-from apigateway.service.alert_flow.handlers.app_request import AppRequestAlerter, AppRequestAppCodeRequiredFilter
-from apigateway.service.alert_flow.handlers.base import (
+from apigateway.service.alert_flow import (
     AlarmRecordCreator,
+    AlertFlow,
+    AppRequestAlerter,
+    AppRequestAppCodeRequiredFilter,
     GatewayExistFilter,
+    MonitorEvent,
+    NginxErrorAlerter,
     RelatedLogRecordsFetcher,
-)
-from apigateway.service.alert_flow.handlers.nginx_error import NginxErrorAlerter
-from apigateway.service.alert_flow.handlers.resource_backend import (
     ResourceBackendAlarmStrategyEnabledFilter,
     ResourceBackendAlerter,
 )
-from apigateway.service.alert_flow.helpers import AlertFlow, MonitorEvent
 
 logger = logging.getLogger(__name__)
 

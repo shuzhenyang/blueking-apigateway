@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,7 +21,7 @@
  * @param {Object} res 接口返回值
  */
 export const blobDownLoad = async (res: any) => {
-  if (res.ok) {
+  if (res?.ok) {
     const blob: any = await res.blob();
     const disposition = res.headers.get('Content-Disposition') || '';
     const url = URL.createObjectURL(blob);

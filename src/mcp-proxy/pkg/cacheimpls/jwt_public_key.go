@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -41,8 +41,11 @@ func (k JWTInfoCacheKey) Key() string {
 	return cast.ToString(k.GatewayID)
 }
 
-func retrieveJWTInfo(ctx context.Context, k cache.Key) (interface{}, error) {
-	key := k.(JWTInfoCacheKey)
+func retrieveJWTInfo(ctx context.Context, k cache.Key) (any, error) {
+	key, ok := k.(JWTInfoCacheKey)
+	if !ok {
+		return nil, errors.New("invalid cache key type for JWTInfoCacheKey")
+	}
 	r := repo.JWT
 	jwtInfo, err := repo.JWT.WithContext(ctx).Where(r.GatewayID.Eq(key.GatewayID)).Take()
 	if err != nil {
@@ -62,17 +65,17 @@ func GetJWTInfo(ctx context.Context, gatewayID int) (jwt *model.JWT, err error) 
 	key := JWTInfoCacheKey{
 		GatewayID: gatewayID,
 	}
-	var value interface{}
+	var value any
 	value, err = cacheGet(ctx, jwtInfoCache, key)
 	if err != nil {
-		return
+		return jwt, err
 	}
 
 	var ok bool
 	jwt, ok = value.(*model.JWT)
 	if !ok {
 		err = errors.New("not model.CoreJWT in cache")
-		return
+		return jwt, err
 	}
-	return
+	return jwt, err
 }

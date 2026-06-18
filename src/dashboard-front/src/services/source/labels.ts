@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,6 +21,7 @@
 *  */
 
 import http from '../http';
+import type { IGatewayLabelInputSLZ } from '@/services/types/body/post/gateways.ts';
 
 const path = '/gateways';
 
@@ -29,7 +30,8 @@ const path = '/gateways';
  * @param apigwId 网关id
  * @param data 标签名称
  */
-export const createLabels = (apigwId: number, data: { name: string }) => http.post(`${path}/${apigwId}/labels/`, data);
+export const createLabels = (apigwId: number, data: IGatewayLabelInputSLZ) =>
+  http.post(`${path}/${apigwId}/labels/`, data);
 
 /**
  * 删除标签
@@ -44,5 +46,5 @@ export const deleteLabels = (apigwId: number, labelsId: number) => http.delete(`
  * @param labelsId 标签id
  * @param data 标签数据
  */
-export const updateLabel = (apigwId: number, labelsId: number, data: { name: string }) =>
+export const updateLabel = (apigwId: number, labelsId: number, data: IGatewayLabelInputSLZ) =>
   http.put(`${path}/${apigwId}/labels/${labelsId}/`, data);

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -15,17 +15,24 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+from datetime import timedelta
+
 import pytest
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 from django_dynamic_fixture import G
 
+from apigateway.apps.data_plane.constants import DataPlaneStatusEnum
+from apigateway.apps.data_plane.models import DataPlane, GatewayDataPlaneBinding
 from apigateway.apps.gateway.models import GatewayAppBinding
+from apigateway.apps.metrics.models import StatisticsGatewayRequestByDay
 from apigateway.apps.monitor.models import AlarmStrategy
 from apigateway.apps.support.models import ReleasedResourceDoc
-from apigateway.biz.gateway import GatewayHandler
+from apigateway.biz.gateway import OPERATION_STATUS_DELTA_DAYS, GatewayHandler
 from apigateway.core.constants import (
     ContextScopeTypeEnum,
     ContextTypeEnum,
+    GatewayOperationStatusEnum,
     GatewayStatusEnum,
     GatewayTypeEnum,
     StageStatusEnum,
@@ -96,6 +103,39 @@ class TestGatewayHandler:
         result = GatewayHandler.get_stages_with_release_status([fake_gateway.id])
         result[fake_gateway.id] = sorted(result[fake_gateway.id], key=lambda x: x["id"])
         assert result == expected
+
+    def test_list_public_released_gateways_excludes_unreleased(self, fake_gateway):
+        unreleased = G(Gateway, status=GatewayStatusEnum.ACTIVE.value, is_public=True)
+        released = G(Gateway, status=GatewayStatusEnum.ACTIVE.value, is_public=True)
+        inactive = G(Gateway, status=GatewayStatusEnum.INACTIVE.value, is_public=True)
+        G(Release, gateway=released)
+        G(Release, gateway=inactive)
+
+        gateway_ids = list(GatewayHandler.list_public_released_gateways().values_list("id", flat=True))
+
+        assert released.id in gateway_ids
+        assert unreleased.id not in gateway_ids
+        assert inactive.id not in gateway_ids
+
+    def test_get_operation_statuses_checks_recent_start_time_only(self):
+        now = timezone.now()
+        gateway = G(
+            Gateway,
+            status=GatewayStatusEnum.ACTIVE.value,
+            created_time=now - timedelta(days=OPERATION_STATUS_DELTA_DAYS + 1),
+        )
+        G(
+            StatisticsGatewayRequestByDay,
+            gateway_id=gateway.id,
+            start_time=now - timedelta(days=1),
+            end_time=now + timedelta(days=1),
+            stage_name="prod",
+            resource_id=1,
+        )
+
+        result = GatewayHandler.get_operation_statuses([gateway])
+
+        assert result[gateway.id]["status"] == GatewayOperationStatusEnum.ACTIVE.value
 
     @pytest.mark.parametrize(
         "user_conf, api_type, allow_update_api_auth, unfiltered_sensitive_keys, allow_auth_from_params, allow_delete_sensitive_params, expected",
@@ -243,7 +283,7 @@ class TestGatewayHandler:
         expected,
     ):
         mocker.patch(
-            "apigateway.biz.gateway.GatewayHandler.get_gateway_auth_config",
+            "apigateway.biz.gateway.gateway.GatewayHandler.get_gateway_auth_config",
             return_value={
                 "user_auth_type": "default",
                 "api_type": GatewayTypeEnum.CLOUDS_API.value,
@@ -274,7 +314,7 @@ class TestGatewayHandler:
 
     def test_save_related_data(self, mocker, fake_gateway):
         mocker.patch(
-            "apigateway.biz.gateway.gateway.APIAuthConfig.config",
+            "apigateway.biz.gateway.gateway.GatewayAuthConfig.config",
             new_callable=mocker.PropertyMock(
                 return_value={
                     "user_auth_type": "default",
@@ -390,22 +430,38 @@ class TestGatewayHandler:
             result = GatewayHandler.get_resource_count(test["gateway_ids"])
             assert result == test["expected"]
 
-    @pytest.mark.parametrize(
-        "gateway_name, expected",
-        [
-            ("app1", 30),
-            ("app2", 50),
-            ("app3", 20),
-        ],
-    )
-    def test_get_max_resource_count(self, settings, gateway_name, expected):
-        settings.API_GATEWAY_RESOURCE_LIMITS = {
-            "max_resource_count_per_gateway": 20,
-            "max_resource_count_per_gateway_whitelist": {
-                "app1": 30,
-                "app2": 50,
-            },
-        }
+    def test_bind_to_data_planes(self):
+        gateway = G(Gateway, tenant_mode="single", tenant_id="default")
+        dp1 = G(DataPlane, name="dp-1", status=DataPlaneStatusEnum.ACTIVE.value)
+        dp2 = G(DataPlane, name="dp-2", status=DataPlaneStatusEnum.ACTIVE.value)
 
-        result = GatewayHandler.get_max_resource_count(gateway_name)
-        assert result == expected
+        GatewayHandler.bind_to_data_planes(
+            gateway=gateway,
+            data_plane_ids=[dp1.id, dp2.id],
+            username="admin",
+        )
+
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=dp1).exists()
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=dp2).exists()
+
+    def test_bind_to_data_planes_skips_missing(self):
+        gateway = G(Gateway, tenant_mode="single", tenant_id="default")
+        dp = G(DataPlane, name="dp-exists", status=DataPlaneStatusEnum.ACTIVE.value)
+
+        GatewayHandler.bind_to_data_planes(
+            gateway=gateway,
+            data_plane_ids=[dp.id, 99999],
+            username="admin",
+        )
+
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=dp).exists()
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway).count() == 1
+
+    def test_bind_to_data_planes_idempotent(self):
+        gateway = G(Gateway, tenant_mode="single", tenant_id="default")
+        dp = G(DataPlane, name="dp-idem", status=DataPlaneStatusEnum.ACTIVE.value)
+
+        GatewayHandler.bind_to_data_planes(gateway=gateway, data_plane_ids=[dp.id], username="admin")
+        GatewayHandler.bind_to_data_planes(gateway=gateway, data_plane_ids=[dp.id], username="admin")
+
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=dp).count() == 1

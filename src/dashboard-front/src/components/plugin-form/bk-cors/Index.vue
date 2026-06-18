@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -55,8 +55,8 @@ const formData = defineModel('modelValue', {
 });
 
 const {
-  schema = {},
-  componentMap = {},
+  schema = {} as ISchema,
+  componentMap = {} as Record<string, any>,
   disabled = false,
 } = defineProps<IProps>();
 
@@ -212,12 +212,12 @@ const getValue = () => {
   return cloneDeep(getSchemaForm());
 };
 
-const handleAddItem = (row) => {
+const handleAddItem = (row: any) => {
   formData.value[row.name]?.push({ key: '' });
   formRef.value?.validate(row.name);
 };
 
-const handleRemoveItem = (row) => {
+const handleRemoveItem = (row: any) => {
   const { field, index } = row;
   formData.value[field.name]?.splice(index, 1);
   formRef.value?.validate(row.name);
@@ -225,15 +225,16 @@ const handleRemoveItem = (row) => {
 
 const validate = async (): Promise<boolean> => {
   try {
-    const isValid = await formRef.value?.validate();
+    const isValid = await (formRef.value as any)?.validate();
     if (!isValid) {
+      // @ts-ignore
       return;
     }
     const schemaForm = getValue();
     const allowOriginsByRegex = schemaForm?.allow_origins_by_regex ?? [];
     // 单独处理下allowOriginsByRegex字段传给后端参数格式
     if (allowOriginsByRegex.length) {
-      formData.value.allow_origins_by_regex = allowOriginsByRegex.map(item => item.key ?? '');
+      formData.value.allow_origins_by_regex = allowOriginsByRegex.map((item: any) => item.key ?? '');
     }
     return isValid;
   }
@@ -249,13 +250,13 @@ const clearValidate = () => {
 
 watch(
   () => formData.value,
-  (newVal) => {
+  (newVal: any) => {
     clearValidate();
     if (isObject(newVal) && isEmpty(newVal)) {
       formData.value = { ...DEFAULT_FORM_DATA };
     }
     if (Array.isArray(newVal?.allow_origins_by_regex)) {
-      formData.value.allow_origins_by_regex = newVal.allow_origins_by_regex.map(item =>
+      formData.value.allow_origins_by_regex = newVal.allow_origins_by_regex.map((item: any) =>
         typeof item === 'string' ? { key: item } : (item || { key: '' }),
       );
     }

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -33,6 +33,7 @@ from apigateway.apps.permission.constants import (
     PermissionApplyExpireDaysEnum,
     PermissionStatusEnum,
 )
+from apigateway.biz.permission import ResourcePermissionHandler
 from apigateway.biz.validators import BKAppCodeValidator
 from apigateway.common.constants import UserAuthTypeEnum
 from apigateway.common.fields import TimestampField
@@ -223,6 +224,7 @@ class AppPermissionApplyRecordBaseSLZ(serializers.ModelSerializer):
     comment = serializers.SerializerMethodField()
     tag = serializers.SerializerMethodField()
     components = serializers.ListField(child=ComponentInRecordSLZ())
+    applied_by = serializers.SerializerMethodField()
 
     class Meta:
         model = AppPermissionApplyRecord
@@ -256,6 +258,14 @@ class AppPermissionApplyRecordBaseSLZ(serializers.ModelSerializer):
 
     def get_tag(self, obj):
         return BoardConfigManager.get_optional_display_label(obj.board)
+
+    def get_applied_by(self, obj):
+        return ResourcePermissionHandler.convert_applied_by_to_display_name(
+            obj.bk_app_code,
+            obj.applied_by,
+            "",
+            "",
+        )
 
 
 class EsbAppPermissionApplyRecordListOutputSLZ(AppPermissionApplyRecordBaseSLZ):

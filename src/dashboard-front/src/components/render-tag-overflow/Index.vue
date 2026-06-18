@@ -1,7 +1,7 @@
 /*
 * TencentBlueKing is pleased to support the open source community by making
 * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-* Copyright (C) 2025 Tencent. All rights reserved.
+* Copyright (C) 2026 Tencent. All rights reserved.
 * Licensed under the MIT License (the "License"); you may not use this file except
 * in compliance with the License. You may obtain a copy of the License at
 *
@@ -17,162 +17,88 @@
 */
 
 <template>
-  <div
-    ref="rowRef"
-    class="render-row-wrapper"
-  >
-    <p
-      ref="textRef"
-      class="render-row"
+  <div class="render-row-wrapper">
+    <!-- 第一个标签：自适应宽度，超长省略 -->
+    <template v-if="visibleData?.length > 0">
+      <AgUserDisplayName
+        :is-enable-display-name="isEnableDisplayName"
+        :user-id="visibleData[0]"
+        class="flex-1 flex-shrink-0 truncate"
+      />
+    </template>
+
+    <!-- 超过1个显示 +n 标签+气泡 -->
+    <BkPopover
+      v-if="overflowData.length > 0"
+      :max-height="500"
+      :popover-delay="0"
+      placement="left"
+      theme="light"
+      arrow
+      v-bind="popoverProps"
     >
-      <BkTag
-        v-for="(item, index) in data"
-        :key="index"
-        class="render-row-item"
-        @click="emits('click')"
-      >
-        {{ item }}
-      </BkTag>
-      <BkTag
-        v-if="overflowData.length > 0"
-        class="overflow-tag"
-        @click="emits('click')"
-      >
+      <BkTag class="overflow-tag">
         +{{ overflowData.length }}
       </BkTag>
-    </p>
-    <p class="visible-content">
-      <BkTag
-        v-for="(item, index) in visibleData"
-        :key="index"
-        class="render-row-item"
-        @click="emits('click')"
-      >
-        {{ item }}
-      </BkTag>
-      <BkPopover
-        v-if="overflowData.length > 0"
-        ext-cls="render-row-overflow-popover-main"
-        :max-height="500"
-        placement="left"
-        theme="light"
-        arrow
-        v-bind="popoverProps"
-      >
-        <BkTag
-          class="overflow-tag"
-          @click="emits('click')"
-        >
-          +{{ overflowData.length }}
-        </BkTag>
-        <template #content>
-          <slot name="popoverContent">
-            <div class="flex flex-col gap-4px">
+      <template #content>
+        <div class="flex flex-col gap-4px">
+          <AgUserDisplayName
+            :is-enable-display-name="isEnableDisplayName"
+            class="flex flex-col flex-shrink-0 gap-4px max-w-800px"
+          >
+            <template #customDisplayName>
               <BkTag
-                v-for="(item, index) in overflowData"
+                v-for="(item, index) of overflowData"
                 :key="index"
-                class="render-row-item mb-4px max-w-400px"
               >
-                {{ item }}
+                <bk-user-display-name
+                  v-if="isEnableDisplayName"
+                  :user-id="item"
+                />
+                <span v-else>
+                  {{ item }}
+                </span>
               </BkTag>
-            </div>
-          </slot>
-        </template>
-      </BkPopover>
-    </p>
+            </template>
+          </AgUserDisplayName>
+        </div>
+      </template>
+    </BkPopover>
   </div>
 </template>
 
 <script setup lang="ts">
-import { debounce } from 'lodash-es';
+import { useFeatureFlag } from '@/stores';
+import AgUserDisplayName from '@/components/ag-user-display-name/Index.vue';
 
-import { useResizeObserver } from '@vueuse/core';
-
-interface Props {
+interface IProps {
   data: string[]
-  // 容器右侧不能占用的预留空间
-  right?: number
   popoverProps?: Record<string, any>
+  isMember?: boolean
 }
 
-const { data, right = 0, popoverProps = {} } = defineProps<Props>();
+const {
+  data,
+  popoverProps = {},
+  isMember = false,
+} = defineProps<IProps>();
 
-const emits = defineEmits<{ click: [void] }>();
+const featureFlagStore = useFeatureFlag();
 
-const findOverflowIndex = () => {
-  overflowIndex.value = null;
-
-  nextTick(() => {
-    if (textRef.value) {
-      const { left, width } = textRef.value.getBoundingClientRect();
-      // 计算可用宽度，需要减去右侧预留的空间
-      const max = left + width - right;
-      const htmlArr: Element[] = Array.from(textRef.value.getElementsByClassName('render-row-item'));
-
-      for (let i = 0; i < htmlArr.length; i++) {
-        const item = htmlArr[i];
-        const { left: itemLeft, width: itemWidth } = item.getBoundingClientRect();
-        if (itemLeft + itemWidth > max) {
-          overflowIndex.value = i;
-          break;
-        }
-      }
-      const colTag = textRef.value.getElementsByClassName('overflow-tag');
-      if (colTag.length) {
-        const { left: colTagLeft, width: colTagWidth } = colTag[0].getBoundingClientRect();
-        if (colTagLeft + colTagWidth > max && overflowIndex.value) {
-          overflowIndex.value = overflowIndex.value - 1;
-        }
-      }
-    }
-  });
-};
-
-const rowRef = ref<HTMLDivElement>();
-useResizeObserver(rowRef, debounce(findOverflowIndex, 300));
-
-const textRef = ref<HTMLParagraphElement>();
-const overflowIndex = ref<number | null>(null);
-
-const overflowData = computed(() => {
-  if (overflowIndex.value === null) {
-    return [];
-  }
-  return data.slice(overflowIndex.value);
-});
-const visibleData = computed(() => {
-  if (overflowIndex.value === null) {
-    return data;
-  }
-
-  return data.slice(0, overflowIndex.value);
-});
-
-watch(() => data, findOverflowIndex, { immediate: true });
+// 只显示第一个
+const visibleData = computed(() => data?.length > 1 ? data.slice(0, 1) : data);
+// 溢出的数据
+const overflowData = computed(() => data?.length > 1 ? data.slice(1) : []);
+// 控制是否展示用户名称组件
+const isEnableDisplayName = computed(() => featureFlagStore.isEnableDisplayName && isMember);
 </script>
 
 <style lang="scss" scoped>
 .render-row-wrapper {
-  position: relative;
   display: inline-flex;
-  max-width: 100%;
   align-items: center;
-
-  .render-row {
-    display: flex;
-    overflow: hidden;
-    opacity: 0%;
-    gap: 4px;
-  }
-
-  .visible-content {
-    position: absolute;
-    display: flex;
-    gap: 4px;
-  }
-
-  .render-row-item {
-    padding: 0 10px;
-  }
+  gap: 4px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 </style>

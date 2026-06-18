@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -121,6 +121,14 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
     )
     user_config = UserConfigSLZ(required=False)
     allow_delete_sensitive_params = serializers.BooleanField(default=True)
+    # Data plane names to bind to when creating a new gateway
+    # If empty, will use 'default' data plane
+    data_planes = serializers.ListField(
+        child=serializers.CharField(max_length=32),
+        required=False,
+        allow_empty=True,
+        help_text="Data plane names to bind the gateway to (defaults to 'default')",
+    )
 
     class Meta:
         model = Gateway
@@ -135,6 +143,7 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
             "api_type",
             "user_config",
             "allow_delete_sensitive_params",
+            "data_planes",
         ]
         extra_kwargs = {
             "description_en": {

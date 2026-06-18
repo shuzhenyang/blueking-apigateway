@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -15,35 +15,37 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-from django.conf import settings
 from django.db.models import Count, Q
-from django.template.loader import render_to_string
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
-from apigateway.apis.web.mcp_server.serializers import MCPServerConfigListOutputSLZ
+from apigateway.apis.web.mcp_server.serializers import (
+    MCPServerAppPermissionApplyCreateOutputSLZ,
+    MCPServerConfigListOutputSLZ,
+)
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
     OFFICIAL_MCP_CATEGORY_NAME,
     MCPServerStatusEnum,
 )
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerCategory
-from apigateway.biz.gateway.type import GatewayTypeHandler
-from apigateway.biz.mcp_server import MCPServerHandler
-from apigateway.common.django.translation import get_current_language_code
+from apigateway.biz.mcp_server import MCPServerHandler, MCPServerPermissionHandler
 from apigateway.common.error_codes import error_codes
+from apigateway.common.tenant.constants import TenantModeEnum
 from apigateway.common.tenant.query import gateway_mcp_server_filter_by_user_tenant_id
 from apigateway.common.tenant.request import get_user_tenant_id
 from apigateway.common.tenant.validators import check_user_can_access_gateway
+from apigateway.components.bkpaas import get_paas_apps_by_username
 from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
-from apigateway.core.models import Gateway, Stage
-from apigateway.service.contexts import GatewayAuthContext
-from apigateway.service.mcp.mcp_server import build_mcp_server_url
 from apigateway.utils.responses import OKJsonResponse
 
 from .serializers import (
+    MCPMarketplaceApplicableAppOutputSLZ,
+    MCPMarketplaceServerAppPermissionApplyCreateInputSLZ,
+    MCPServerBatchConfigInputSLZ,
+    MCPServerBatchConfigOutputSLZ,
     MCPServerCategoryOutputSLZ,
     MCPServerListInputSLZ,
     MCPServerListOutputSLZ,
@@ -82,20 +84,10 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
                 | Q(_labels__icontains=keyword)
             )
 
-        # 分类筛选（支持多个分类）
-        # 当选择的分类中包含 Official 或 Featured 时，使用 AND 逻辑，确保返回的结果同时满足所有选择的分类
-        # 当选择的分类中不包含这些特殊分类时，使用 OR 逻辑
+        # 分类筛选 —— 使用 biz 层的通用方法
         categories = slz.validated_data.get("categories")
         if categories:
-            special_categories = {OFFICIAL_MCP_CATEGORY_NAME, FEATURED_MCP_CATEGORY_NAME}
-            if special_categories & set(categories):
-                # 包含 Official 或 Featured 分类时，使用 AND 逻辑：必须同时属于所有选择的分类
-                for category in categories:
-                    queryset = queryset.filter(categories__name=category, categories__is_active=True)
-                queryset = queryset.distinct()
-            else:
-                # 不包含特殊分类时，使用 OR 逻辑：属于任意一个选择的分类即可
-                queryset = queryset.filter(categories__name__in=categories, categories__is_active=True).distinct()
+            queryset = MCPServerHandler.apply_category_filter(queryset, categories)
 
         # tenant_id filter here
         user_tenant_id = get_user_tenant_id(request)
@@ -115,41 +107,97 @@ class MCPMarketplaceServerListApi(generics.ListAPIView):
 
         page = self.paginate_queryset(queryset)
 
-        gateway_ids = list({mcp_server.gateway.id for mcp_server in page})
-        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config(gateway_ids)
-        gateways = {
-            gateway.id: {
-                "id": gateway.id,
-                "name": gateway.name,
-                "is_official": GatewayTypeHandler.is_official(gateway_auth_configs[gateway.id].gateway_type),
-            }
-            for gateway in Gateway.objects.filter(id__in=gateway_ids)
-        }
-
-        stage_ids = [mcp_server.stage.id for mcp_server in page]
-        stages = {
-            stage.id: {
-                "id": stage.id,
-                "name": stage.name,
-            }
-            for stage in Stage.objects.filter(id__in=stage_ids)
-        }
-
-        # 获取 prompts_count
-        mcp_server_ids = [mcp_server.id for mcp_server in page]
-        prompts_count_map = MCPServerHandler.get_prompts_count_map(mcp_server_ids)
+        # 使用 biz 层的通用方法构建上下文
+        context = MCPServerHandler.build_list_context(
+            page,
+            include_prompts_count=True,
+            include_least_privileges=True,
+        )
 
         slz = MCPServerListOutputSLZ(
             page,
             many=True,
-            context={
-                "gateways": gateways,
-                "stages": stages,
-                "prompts_count_map": prompts_count_map,
-            },
+            context=context,
         )
 
         return self.get_paginated_response(slz.data)
+
+
+@method_decorator(
+    name="post",
+    decorator=swagger_auto_schema(
+        operation_description="发起 MCPServer 权限申请",
+        request_body=MCPMarketplaceServerAppPermissionApplyCreateInputSLZ,
+        responses={status.HTTP_201_CREATED: MCPServerAppPermissionApplyCreateOutputSLZ(many=True)},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPMarketplaceServerAppPermissionApplyCreateApi(generics.CreateAPIView):
+    def create(self, request, *args, **kwargs):
+        slz = MCPMarketplaceServerAppPermissionApplyCreateInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        data = slz.validated_data
+        mcp_server_ids = [kwargs["mcp_server_id"]]
+        user_tenant_id = get_user_tenant_id(request)
+
+        apps = get_paas_apps_by_username(request.user.username, user_tenant_id)
+        if data["bk_app_code"] not in {app.get("code") for app in apps}:
+            raise error_codes.INVALID_ARGUMENT.format(_("请选择当前用户有权限的蓝鲸应用。"))
+
+        queryset = MCPServer.objects.filter(
+            id__in=mcp_server_ids,
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            gateway__status=GatewayStatusEnum.ACTIVE.value,
+            stage__status=StageStatusEnum.ACTIVE.value,
+        )
+        if user_tenant_id:
+            queryset = gateway_mcp_server_filter_by_user_tenant_id(queryset, user_tenant_id)
+
+        valid_ids = set(queryset.values_list("id", flat=True))
+        invalid_ids = set(mcp_server_ids) - valid_ids
+        if invalid_ids:
+            raise error_codes.NOT_FOUND.format(
+                _("请检查对应 MCPServer / 环境 / 网关是否都已启用，不可用 MCPServer ID：{ids}。").format(
+                    ids=", ".join(map(str, sorted(invalid_ids)))
+                ),
+                replace=True,
+            )
+
+        queryset = MCPServerPermissionHandler.create_apply(
+            bk_app_code=data["bk_app_code"],
+            mcp_server_ids=mcp_server_ids,
+            reason=data["reason"],
+            applied_by=request.user.username,
+        )
+
+        output_slz = MCPServerAppPermissionApplyCreateOutputSLZ(queryset, many=True)
+        return OKJsonResponse(status=status.HTTP_201_CREATED, data=output_slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="获取发起 MCPServer 权限申请时可选择的蓝鲸应用列表",
+        responses={status.HTTP_200_OK: MCPMarketplaceApplicableAppOutputSLZ(many=True)},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPMarketplaceApplicableAppListApi(generics.ListAPIView):
+    def list(self, request, *args, **kwargs):
+        apps = get_paas_apps_by_username(request.user.username, get_user_tenant_id(request))
+        output_data = [
+            {
+                "bk_app_code": app.get("code", ""),
+                "name": app.get("name", ""),
+                "logo_url": app.get("logo_url", ""),
+            }
+            for app in apps
+        ]
+
+        slz = MCPMarketplaceApplicableAppOutputSLZ(output_data, many=True)
+        return OKJsonResponse(data=slz.data)
 
 
 @method_decorator(
@@ -167,80 +215,18 @@ class MCPMarketplaceServerRetrieveApi(generics.RetrieveAPIView):
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        if not instance.is_public:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未公开，无法访问。"))
-        if instance.status != MCPServerStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未启用，无法访问。"))
-        if instance.gateway.status != GatewayStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关未启用，无法访问。"))
-        if instance.stage.status != StageStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关对应的环境未启用，无法访问。"))
 
         user_tenant_id = get_user_tenant_id(request)
         check_user_can_access_gateway(instance.gateway.tenant_mode, instance.gateway.tenant_id, user_tenant_id)
 
-        template_name = f"mcp_server/{get_current_language_code()}/guideline.md"
-        guideline = render_to_string(
-            template_name,
-            context={
-                "name": instance.name,
-                "url": build_mcp_server_url(instance.name, instance.protocol_type),
-                "description": instance.description,
-                "bk_login_ticket_key": settings.BK_LOGIN_TICKET_KEY,
-                "bk_access_token_doc_url": settings.BK_ACCESS_TOKEN_DOC_URL,
-                "enable_multi_tenant_mode": settings.ENABLE_MULTI_TENANT_MODE,
-                "user_tenant_id": user_tenant_id,
-                "protocol_type": instance.protocol_type,
-            },
-        )
-        # set the guideline here, for slz
-        instance.guideline = guideline
-
-        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config([instance.gateway.id])
-        gateways = {
-            instance.gateway.id: {
-                "id": instance.gateway.id,
-                "name": instance.gateway.name,
-                "is_official": GatewayTypeHandler.is_official(gateway_auth_configs[instance.gateway.id].gateway_type),
-            }
-        }
-        stages = {
-            instance.stage.id: {
-                "id": instance.stage.id,
-                "name": instance.stage.name,
-            }
-        }
-
-        tool_resources, labels = MCPServerHandler.get_tools_resources_and_labels(
-            gateway_id=instance.gateway.id,
-            stage_name=instance.stage.name,
-            resource_names=instance.resource_names,
-        )
-        instance.tools = tool_resources
-
-        # append the maintainers
-        instance.maintainers = instance.gateway.maintainers
-
-        # 获取 prompts_count 和 prompts 列表
-        prompts_count_map = MCPServerHandler.get_prompts_count_map([instance.id])
-        prompts = MCPServerHandler.get_prompts(instance.id)
-
-        # 获取用户自定义文档
-        user_custom_doc = MCPServerHandler.get_user_custom_doc(instance.id)
-
-        serializer = self.get_serializer(
+        # 使用 biz 层的通用方法完成访问校验和上下文构建
+        context = MCPServerHandler.build_retrieve_context(
             instance,
-            context={
-                "gateways": gateways,
-                "stages": stages,
-                "labels": labels,
-                "tool_name_map": instance.gen_tool_name_map(),
-                "prompts_count_map": prompts_count_map,
-                "prompts": prompts,
-                "user_custom_doc": user_custom_doc,
-            },
+            check_public=True,
+            user_tenant_id=user_tenant_id,
         )
-        # 返回工具列表页面需要的信息
+
+        serializer = self.get_serializer(instance, context=context)
         return OKJsonResponse(data=serializer.data)
 
 
@@ -259,14 +245,9 @@ class MCPMarketplaceServerToolDocRetrieveApi(generics.RetrieveAPIView):
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        if not instance.is_public:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未公开，无法访问。"))
-        if instance.status != MCPServerStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未启用，无法访问。"))
-        if instance.gateway.status != GatewayStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关未启用，无法访问。"))
-        if instance.stage.status != StageStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关对应的环境未启用，无法访问。"))
+
+        # 使用 biz 层的通用方法校验访问权限
+        MCPServerHandler.validate_access(instance, check_public=True)
 
         user_tenant_id = get_user_tenant_id(request)
         check_user_can_access_gateway(instance.gateway.tenant_mode, instance.gateway.tenant_id, user_tenant_id)
@@ -286,7 +267,7 @@ class MCPMarketplaceServerToolDocRetrieveApi(generics.RetrieveAPIView):
 @method_decorator(
     name="get",
     decorator=swagger_auto_schema(
-        operation_description="获取 MCP 市场中某个 Server 的配置列表（支持 Cursor、CodeBuddy、Claude、AIDev 等工具的配置）",
+        operation_description="获取 MCP 市场中某个 Server 的配置列表（支持 Cursor、CodeBuddy、Claude、VSCode 等工具的配置）",
         responses={status.HTTP_200_OK: MCPServerConfigListOutputSLZ()},
         tags=["WebAPI.MCPServer"],
     ),
@@ -301,20 +282,16 @@ class MCPMarketplaceServerConfigListApi(generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        # 验证 MCPServer 访问权限
-        if not instance.is_public:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未公开，无法访问。"))
-        if instance.status != MCPServerStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未启用，无法访问。"))
-        if instance.gateway.status != GatewayStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关未启用，无法访问。"))
-        if instance.stage.status != StageStatusEnum.ACTIVE.value:
-            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关对应的环境未启用，无法访问。"))
+        # 使用 biz 层的通用方法校验访问权限
+        MCPServerHandler.validate_access(instance, check_public=True)
 
         user_tenant_id = get_user_tenant_id(request)
         check_user_can_access_gateway(instance.gateway.tenant_mode, instance.gateway.tenant_id, user_tenant_id)
 
-        configs = MCPServerHandler.build_agent_client_configs(instance)
+        least_privileges = MCPServerHandler.get_least_privileges([instance])
+        least_privilege = least_privileges.get((instance.gateway.id, instance.stage.id), "")
+
+        configs = MCPServerHandler.build_agent_client_configs(instance, least_privilege, user_tenant_id=user_tenant_id)
         return OKJsonResponse(data={"configs": configs})
 
 
@@ -322,6 +299,7 @@ class MCPMarketplaceServerConfigListApi(generics.RetrieveAPIView):
     name="get",
     decorator=swagger_auto_schema(
         operation_description="获取 MCP 市场分类列表",
+        query_serializer=MCPServerListInputSLZ,
         responses={status.HTTP_200_OK: MCPServerCategoryOutputSLZ(many=True)},
         tags=["WebAPI.MCPServer"],
     ),
@@ -332,10 +310,13 @@ class MCPMarketplaceCategoryListApi(generics.ListAPIView):
     serializer_class = MCPServerCategoryOutputSLZ
 
     def list(self, request, *args, **kwargs):
+        slz = MCPServerListInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+
         # 获取用户租户 ID，用于过滤
         user_tenant_id = get_user_tenant_id(request)
 
-        # 构建分类统计过滤条件
+        # 构建分类统计过滤条件（和 MCPMarketplaceServerListApi 保持一致）
         mcp_server_filter = Q(
             mcp_servers__is_public=True,
             mcp_servers__status=MCPServerStatusEnum.ACTIVE.value,
@@ -343,10 +324,35 @@ class MCPMarketplaceCategoryListApi(generics.ListAPIView):
             mcp_servers__stage__status=StageStatusEnum.ACTIVE.value,
         )
 
-        # 如果有租户过滤，添加租户条件
+        # 关键字筛选
+        keyword = slz.validated_data.get("keyword")
+        if keyword:
+            mcp_server_filter &= (
+                Q(mcp_servers__name__icontains=keyword)
+                | Q(mcp_servers__title__icontains=keyword)
+                | Q(mcp_servers__description__icontains=keyword)
+                | Q(mcp_servers___labels__icontains=keyword)
+            )
+
+        # 分类筛选（支持多个分类，与 MCPMarketplaceServerListApi 逻辑一致）
+        categories = slz.validated_data.get("categories")
+        if categories:
+            special_categories = {OFFICIAL_MCP_CATEGORY_NAME, FEATURED_MCP_CATEGORY_NAME}
+            if special_categories & set(categories):
+                # 包含 Official 或 Featured 分类时，使用 AND 逻辑：必须同时属于所有选择的分类
+                for category in categories:
+                    mcp_server_filter &= Q(
+                        mcp_servers__categories__name=category, mcp_servers__categories__is_active=True
+                    )
+            else:
+                # 不包含特殊分类时，使用 OR 逻辑：属于任意一个选择的分类即可
+                mcp_server_filter &= Q(
+                    mcp_servers__categories__name__in=categories, mcp_servers__categories__is_active=True
+                )
         if user_tenant_id:
-            mcp_server_filter &= Q(mcp_servers__gateway__tenant_id=user_tenant_id) | Q(
-                mcp_servers__gateway__tenant_mode="global"
+            mcp_server_filter &= Q(mcp_servers__gateway__tenant_mode=TenantModeEnum.GLOBAL.value) | Q(
+                mcp_servers__gateway__tenant_mode=TenantModeEnum.SINGLE.value,
+                mcp_servers__gateway__tenant_id=user_tenant_id,
             )
 
         # 使用 annotate 一次性统计每个分类的 MCPServer 数量，避免 N+1 查询
@@ -361,3 +367,66 @@ class MCPMarketplaceCategoryListApi(generics.ListAPIView):
 
         serializer = self.get_serializer(queryset, many=True, context={"category_stats": category_stats})
         return OKJsonResponse(data=serializer.data)
+
+
+@method_decorator(
+    name="post",
+    decorator=swagger_auto_schema(
+        operation_description="批量获取 MCP 市场 MCPServer 配置（支持指定客户端类型：cursor, codebuddy, claude, vscode 等）",
+        request_body=MCPServerBatchConfigInputSLZ,
+        responses={status.HTTP_200_OK: MCPServerBatchConfigOutputSLZ()},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPMarketplaceBatchConfigApi(generics.CreateAPIView):
+    """批量获取 MCP 市场 MCPServer 配置，支持指定客户端类型"""
+
+    def create(self, request, *args, **kwargs):
+        slz = MCPServerBatchConfigInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        mcp_server_ids = slz.validated_data["mcp_server_ids"]
+        client_type = slz.validated_data["client_type"]
+
+        # 查询 MCPServer 列表（只查询公开的）
+        queryset = MCPServer.objects.filter(
+            id__in=mcp_server_ids,
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            gateway__status=GatewayStatusEnum.ACTIVE.value,
+            stage__status=StageStatusEnum.ACTIVE.value,
+        ).select_related("gateway", "stage")
+
+        # 租户过滤
+        user_tenant_id = get_user_tenant_id(request)
+        if user_tenant_id:
+            queryset = gateway_mcp_server_filter_by_user_tenant_id(queryset, user_tenant_id)
+
+        instances = list(queryset)
+
+        if not instances:
+            raise error_codes.NOT_FOUND.format(_("未找到有效的 MCPServer"), replace=True)
+
+        # 校验访问权限
+        for instance in instances:
+            check_user_can_access_gateway(instance.gateway.tenant_mode, instance.gateway.tenant_id, user_tenant_id)
+
+        # 获取最低权限信息（按 mcp_server.id 为 key）
+        least_privileges = MCPServerHandler.get_least_privileges_by_server(instances)
+
+        # 构建批量配置
+        config = MCPServerHandler.build_batch_agent_client_config(
+            instances, client_type, least_privileges, user_tenant_id=user_tenant_id
+        )
+
+        # 查找客户端显示名称
+        display_name = MCPServerHandler.get_client_display_name(client_type)
+
+        result = {
+            "client_type": client_type,
+            "display_name": display_name,
+            "config": config,
+        }
+
+        output_slz = MCPServerBatchConfigOutputSLZ(result)
+        return OKJsonResponse(data=output_slz.data)

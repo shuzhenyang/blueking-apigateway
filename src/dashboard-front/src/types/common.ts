@@ -42,11 +42,11 @@ export interface IPagination {
   // 是否使用小型分页样式
   small?: boolean
   // 数据偏移量
-  offset: number
+  offset?: number
   // 每页显示的数据条数
-  limit: number
+  limit?: number
   // 数据总条数;
-  count: number
+  count?: number
   // 是否存在异常
   abnormal?: boolean
   // 可选的每页显示条数列表
@@ -59,13 +59,14 @@ export interface IDropList {
   value: string
   label: string
   disabled?: boolean
+  tooltips?: string
 }
 
 export interface ISearchSelect {
-  id: number
+  id: number | string
   name: string
   values: {
-    id: number
+    id: number | string
     name: string
   }[]
 }
@@ -146,3 +147,55 @@ export interface ISearchSelectData {
   multiple?: boolean
   children?: ISearchSelect[]
 }
+
+// mavon-editor 类型定义
+export interface IMavonEditorToolbars {
+  bold?: boolean
+  italic?: boolean
+  header?: boolean
+  underline?: boolean
+  strikethrough?: boolean
+  mark?: boolean
+  quote?: boolean
+  ol?: boolean
+  ul?: boolean
+  link?: boolean
+  image?: boolean
+  table?: boolean
+  fullscreen?: boolean
+  subfield?: boolean
+  preview?: boolean
+  code?: boolean
+  undo?: boolean
+  redo?: boolean
+}
+
+export interface IMavonEditorProps {
+  toolbars?: IMavonEditorToolbars
+  defaultOpen?: 'edit' | 'preview'
+  language?: 'zh' | 'en'
+  subfield?: boolean
+  boxShadow?: boolean
+  tabSize?: number
+  fontSize?: string | number
+  scrollStyle?: boolean
+  toolbarsFlag?: boolean
+}
+
+export type ITableEmptyType = 'empty' | 'search-empty' | 'searchEmpty' | 'error';
+
+export type IMethodFilterItem = {
+  label: string
+  value?: string
+  checkAll?: boolean
+};
+
+export type ISearchSelectFilter = {
+  id: number | string // 过滤器ID
+  name: string // 过滤器名称
+  values: {
+    id: number | string // 过滤器值ID
+    name: string // 过滤器值名称
+  }[]
+  type?: string // 过滤器类型
+};

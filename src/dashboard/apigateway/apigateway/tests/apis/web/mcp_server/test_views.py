@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,14 +16,17 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import datetime
 import json
 
 import pytest
 from ddf import G
 
+from apigateway.apis.web.constants import ExportTypeEnum
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
     OFFICIAL_MCP_CATEGORY_NAME,
+    MCPServerAppPermissionApplyProcessedStateEnum,
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerAppPermissionGrantTypeEnum,
     MCPServerExtendTypeEnum,
@@ -37,7 +40,10 @@ from apigateway.apps.mcp_server.models import (
     MCPServerCategory,
     MCPServerExtend,
 )
-from apigateway.core.models import Stage
+from apigateway.biz.bk_itsm import ITSM_PERMISSION_APPROVAL_HANDLER
+from apigateway.core.constants import StageStatusEnum
+from apigateway.core.models import Release, ResourceVersion, Stage
+from apigateway.tests.utils.testing import create_gateway
 from apigateway.utils.time import now_datetime
 
 pytestmark = pytest.mark.django_db
@@ -705,6 +711,18 @@ class TestMCPServerRetrieveUpdateDestroyApi:
         assert result["data"]["name"] == fake_mcp_server.name
         assert "updated_time" in result["data"]
 
+    def test_retrieve_from_other_gateway_returns_404(self, request_view, fake_gateway, fake_mcp_server):
+        other_gateway = create_gateway()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.retrieve_update_destroy",
+            path_params={"gateway_id": other_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=other_gateway,
+        )
+
+        assert resp.status_code == 404
+
     def test_update(self, mocker, request_view, fake_gateway, fake_mcp_server, faker):
         mocker.patch(
             "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
@@ -747,7 +765,12 @@ class TestMCPServerRetrieveUpdateDestroyApi:
 
         assert resp.status_code == 400
 
-    def test_destroy_inactive_success(self, request_view, fake_gateway, fake_mcp_server_inactive):
+    def test_destroy_inactive_success(self, mocker, request_view, fake_gateway, fake_mcp_server_inactive):
+        mock_cleanup_all_resource_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.cleanup_all_resource_permissions",
+            return_value=None,
+        )
+
         resp = request_view(
             method="DELETE",
             view_name="mcp_server.retrieve_update_destroy",
@@ -757,6 +780,10 @@ class TestMCPServerRetrieveUpdateDestroyApi:
 
         assert resp.status_code == 204
         assert not MCPServer.objects.filter(id=fake_mcp_server_inactive.id).exists()
+        mock_cleanup_all_resource_permissions.assert_called_once_with(
+            gateway_id=fake_gateway.id,
+            mcp_server_id=fake_mcp_server_inactive.id,
+        )
 
 
 class TestMCPServerUpdateStatusApi:
@@ -779,26 +806,6 @@ class TestMCPServerUpdateStatusApi:
         assert fake_mcp_server.status == MCPServerStatusEnum.INACTIVE.value
 
 
-class TestMCPServerUpdateLabelsApi:
-    def test_update_labels(self, request_view, fake_gateway, fake_mcp_server):
-        data = {
-            "labels": ["label1", "label2"],
-        }
-
-        resp = request_view(
-            method="PATCH",
-            view_name="mcp_server.update_labels",
-            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
-            gateway=fake_gateway,
-            data=data,
-        )
-
-        assert resp.status_code == 204
-
-        fake_mcp_server.refresh_from_db()
-        assert fake_mcp_server.labels == data["labels"]
-
-
 class TestMCPServerToolsListApi:
     def test_list(self, mocker, request_view, fake_gateway, fake_mcp_server):
         mocker.patch(
@@ -819,7 +826,7 @@ class TestMCPServerToolsListApi:
 class TestMCPServerGuidelineRetrieveApi:
     def test_retrieve(self, mocker, request_view, fake_gateway, fake_mcp_server):
         mocker.patch(
-            "apigateway.apis.web.mcp_server.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
 
@@ -839,7 +846,7 @@ class TestMCPServerConfigListApi:
     def test_retrieve_config_list(self, mocker, request_view, fake_gateway, fake_mcp_server):
         """测试获取配置列表（默认 AIDEV 关闭）"""
         mocker.patch(
-            "apigateway.apis.web.mcp_server.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Config Content",
         )
 
@@ -884,16 +891,19 @@ class TestMCPServerConfigListApi:
     ):
         """测试获取配置列表（配置了 AIDEV_CREATE_URL）"""
         mocker.patch(
-            "apigateway.apis.web.mcp_server.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Config Content",
         )
         # 模拟配置了 AIDEV_AGENT_CREATE_URL（AIDev 启用）
-        settings.MCP_CONFIG_AGENT_CLIENTS = [
-            {"name": "codebuddy", "display_name": "CodeBuddy"},
-            {"name": "cursor", "display_name": "Cursor"},
-            {"name": "claude", "display_name": "Claude"},
-            {"name": "aidev", "display_name": "AIDev"},
-        ]
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.get_mcp_config_agent_clients",
+            return_value=[
+                {"name": "codebuddy", "display_name": "CodeBuddy"},
+                {"name": "cursor", "display_name": "Cursor"},
+                {"name": "claude", "display_name": "Claude"},
+                {"name": "aidev", "display_name": "AIDev"},
+            ],
+        )
 
         resp = request_view(
             method="GET",
@@ -917,7 +927,7 @@ class TestMCPServerConfigListApi:
     def test_retrieve_config_list_display_names(self, mocker, request_view, fake_gateway, fake_mcp_server):
         """测试配置项显示名称"""
         mocker.patch(
-            "apigateway.apis.web.mcp_server.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Config Content",
         )
 
@@ -936,6 +946,42 @@ class TestMCPServerConfigListApi:
         assert config_map["cursor"] == "Cursor"
         assert config_map["codebuddy"] == "CodeBuddy"
         assert config_map["claude"] == "Claude"
+
+    def test_retrieve_config_list_oauth2_public_client_enabled(self, request_view, fake_gateway, fake_mcp_server):
+        """测试 OAuth2 公开客户端模式开启时，配置中不包含认证请求头"""
+        fake_mcp_server.oauth2_public_client_enabled = True
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.config_list",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        for config in result["data"]["configs"]:
+            assert "X-Bkapi-Authorization" not in config["content"]
+            assert "headers" not in config["content"]
+
+    def test_retrieve_config_list_oauth2_disabled(self, request_view, fake_gateway, fake_mcp_server):
+        """测试 OAuth2 公开客户端模式关闭时，配置中包含认证请求头"""
+        fake_mcp_server.oauth2_public_client_enabled = False
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.config_list",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        for config in result["data"]["configs"]:
+            assert "X-Bkapi-Authorization" in config["content"]
+            assert "headers" in config["content"]
 
 
 class TestMCPServerToolDocRetrieveApi:
@@ -1125,7 +1171,7 @@ class TestMCPServerStageReleaseCheckApi:
 
     def test_check_with_mcp_servers(self, mocker, request_view, fake_gateway, fake_mcp_server):
         mocker.patch(
-            "apigateway.biz.resource_version.ResourceVersionHandler.get_resource_names_set",
+            "apigateway.apis.web.mcp_server.views.get_resource_names_set",
             return_value={"resource1"},
         )
 
@@ -1216,6 +1262,37 @@ class TestMCPServerAppPermissionListCreateApi:
             bk_app_code="new-app",
         ).exists()
 
+    def test_create_with_mcp_server_from_other_gateway_returns_404(self, mocker, request_view, fake_gateway, faker):
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+        other_gateway = create_gateway()
+        other_stage = G(Stage, gateway=other_gateway, status=1, name=faker.pystr(), description=faker.pystr())
+        other_mcp_server = G(
+            MCPServer,
+            name=faker.pystr()[:20],
+            gateway=other_gateway,
+            stage=other_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            _resource_names="resource1",
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.app-permission.list_create",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": other_mcp_server.id},
+            gateway=fake_gateway,
+            data={"bk_app_code": "new-app"},
+        )
+
+        assert resp.status_code == 404
+        assert not MCPServerAppPermission.objects.filter(
+            mcp_server=other_mcp_server,
+            bk_app_code="new-app",
+        ).exists()
+        mock_sync_permissions.assert_not_called()
+
 
 class TestMCPServerAppPermissionDestroyApi:
     def test_destroy(self, mocker, request_view, fake_gateway, fake_mcp_server):
@@ -1247,7 +1324,12 @@ class TestMCPServerAppPermissionDestroyApi:
 
 
 class TestMCPServerAppPermissionApplyListApi:
-    def test_list_pending(self, request_view, fake_gateway, fake_mcp_server):
+    def test_list_pending_with_mcp_server_id(self, request_view, fake_gateway, fake_mcp_server, settings):
+        """测试按 mcp_server_id 查询"""
+        settings.BK_ITSM4_TICKET_URL_TEMPLATE = (
+            "https://example.com/#/ticket/ticketInfo?type=ticket&ticketId={ticket_id}"
+        )
+
         G(
             MCPServerAppPermissionApply,
             mcp_server=fake_mcp_server,
@@ -1255,41 +1337,116 @@ class TestMCPServerAppPermissionApplyListApi:
             applied_by="admin",
             applied_time=now_datetime(),
             status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+            itsm_ticket_id="102025092210362600001802",
         )
 
         resp = request_view(
             method="GET",
             view_name="mcp_server.app-permission-apply.list",
-            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            path_params={"gateway_id": fake_gateway.id},
             gateway=fake_gateway,
-            data={"state": "unprocessed"},
+            data={"state": "unprocessed", "mcp_server_id": fake_mcp_server.id},
         )
         result = resp.json()
 
         assert resp.status_code == 200
         assert result["data"]["count"] == 1
+        assert result["data"]["results"][0]["itsm_ticket_id"] == "102025092210362600001802"
+        assert (
+            result["data"]["results"][0]["itsm_ticket_url"]
+            == "https://example.com/#/ticket/ticketInfo?type=ticket&ticketId=102025092210362600001802"
+        )
 
-    def test_list_processed(self, request_view, fake_gateway, fake_mcp_server):
+    def test_list_processed_with_mcp_server_id(self, request_view, fake_gateway, fake_mcp_server):
+        """测试按 mcp_server_id 查询已处理的审批，ITSM 审批记录按处理时间排序"""
+        handled_time = now_datetime()
+        # 普通审批，处理时间较早
         G(
             MCPServerAppPermissionApply,
             mcp_server=fake_mcp_server,
             bk_app_code="test-app",
             applied_by="admin",
-            applied_time=now_datetime(),
+            applied_time=handled_time,
+            handled_time=handled_time - datetime.timedelta(days=1),
+            handled_by="admin",
+            status=MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
+        )
+        # ITSM 审批，处理时间较新
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="itsm-app",
+            applied_by="admin",
+            applied_time=handled_time,
+            handled_time=handled_time,
+            handled_by=ITSM_PERMISSION_APPROVAL_HANDLER,
             status=MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
         )
 
         resp = request_view(
             method="GET",
             view_name="mcp_server.app-permission-apply.list",
-            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            path_params={"gateway_id": fake_gateway.id},
             gateway=fake_gateway,
-            data={"state": "processed"},
+            data={"state": "processed", "mcp_server_id": fake_mcp_server.id, "limit": 1},
         )
         result = resp.json()
 
         assert resp.status_code == 200
-        assert result["data"]["count"] == 1
+        assert result["data"]["count"] == 2
+        # ITSM 审批记录处理时间更新，应排在第一位
+        assert result["data"]["results"][0]["bk_app_code"] == "itsm-app"
+
+    def test_list_all_mcp_servers_without_mcp_server_id(self, request_view, fake_gateway, fake_stage, faker):
+        """测试不传 mcp_server_id 查询网关下所有 MCP Server 的审批"""
+        # 创建两个 MCP Server（使用 _resource_names 字段存储资源名称）
+        mcp_server_1 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="mcp-server-1",
+            _resource_names="resource1",
+        )
+        mcp_server_2 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="mcp-server-2",
+            _resource_names="resource2",
+        )
+
+        # 为两个 MCP Server 分别创建审批记录
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=mcp_server_1,
+            bk_app_code="app-1",
+            applied_by="user1",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=mcp_server_2,
+            bk_app_code="app-2",
+            applied_by="user2",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+
+        # 不传 mcp_server_id，查询所有
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.app-permission-apply.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"state": "unprocessed"},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["count"] == 2
+        bk_app_codes = {item["bk_app_code"] for item in result["data"]["results"]}
+        assert bk_app_codes == {"app-1", "app-2"}
 
 
 class TestMCPServerAppPermissionApplyApplicantListApi:
@@ -1321,6 +1478,95 @@ class TestMCPServerAppPermissionApplyApplicantListApi:
 
         assert resp.status_code == 200
         assert len(result["data"]["applicants"]) == 2
+
+    def test_gateway_level_list(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="test-app",
+            applied_by="user1",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="test-app2",
+            applied_by="user2",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.app-permission-apply.gateway_applicant_list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["applicants"] == ["user1", "user2"]
+
+    def test_list_with_state_processed(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="pending-app",
+            applied_by="user-pending",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="approved-app",
+            applied_by="user-approved",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.app-permission-apply.applicant_list",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+            data={"state": MCPServerAppPermissionApplyProcessedStateEnum.PROCESSED.value},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["applicants"] == ["user-approved"]
+
+    def test_list_with_state_unprocessed(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="pending-app",
+            applied_by="user-pending",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="rejected-app",
+            applied_by="user-rejected",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.REJECTED.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.app-permission-apply.applicant_list",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+            data={"state": MCPServerAppPermissionApplyProcessedStateEnum.UNPROCESSED.value},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["applicants"] == ["user-pending"]
 
 
 class TestMCPServerAppPermissionApplyUpdateStatusApi:
@@ -1490,9 +1736,9 @@ class TestMCPServerAppPermissionApplyListApiWithFilters:
         resp = request_view(
             method="GET",
             view_name="mcp_server.app-permission-apply.list",
-            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            path_params={"gateway_id": fake_gateway.id},
             gateway=fake_gateway,
-            data={"state": "unprocessed", "bk_app_code": "target-app"},
+            data={"state": "unprocessed", "mcp_server_id": fake_mcp_server.id, "bk_app_code": "target-app"},
         )
         result = resp.json()
 
@@ -1521,9 +1767,9 @@ class TestMCPServerAppPermissionApplyListApiWithFilters:
         resp = request_view(
             method="GET",
             view_name="mcp_server.app-permission-apply.list",
-            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            path_params={"gateway_id": fake_gateway.id},
             gateway=fake_gateway,
-            data={"state": "unprocessed", "applied_by": "target-user"},
+            data={"state": "unprocessed", "mcp_server_id": fake_mcp_server.id, "applied_by": "target-user"},
         )
         result = resp.json()
 
@@ -1531,13 +1777,61 @@ class TestMCPServerAppPermissionApplyListApiWithFilters:
         assert result["data"]["count"] == 1
         assert result["data"]["results"][0]["applied_by"] == "target-user"
 
+    def test_list_filter_by_bk_app_code_without_mcp_server_id(self, request_view, fake_gateway, fake_stage, faker):
+        """测试不传 mcp_server_id 时按 bk_app_code 过滤"""
+        mcp_server_1 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="mcp-server-1",
+            _resource_names="resource1",
+        )
+        mcp_server_2 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="mcp-server-2",
+            _resource_names="resource2",
+        )
+
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=mcp_server_1,
+            bk_app_code="target-app",
+            applied_by="user1",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=mcp_server_2,
+            bk_app_code="other-app",
+            applied_by="user2",
+            applied_time=now_datetime(),
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        )
+
+        # 不传 mcp_server_id，只按 bk_app_code 过滤
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.app-permission-apply.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"state": "unprocessed", "bk_app_code": "target-app"},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["count"] == 1
+        assert result["data"]["results"][0]["bk_app_code"] == "target-app"
+
 
 class TestMCPServerStageReleaseCheckApiNoChanges:
     """测试环境发布检查无变更的情况"""
 
     def test_check_no_changes(self, mocker, request_view, fake_gateway, fake_mcp_server):
         mocker.patch(
-            "apigateway.biz.resource_version.ResourceVersionHandler.get_resource_names_set",
+            "apigateway.apis.web.mcp_server.views.get_resource_names_set",
             return_value={"resource1", "resource2"},  # 包含所有 mcp_server 的资源
         )
 
@@ -2071,7 +2365,7 @@ class TestMCPServerProtocolType:
         fake_mcp_server.save()
 
         mock_render = mocker.patch(
-            "apigateway.apis.web.mcp_server.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
 
@@ -2097,7 +2391,7 @@ class TestMCPServerProtocolType:
         fake_mcp_server.save()
 
         mock_render = mocker.patch(
-            "apigateway.apis.web.mcp_server.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
 
@@ -2440,3 +2734,973 @@ class TestMCPServerFilterOptionsApi:
         assert "tag3" in labels
         # 验证标签按字母顺序排序
         assert labels == sorted(labels)
+
+
+# ========== OAuth2 公开客户端模式相关测试 ==========
+
+
+class TestMCPServerOAuth2Enabled:
+    """测试 MCPServer OAuth2 公开客户端模式相关功能"""
+
+    def test_create_with_oauth2_public_client_enabled(self, mocker, request_view, fake_gateway, fake_stage, faker):
+        """测试创建 MCPServer 时开启 OAuth2 公开客户端模式"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
+            return_value={"resource1", "resource2"},
+        )
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+
+        data = {
+            "name": "test-mcp-oauth2-" + faker.pystr()[:10].lower().replace("_", "-"),
+            "description": faker.pystr(),
+            "stage_id": fake_stage.id,
+            "is_public": True,
+            "labels": ["test"],
+            "resource_names": ["resource1", "resource2"],
+            "tool_names": ["resource1", "resource2"],
+            "oauth2_public_client_enabled": True,
+        }
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data=data,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 201
+        mcp_server = MCPServer.objects.get(id=result["data"]["id"])
+        assert mcp_server.oauth2_public_client_enabled is True
+
+        # 验证 sync_permissions 被调用（oauth2 权限在 sync_permissions 内部处理）
+        mock_sync_permissions.assert_called_once_with(mcp_server.id)
+
+    def test_create_with_oauth2_disabled(self, mocker, request_view, fake_gateway, fake_stage, faker):
+        """测试创建 MCPServer 时不开启 OAuth2 公开客户端模式"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
+            return_value={"resource1", "resource2"},
+        )
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+
+        data = {
+            "name": "test-mcp-no-oauth2-" + faker.pystr()[:10].lower().replace("_", "-"),
+            "description": faker.pystr(),
+            "stage_id": fake_stage.id,
+            "is_public": True,
+            "labels": ["test"],
+            "resource_names": ["resource1", "resource2"],
+            "tool_names": ["resource1", "resource2"],
+            "oauth2_public_client_enabled": False,
+        }
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data=data,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 201
+        mcp_server = MCPServer.objects.get(id=result["data"]["id"])
+        assert mcp_server.oauth2_public_client_enabled is False
+
+        # sync_permissions 始终被调用（内部会根据 oauth2_public_client_enabled 处理 public 权限）
+        mock_sync_permissions.assert_called_once_with(mcp_server.id)
+
+    def test_create_default_oauth2_disabled(self, mocker, request_view, fake_gateway, fake_stage, faker):
+        """测试创建 MCPServer 时默认 OAuth2 公开客户端模式关闭"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
+            return_value={"resource1", "resource2"},
+        )
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+
+        data = {
+            "name": "test-mcp-default-" + faker.pystr()[:10].lower().replace("_", "-"),
+            "description": faker.pystr(),
+            "stage_id": fake_stage.id,
+            "is_public": True,
+            "labels": ["test"],
+            "resource_names": ["resource1", "resource2"],
+            "tool_names": ["resource1", "resource2"],
+            # 不传 oauth2_public_client_enabled，默认应为 False
+        }
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data=data,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 201
+        mcp_server = MCPServer.objects.get(id=result["data"]["id"])
+        assert mcp_server.oauth2_public_client_enabled is False
+
+        # sync_permissions 始终被调用（内部会根据 oauth2_public_client_enabled 处理 public 权限）
+        mock_sync_permissions.assert_called_once_with(mcp_server.id)
+
+    def test_update_enable_oauth2(self, mocker, request_view, fake_gateway, fake_mcp_server, faker):
+        """测试更新 MCPServer 时开启 OAuth2 公开客户端模式"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
+            return_value={"resource1", "resource2"},
+        )
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+
+        # 确保初始状态未开启
+        fake_mcp_server.oauth2_public_client_enabled = False
+        fake_mcp_server.save()
+
+        data = {
+            "description": faker.pystr(),
+            "oauth2_public_client_enabled": True,
+        }
+
+        resp = request_view(
+            method="PATCH",
+            view_name="mcp_server.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+            data=data,
+        )
+
+        assert resp.status_code == 204
+
+        fake_mcp_server.refresh_from_db()
+        assert fake_mcp_server.oauth2_public_client_enabled is True
+
+        # 验证 sync_permissions 被调用（oauth2 权限在内部统一处理）
+        mock_sync_permissions.assert_called_once_with(fake_mcp_server.id)
+
+    def test_update_disable_oauth2(self, mocker, request_view, fake_gateway, fake_mcp_server, faker):
+        """测试更新 MCPServer 时关闭 OAuth2 公开客户端模式"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
+            return_value={"resource1", "resource2"},
+        )
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+
+        # 初始状态开启 OAuth2 公开客户端模式
+        fake_mcp_server.oauth2_public_client_enabled = True
+        fake_mcp_server.save()
+
+        data = {
+            "description": faker.pystr(),
+            "oauth2_public_client_enabled": False,
+        }
+
+        resp = request_view(
+            method="PATCH",
+            view_name="mcp_server.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+            data=data,
+        )
+
+        assert resp.status_code == 204
+
+        fake_mcp_server.refresh_from_db()
+        assert fake_mcp_server.oauth2_public_client_enabled is False
+
+        # 关闭 OAuth2 时 sync_permissions 也被调用（内部会撤销 public 权限）
+        mock_sync_permissions.assert_called_once_with(fake_mcp_server.id)
+
+    def test_update_full_with_oauth2_public_client_enabled(
+        self, mocker, request_view, fake_gateway, fake_mcp_server, faker
+    ):
+        """测试全量更新 MCPServer 时开启 OAuth2 公开客户端模式"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_valid_resource_names",
+            return_value={"resource1", "resource2"},
+        )
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+
+        data = {
+            "description": faker.pystr(),
+            "is_public": True,
+            "resource_names": ["resource1", "resource2"],
+            "tool_names": ["resource1", "resource2"],
+            "oauth2_public_client_enabled": True,
+        }
+
+        resp = request_view(
+            method="PUT",
+            view_name="mcp_server.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+            data=data,
+        )
+
+        assert resp.status_code == 204
+
+        fake_mcp_server.refresh_from_db()
+        assert fake_mcp_server.oauth2_public_client_enabled is True
+
+        # 验证 sync_permissions 被调用（oauth2 权限在内部统一处理）
+        mock_sync_permissions.assert_called_once_with(fake_mcp_server.id)
+
+    def test_list_returns_oauth2_public_client_enabled(self, request_view, fake_gateway, fake_mcp_server):
+        """测试列表接口返回 oauth2_public_client_enabled 字段"""
+        fake_mcp_server.oauth2_public_client_enabled = True
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == fake_mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["oauth2_public_client_enabled"] is True
+
+    def test_list_returns_oauth2_disabled(self, request_view, fake_gateway, fake_mcp_server):
+        """测试列表接口返回 oauth2_public_client_enabled=False"""
+        fake_mcp_server.oauth2_public_client_enabled = False
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == fake_mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["oauth2_public_client_enabled"] is False
+
+    def test_retrieve_returns_oauth2_public_client_enabled(self, request_view, fake_gateway, fake_mcp_server):
+        """测试详情接口返回 oauth2_public_client_enabled 字段"""
+        fake_mcp_server.oauth2_public_client_enabled = True
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["oauth2_public_client_enabled"] is True
+
+    def test_retrieve_returns_oauth2_disabled(self, request_view, fake_gateway, fake_mcp_server):
+        """测试详情接口返回 oauth2_public_client_enabled=False"""
+        fake_mcp_server.oauth2_public_client_enabled = False
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id, "mcp_server_id": fake_mcp_server.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["oauth2_public_client_enabled"] is False
+
+
+class TestMCPServerListAppPermissionRisk:
+    """测试 MCPServer 列表接口返回的应用态权限安全风险信息"""
+
+    def _make_resource_version_data(self, resources):
+        """构造 ResourceVersion.data 中的资源数据"""
+        data = []
+        for i, res in enumerate(resources):
+            data.append(
+                {
+                    "id": i + 1,
+                    "name": res["name"],
+                    "description": f"test resource {res['name']}",
+                    "method": "GET",
+                    "path": f"/test/{res['name']}/",
+                    "match_subpath": False,
+                    "is_public": True,
+                    "allow_apply_permission": True,
+                    "contexts": {
+                        "resource_auth": {
+                            "config": json.dumps(
+                                {
+                                    "app_verified_required": res.get("app_verified_required", True),
+                                    "resource_perm_required": res.get("resource_perm_required", True),
+                                }
+                            )
+                        }
+                    },
+                }
+            )
+        return data
+
+    def test_list_no_risk_when_oauth2_disabled(self, request_view, fake_gateway, fake_mcp_server):
+        """oauth2_public_client_enabled=False 时无安全风险"""
+        fake_mcp_server.oauth2_public_client_enabled = False
+        fake_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == fake_mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["app_permission_risk"]["has_risk"] is False
+        assert mcp_server_data["app_permission_risk"]["risk_tools"] == []
+
+    def test_list_has_risk_with_app_verified_tools(self, request_view, fake_gateway, fake_stage):
+        """oauth2_public_client_enabled=True 且部分工具需要应用认证时，返回存在风险的工具"""
+        rv = G(ResourceVersion, gateway=fake_gateway)
+        rv._data = json.dumps(
+            self._make_resource_version_data(
+                [
+                    {"name": "tool_a", "app_verified_required": True},
+                    {"name": "tool_b", "app_verified_required": False},
+                ]
+            )
+        )
+        rv.save()
+
+        G(Release, gateway=fake_gateway, stage=fake_stage, resource_version=rv)
+
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            oauth2_public_client_enabled=True,
+            _resource_names="tool_a;tool_b",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["app_permission_risk"]["has_risk"] is True
+        assert "tool_a" in mcp_server_data["app_permission_risk"]["risk_tools"]
+        assert "tool_b" not in mcp_server_data["app_permission_risk"]["risk_tools"]
+
+    def test_list_no_risk_when_all_tools_skip_app_auth(self, request_view, fake_gateway, fake_stage):
+        """oauth2_public_client_enabled=True 但所有工具都不需要应用认证时无安全风险"""
+        rv = G(ResourceVersion, gateway=fake_gateway)
+        rv._data = json.dumps(
+            self._make_resource_version_data(
+                [
+                    {"name": "tool_c", "app_verified_required": False},
+                    {"name": "tool_d", "app_verified_required": False},
+                ]
+            )
+        )
+        rv.save()
+
+        G(Release, gateway=fake_gateway, stage=fake_stage, resource_version=rv)
+
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            oauth2_public_client_enabled=True,
+            _resource_names="tool_c;tool_d",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["app_permission_risk"]["has_risk"] is False
+        assert mcp_server_data["app_permission_risk"]["risk_tools"] == []
+
+    def test_list_no_risk_when_oauth2_public_client_enabled_but_no_release(
+        self, request_view, fake_gateway, fake_stage
+    ):
+        """oauth2_public_client_enabled=True 但尚未发布时无安全风险（无 Release 记录）"""
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            oauth2_public_client_enabled=True,
+            _resource_names="tool_e",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["app_permission_risk"]["has_risk"] is False
+        assert mcp_server_data["app_permission_risk"]["risk_tools"] == []
+
+
+class TestMCPServerBatchConfigApi:
+    """测试批量获取 MCPServer 配置 API"""
+
+    def test_batch_config_success(self, request_view, fake_gateway, fake_stage, faker):
+        """测试批量获取配置成功"""
+        server1 = G(
+            MCPServer,
+            name="test-server-1",
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource1",
+            oauth2_public_client_enabled=False,
+        )
+        server2 = G(
+            MCPServer,
+            name="test-server-2",
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource2",
+            oauth2_public_client_enabled=False,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [server1.id, server2.id],
+                "client_type": "cursor",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["client_type"] == "cursor"
+        assert result["data"]["display_name"] == "Cursor"
+        assert "config" in result["data"]
+        assert "mcpServers" in result["data"]["config"]
+        assert "test-server-1" in result["data"]["config"]["mcpServers"]
+        assert "test-server-2" in result["data"]["config"]["mcpServers"]
+
+    def test_batch_config_codebuddy(self, request_view, fake_gateway, fake_stage, faker):
+        """测试批量获取 CodeBuddy 配置（包含 transportType）"""
+        server = G(
+            MCPServer,
+            name="test-server-codebuddy",
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource1",
+            oauth2_public_client_enabled=False,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [server.id],
+                "client_type": "codebuddy",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["client_type"] == "codebuddy"
+        assert result["data"]["display_name"] == "CodeBuddy"
+
+        server_config = result["data"]["config"]["mcpServers"]["test-server-codebuddy"]
+        assert "transportType" in server_config
+
+    def test_batch_config_with_inactive_server(self, request_view, fake_gateway, fake_stage, faker):
+        """测试包含停用状态的 MCPServer 时会被过滤"""
+        active_server = G(
+            MCPServer,
+            name="active-server",
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource1",
+        )
+        inactive_server = G(
+            MCPServer,
+            name="inactive-server",
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.INACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource2",
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [active_server.id, inactive_server.id],
+                "client_type": "cursor",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert "active-server" in result["data"]["config"]["mcpServers"]
+        assert "inactive-server" not in result["data"]["config"]["mcpServers"]
+
+    def test_batch_config_not_found(self, request_view, fake_gateway):
+        """测试所有 MCPServer 都无效时返回 404"""
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [99999, 99998],
+                "client_type": "cursor",
+            },
+        )
+
+        assert resp.status_code == 404
+
+    def test_batch_config_invalid_input(self, request_view, fake_gateway):
+        """测试无效输入时返回 400"""
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [],
+                "client_type": "cursor",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_batch_config_oauth2_public_client_enabled(self, request_view, fake_gateway, fake_stage, faker):
+        """测试 OAuth2 公开客户端模式开启时配置中不包含认证请求头"""
+        server = G(
+            MCPServer,
+            name="oauth2-server",
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource1",
+            oauth2_public_client_enabled=True,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [server.id],
+                "client_type": "cursor",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        server_config = result["data"]["config"]["mcpServers"]["oauth2-server"]
+        if "headers" in server_config:
+            assert "X-Bkapi-Authorization" not in server_config["headers"]
+
+    def test_batch_config_other_gateway_server(self, request_view, fake_gateway, faker):
+        """测试不能获取其他网关的 MCPServer 配置"""
+        other_gateway = create_gateway()
+        other_stage = G(Stage, gateway=other_gateway, name="prod", status=StageStatusEnum.ACTIVE.value)
+
+        other_server = G(
+            MCPServer,
+            name="other-server",
+            gateway=other_gateway,
+            stage=other_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            description=faker.pystr(),
+            is_public=True,
+            _resource_names="resource1",
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.batch_configs",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "mcp_server_ids": [other_server.id],
+                "client_type": "cursor",
+            },
+        )
+
+        assert resp.status_code == 404
+
+
+class TestGatewayMCPServerAppPermissionListApi:
+    """测试网关级 MCPServer 应用权限列表 API"""
+
+    def test_list(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app1",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app2",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.APPLY.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["count"] == 2
+
+    def test_list_order_by_effective_time(self, request_view, fake_gateway, fake_mcp_server):
+        base_time = now_datetime()
+        grant_permission = G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="grant-app",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+        apply_permission = G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="apply-app",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.APPLY.value,
+        )
+        MCPServerAppPermission.objects.filter(id=grant_permission.id).update(
+            created_time=base_time - datetime.timedelta(days=2)
+        )
+        MCPServerAppPermission.objects.filter(id=apply_permission.id).update(
+            created_time=base_time - datetime.timedelta(days=3)
+        )
+        G(
+            MCPServerAppPermissionApply,
+            mcp_server=fake_mcp_server,
+            bk_app_code="apply-app",
+            applied_by="admin",
+            applied_time=base_time - datetime.timedelta(days=4),
+            handled_by="admin",
+            handled_time=base_time - datetime.timedelta(days=1),
+            status=MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"order_by": "effective_time"},
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert [item["bk_app_code"] for item in result["data"]["results"]] == ["grant-app", "apply-app"]
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"order_by": "-effective_time"},
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert [item["bk_app_code"] for item in result["data"]["results"]] == ["apply-app", "grant-app"]
+
+    def test_list_filter_by_mcp_server_id(self, request_view, fake_gateway, fake_mcp_server, fake_stage, faker):
+        another_mcp = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name=faker.pystr()[:20],
+            status=MCPServerStatusEnum.ACTIVE.value,
+        )
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app1",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+        G(
+            MCPServerAppPermission,
+            mcp_server=another_mcp,
+            bk_app_code="app2",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"mcp_server_id": fake_mcp_server.id},
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["count"] == 1
+        assert result["data"]["results"][0]["bk_app_code"] == "app1"
+
+    def test_list_filter_by_bk_app_code(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="target-app",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="other-app",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"bk_app_code": "target"},
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["count"] == 1
+        assert result["data"]["results"][0]["bk_app_code"] == "target-app"
+
+    def test_list_filter_by_grant_type(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="grant-app",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="apply-app",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.APPLY.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"grant_type": MCPServerAppPermissionGrantTypeEnum.GRANT.value},
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["count"] == 1
+        assert result["data"]["results"][0]["grant_type"] == MCPServerAppPermissionGrantTypeEnum.GRANT.value
+
+    def test_list_empty(self, request_view, fake_gateway):
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["count"] == 0
+
+    def test_list_returns_mcp_server_info(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app1",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_server.gateway_app_permission.list",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+        )
+        assert resp.status_code == 200
+        result = resp.json()
+        item = result["data"]["results"][0]
+        assert "mcp_server" in item
+        assert item["mcp_server"]["id"] == fake_mcp_server.id
+        assert item["mcp_server"]["name"] == fake_mcp_server.name
+        assert "grant_type_display" in item
+
+
+class TestGatewayMCPServerAppPermissionExportApi:
+    """测试网关级 MCPServer 应用权限导出 API"""
+
+    def test_export_all(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app1",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.gateway_app_permission.export",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={"export_type": ExportTypeEnum.ALL.value},
+        )
+        assert resp.status_code == 200
+
+    def test_export_filtered(self, request_view, fake_gateway, fake_mcp_server):
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app1",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+        G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app2",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.APPLY.value,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.gateway_app_permission.export",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "export_type": ExportTypeEnum.FILTERED.value,
+                "grant_type": MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_export_selected(self, request_view, fake_gateway, fake_mcp_server):
+        permission = G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code="app1",
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.gateway_app_permission.export",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "export_type": ExportTypeEnum.SELECTED.value,
+                "selected_ids": [permission.id],
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_export_selected_empty_ids(self, request_view, fake_gateway):
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.gateway_app_permission.export",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={
+                "export_type": ExportTypeEnum.SELECTED.value,
+                "selected_ids": [],
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_export_missing_export_type(self, request_view, fake_gateway):
+        resp = request_view(
+            method="POST",
+            view_name="mcp_server.gateway_app_permission.export",
+            path_params={"gateway_id": fake_gateway.id},
+            gateway=fake_gateway,
+            data={},
+        )
+        assert resp.status_code == 400

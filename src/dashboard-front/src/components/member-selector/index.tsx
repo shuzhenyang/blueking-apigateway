@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -83,7 +83,7 @@ export default defineComponent({
 
   emits: ['change', 'input', 'blur', 'focus'],
 
-  setup(props, ctx) {
+  setup(props: any, ctx: any) {
     const tagInputRef = ref(null);
     // 使用 staffStore 获取员工数据
     const staffStore = useStaff();
@@ -98,7 +98,7 @@ export default defineComponent({
     // 监听 staffStore.list 的变化
     watch(
       () => staffStore.list,
-      (list) => {
+      (list: any) => {
         if (list.length) {
           nextTick(() => {
             userList.value = cloneDeep(list);

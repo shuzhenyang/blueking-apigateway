@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -20,7 +20,7 @@
     :is-show="batchApplyDialogConf.isShow"
     theme="primary"
     :mask-close="false"
-    :width="670"
+    :width="640"
     :loading="batchApplyDialogConf.isLoading"
     :title="title"
     @closed="handleClose"
@@ -29,6 +29,7 @@
       <AgTable
         v-model:table-data="tableData"
         local-page
+        show-cell-empty-content
         :size="'small'"
         :max-height="300"
         :columns="approvalColumns"
@@ -45,7 +46,7 @@
             [
               {
                 required: true,
-                message: t('必填项'),
+                message: t('请输入备注'),
                 trigger: 'blur',
               },
             ]
@@ -65,13 +66,13 @@
     <template #footer>
       <BkButton
         theme="primary"
-        :loading="['approved'].includes(formData.status) && batchApplyDialogConf.isLoading"
+        :loading="['approved'].includes(formData.status ?? '') && batchApplyDialogConf.isLoading"
         @click="handleApprovedPermission"
       >
         {{ t("全部通过") }}
       </BkButton>
       <BkButton
-        :loading="['rejected'].includes(formData.status) && batchApplyDialogConf.isLoading"
+        :loading="['rejected'].includes(formData.status ?? '') && batchApplyDialogConf.isLoading"
         class="m-l-4px"
         @click="handleRejectPermission"
       >
@@ -87,40 +88,38 @@
   </BkDialog>
 </template>
 
-<script lang="ts" setup>
+<script lang="tsx" setup>
 import { Form } from 'bkui-vue';
+import type { TableRowData } from '@blueking/tdesign-ui';
 import { t } from '@/locales';
 import type { IFormMethod } from '@/types/common';
+import { useFeatureFlag } from '@/stores';
 import AgTable from '@/components/ag-table/Index.vue';
+
+type IDialogParams = {
+  isShow: boolean
+  isLoading: boolean
+};
+
+type IActionParams = {
+  status?: string
+  comment?: string
+  ids?: number[]
+  part_resource_ids?: Record<string, unknown>
+};
 
 interface IProps {
   title?: string
   selections?: any[]
-  dialogParams?: {
-    isShow: boolean
-    isLoading: boolean
-  }
-  actionParams?: {
-    status: string
-    comment?: string
-    ids: number[]
-    part_resource_ids: Record<string, unknown>
-  }
+  dialogParams?: IDialogParams
+  actionParams?: IActionParams
 }
 
-interface Emits {
+interface IEmits {
   (e: 'approved'): void
   (e: 'rejected'): void
-  (e: 'update:dialogParams', value: {
-    isShow: boolean
-    isLoading: boolean
-  })
-  (e: 'update:actionParams', value: {
-    status: string
-    comment?: string
-    ids: number[]
-    part_resource_ids: Record<string, unknown>
-  })
+  (e: 'update:dialogParams', value: IDialogParams): void
+  (e: 'update:actionParams', value: IActionParams): void
 }
 
 const {
@@ -137,7 +136,10 @@ const {
   },
   selections = [],
 } = defineProps<IProps>();
-const emits = defineEmits<Emits>();
+
+const emits = defineEmits<IEmits>();
+
+const featureFlagStore = useFeatureFlag();
 
 const batchApprovalFormRef = ref<InstanceType<typeof Form> & IFormMethod>();
 const approvalColumns = shallowRef([
@@ -150,11 +152,16 @@ const approvalColumns = shallowRef([
     title: t('申请人'),
     colKey: 'applied_by',
     ellipsis: true,
+    cell: (_: unknown, { row }: { row: TableRowData }) =>
+      featureFlagStore.isEnableDisplayName && !!row.applied_by
+        ? <span><bk-user-display-name user-id={row.applied_by} /></span>
+        : <span>{row.applied_by || '--'}</span>,
   },
   {
     title: t('申请时间'),
     colKey: 'created_time',
     ellipsis: true,
+    width: 260,
   },
 ]);
 
@@ -162,14 +169,14 @@ const tableData = computed(() => selections);
 
 const batchApplyDialogConf = computed({
   get: () => dialogParams,
-  set: (params) => {
+  set: (params: IDialogParams) => {
     emits('update:dialogParams', params);
   },
 });
 
 const formData = computed({
   get: () => actionParams,
-  set: (form) => {
+  set: (form: IActionParams) => {
     emits('update:actionParams', form);
   },
 });

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,7 +20,7 @@ from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
-from apigateway.common.permissions import GatewayDisplayablePermission
+from apigateway.apis.web.docs.gateway.mixins import GatewayDocsPermissionMixin
 from apigateway.core.constants import StageStatusEnum
 from apigateway.core.models import Stage
 from apigateway.utils.responses import OKJsonResponse
@@ -36,9 +36,7 @@ from .serializers import StageOutputSLZ
         tags=["WebAPI.Docs.Stage"],
     ),
 )
-class StageListApi(generics.ListAPIView):
-    permission_classes = [GatewayDisplayablePermission]
-
+class StageListApi(GatewayDocsPermissionMixin, generics.ListAPIView):
     def list(self, request, gateway_name: str, *args, **kwargs):
         """获取网关公开、可用的环境列表"""
         stages = Stage.objects.filter(

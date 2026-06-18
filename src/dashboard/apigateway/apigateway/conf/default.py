@@ -2,7 +2,7 @@
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,7 +23,6 @@ from typing import List
 from urllib.parse import quote
 
 import pymysql
-import urllib3
 from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 from django.db.backends.mysql.features import DatabaseFeatures
@@ -33,7 +32,16 @@ from apigateway.common.env import Env
 from apigateway.conf.celery_conf import *  # noqa
 from apigateway.conf.celery_conf import CELERY_BEAT_SCHEDULE
 from apigateway.conf.log_utils import build_logging_config
-from apigateway.conf.utils import PatchFeatures, get_default_keepalive_options
+from apigateway.conf.utils import (
+    PatchFeatures,
+    get_bkrepo_config,
+    get_default_feature_flags,
+    get_default_keepalive_options,
+    get_esb_board_configs,
+    get_frontend_env_vars,
+    get_gateway_quota_config,
+    get_plugin_metadata_config,
+)
 
 pymysql.install_as_MySQLdb()
 # Patch version info to force pass Django client check
@@ -41,10 +49,6 @@ pymysql.version_info = 1, 4, 6, "final", 0
 
 # 目前 Django 仅是对 5.7 做了软性的不兼容改动，在没有使用 8.0 特异的功能时，对 5.7 版本的使用无影响
 DatabaseFeatures.minimum_database_version = PatchFeatures.minimum_database_version
-
-# Patch the SSL module for compatibility with legacy CA credentials.
-# https://stackoverflow.com/questions/72479812/how-to-change-tweak-python-3-10-default-ssl-settings-for-requests-sslv3-alert
-urllib3.util.ssl_.DEFAULT_CIPHERS = "ALL:@SECLEVEL=1"
 
 env = Env()
 
@@ -117,6 +121,8 @@ INSTALLED_APPS = [
     "apigateway.apps.docs",
     "apigateway.apps.api_debug",
     "apigateway.apps.mcp_server",
+    "apigateway.apps.bk_itsm",
+    "apigateway.apps.data_plane",
     "apigw_manager.apigw",
     "apigateway.controller",
     "apigateway.healthz",
@@ -207,7 +213,6 @@ CORS_ORIGIN_REGEX_WHITELIST: List[str] = env.list("CORS_ORIGIN_REGEX_WHITELIST",
 # Internationalization
 LANGUAGE_CODE = "zh-hans"
 USE_I18N = True
-USE_L10N = True
 
 # timezone
 TIME_ZONE = "Asia/Shanghai"
@@ -266,6 +271,7 @@ REST_FRAMEWORK = {
 SWAGGER_SETTINGS = {
     "DEFAULT_AUTO_SCHEMA_CLASS": "apigateway.common.swagger.BkStandardResponseSwaggerAutoSchema",
 }
+SWAGGER_USE_COMPAT_RENDERERS = False
 
 # https://docs.djangoproject.com/en/3.2/ref/checks/
 # disable warnings: db_table '<table_name>' is used by multiple models
@@ -299,6 +305,16 @@ if not ENABLE_MULTI_TENANT_MODE:
             "isolation_level": env.str("BK_ESB_DATABASE_ISOLATION_LEVEL", "READ COMMITTED"),
         },
     }
+
+# Django 5.2 changed the default MySQL connection charset from utf8(mb3) to utf8mb4.
+# Existing tables are utf8mb3, so pin the connection charset to keep the pre-upgrade
+# behavior and avoid "Illegal mix of collations" errors; override via env when the
+# tables are migrated to utf8mb4. Guarded to MySQL only: SQLite (used by tests)
+# would reject a "charset" connection kwarg.
+_DATABASE_CHARSET = env.str("BK_APIGW_DATABASE_CHARSET", "utf8")
+for _db_conf in DATABASES.values():
+    if "mysql" in _db_conf["ENGINE"]:
+        _db_conf.setdefault("OPTIONS", {})["charset"] = _DATABASE_CHARSET
 
 # database ssl
 BK_APIGW_DATABASE_TLS_ENABLED = env.bool("BK_APIGW_DATABASE_TLS_ENABLED", False)
@@ -360,9 +376,6 @@ REDIS_TLS_CERT_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_FILE", "")
 REDIS_TLS_CERT_KEY_FILE = env.str("BK_APIGW_REDIS_TLS_CERT_KEY_FILE", "")
 REDIS_TLS_CHECK_HOSTNAME = env.bool("BK_APIGW_REDIS_TLS_CHECK_HOSTNAME", True)
 
-# redis lock 配置
-REDIS_PUBLISH_LOCK_TIMEOUT = env.int("BK_APIGW_PUBLISH_LOCK_TIMEOUT", 5)
-REDIS_PUBLISH_LOCK_RETRY_GET_TIMES = env.int("BK_APIGW_PUBLISH_LOCK_RETRY_GET_TIMES", 3)
 
 DEFAULT_REDIS_CONFIG = CHANNEL_REDIS_CONFIG = {
     "host": REDIS_HOST,
@@ -376,6 +389,10 @@ DEFAULT_REDIS_CONFIG = CHANNEL_REDIS_CONFIG = {
     "tls_cert_key_file": REDIS_TLS_CERT_KEY_FILE,
     "tls_check_hostname": REDIS_TLS_CHECK_HOSTNAME,
 }
+
+# redis lock 配置
+REDIS_PUBLISH_LOCK_TIMEOUT = env.int("BK_APIGW_PUBLISH_LOCK_TIMEOUT", 5)
+REDIS_PUBLISH_LOCK_RETRY_GET_TIMES = env.int("BK_APIGW_PUBLISH_LOCK_RETRY_GET_TIMES", 3)
 
 # ==============================================================================
 # etcd 配置
@@ -437,20 +454,6 @@ else:
         broker_url = f"rediss://:{quote(REDIS_PASSWORD)}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}?{urllib.parse.urlencode(query_string_params)}"
         CELERY_BROKER_URL = broker_url
         CELERY_RESULT_BACKEND = broker_url
-
-if env.bool("FEATURE_FLAG_ENABLE_RUN_DATA_METRICS", True):
-    CELERY_BEAT_SCHEDULE.update(
-        {
-            "apigateway.apps.metrics.tasks.statistics_request_by_day": {
-                "task": "apigateway.apps.metrics.tasks.statistics_request_by_day",
-                "schedule": crontab(minute=30, hour=8),  # noqa: F405
-            },
-            "apigateway.apps.permission.tasks.renew_app_resource_permission": {
-                "task": "apigateway.apps.permission.tasks.renew_app_resource_permission",
-                "schedule": crontab(minute=50, hour=10),
-            },
-        }
-    )
 
 # 清理任务相关配置
 CLEAN_TABLE_INTERVAL_DAYS = env.int("CLEAN_TABLE_INTERVAL_DAYS", 365)
@@ -518,7 +521,8 @@ CRYPTO_NONCE = env.str("BK_APIGW_CRYPTO_NONCE", "q76rE8srRuYM")
 # 模板变量
 # ==============================================================================
 BK_API_URL_TMPL = env.str("BK_API_URL_TMPL", "").rstrip("/")
-BK_API_INNER_URL_TMPL = env.str("BK_API_INNER_URL_TMPL", "") or BK_API_URL_TMPL
+# TODO: remove in the future, and remove in the helm-chart and te repo
+# BK_API_INNER_URL_TMPL = env.str("BK_API_INNER_URL_TMPL", "") or BK_API_URL_TMPL
 API_RESOURCE_URL_TMPL = env.str("API_RESOURCE_URL_TMPL", "")
 API_DOCS_URL_TMPL = env.str("API_DOCS_URL_TMPL", "")
 RESOURCE_DOC_URL_TMPL = env.str("RESOURCE_DOC_URL_TMPL", "")
@@ -526,11 +530,15 @@ COMPONENT_DOC_URL_TMPL = env.str("COMPONENT_DOC_URL_TMPL", "")
 
 BK_COMPONENT_API_URL = env.str("BK_COMPONENT_API_URL", "")
 BK_COMPONENT_API_INNER_URL = env.str("BK_COMPONENT_API_INNER_URL", "") or BK_COMPONENT_API_URL
-BK_PAAS3_API_URL = BK_API_INNER_URL_TMPL.format(api_name="bkpaas3")
+# TODO: remove in the future, and remove in the helm-chart and te repo
+# BK_PAAS3_API_URL = BK_API_INNER_URL_TMPL.format(api_name="bkpaas3")
 BK_PAAS3_API_TIMEOUT = env.int("BK_PAAS3_API_TIMEOUT", 30)
-BK_APIGATEWAY_API_URL = env.str("BK_APIGATEWAY_API_URL", "")
+# TODO: remove in the future, and remove in the helm-chart and te repo
+# BK_APIGATEWAY_API_URL = env.str("BK_APIGATEWAY_API_URL", "")
 
 BK_AUTH_API_URL = env.str("BK_AUTH_API_URL", "")
+# BKAuth 站点地址 用于 OAuth2 跳转
+BK_AUTH_SERVER_URL = env.str("BK_AUTH_SERVER_URL", "")
 BK_MCP_SERVER_PERMISSION_APPROVAL_URL_TMPL = (
     env.str("DASHBOARD_FE_URL", "").rstrip("/") + "/{gateway_id}/mcp/permission?serverId={mcp_server_id}"
 )
@@ -562,18 +570,35 @@ BKAIDEV_USE_MOCK = env.bool("BKAIDEV_USE_MOCK", False)
 # AIDEV 平台配置（配置了 AIDEV_AGENT_CREATE_URL 则启用 AIDev）
 AIDEV_AGENT_CREATE_URL = env.str("AIDEV_AGENT_CREATE_URL", "")
 
-# MCP Server 配置工具列表
-MCP_CONFIG_AGENT_CLIENTS = [
-    {"name": "codebuddy", "display_name": "CodeBuddy"},
-    {"name": "cursor", "display_name": "Cursor"},
-    {"name": "claude", "display_name": "Claude"},
-    {"name": "vscode", "display_name": "VSCode"},
-]
+# MCP Server OAuth2 公开客户端模式开启后自动授权的 bk_app_code
+MCP_SERVER_OAUTH2_PUBLIC_CLIENT_APP_CODE = env.str("MCP_SERVER_OAUTH2_PUBLIC_CLIENT_APP_CODE", "public")
 
-# 如果配置了 AIDEV_AGENT_CREATE_URL，则添加 AIDev 到配置列表
-if AIDEV_AGENT_CREATE_URL:
-    MCP_CONFIG_AGENT_CLIENTS.append({"name": "aidev", "display_name": "AIDev"})
-
+# ==============================================================================
+# ITSM v4 配置
+# ==============================================================================
+BK_ITSM4_GATEWAY_NAME = env.str("BK_ITSM4_GATEWAY_NAME", "bk-itsm4" if EDITION == "te" else "cw-aitsm")
+BK_ITSM4_URL_PREFIX = (
+    BK_API_URL_TMPL.format(api_name=BK_ITSM4_GATEWAY_NAME) + "/" + env.str("BK_ITSM4_GATEWAY_STAGE", "prod")
+)
+BK_ITSM4_API_TIMEOUT = env.int("BK_ITSM4_API_TIMEOUT", 30)
+BK_ITSM4_SYSTEM_TOKEN = env.str("BK_ITSM4_SYSTEM_TOKEN", default="")
+BK_ITSM4_CALLBACK_APP_CODE = env.str(
+    "BK_ITSM4_CALLBACK_APP_CODE",
+    default="bk-itsm4" if EDITION == "te" else "cw_aitsm",
+)
+BK_ITSM4_CALLBACK_ALLOWED_APP_CODES = env.list(
+    "BK_ITSM4_CALLBACK_ALLOWED_APP_CODES",
+    default=[BK_ITSM4_CALLBACK_APP_CODE],
+)
+BK_ITSM4_CALLBACK_STAGE = env.str("BK_ITSM4_CALLBACK_STAGE", "prod")
+BK_ITSM4_CALLBACK_PATH = env.str(
+    "BK_ITSM4_CALLBACK_PATH",
+    f"/{BK_ITSM4_CALLBACK_STAGE}/api/v2/inner/itsm/callback/",
+)
+# ITSM 单据中心 URL 模板，使用 {ticket_id} 占位符
+BK_ITSM4_TICKET_URL_TEMPLATE = env.str("BK_ITSM4_TICKET_URL_TEMPLATE", default="")
+# 是否启用 ITSM 权限申请工单（环境变量名保持兼容）
+ENABLE_ITSM4_PERMISSION_APPLY = env.bool("BK_ITSM4_PERMISSION_APPLY_ENABLED", default=True)
 
 # ==============================================================================
 # 网关全局配置
@@ -588,6 +613,9 @@ GATEWAY_DEFAULT_CREATOR = env.str("GATEWAY_DEFAULT_CREATOR", "admin")
 DEFAULT_USER_AUTH_TYPE = "default"
 
 APIGW_MANAGERS = env.list("APIGW_MANAGERS", default=["admin"])
+
+# 不活跃网关通知灰度用户列表，非空时仅通知列表中的用户
+INACTIVE_GATEWAY_NOTIFY_GRAY_USER_LIST = env.list("INACTIVE_GATEWAY_NOTIFY_GRAY_USER_LIST", default=[])
 
 # 网关 jwt 签发者，必须与 apigateway 后端服务保持一致，
 # apigw-manager sdk 利用 issuer 支持获取不同网关实例同名网关的公钥，以支持同一后端服务接入不同网关实例
@@ -706,33 +734,15 @@ BK_LOGIN_PLAIN_WINDOW_HEIGHT = env.int("BK_LOGIN_PLAIN_WINDOW_HEIGHT", default=5
 # ==============================================================================
 # bkrepo 配置
 # ==============================================================================
-BKREPO_ENDPOINT_URL = env.str("BKREPO_ENDPOINT_URL", "")
-BKREPO_USERNAME = env.str("BKREPO_USERNAME", "bk_apigateway")
-BKREPO_PASSWORD = env.str("BKREPO_PASSWORD", "")
-BKREPO_PROJECT = env.str("BKREPO_PROJECT", "bk_apigateway")
-BKREPO_GENERIC_BUCKET = env.str("BKREPO_GENERIC_BUCKET", "generic")
-
-# pypi 镜像源配置
-PYPI_MIRRORS_CONFIG = {
-    "default": {
-        "repository_url": env.str("DEFAULT_PYPI_REPOSITORY_URL", ""),
-        "index_url": env.str("DEFAULT_PYPI_INDEX_URL", ""),
-        "username": env.str("DEFAULT_PYPI_USERNAME", ""),
-        "password": env.str("DEFAULT_PYPI_PASSWORD", ""),
-    }
-}
-
-PYPI_MIRRORS_REPOSITORY = env.str("PYPI_INDEX_URL", "https://pypi.org/simple/")
-
-# maven 仓库配置
-MAVEN_MIRRORS_CONFIG = {
-    "default": {
-        "repository_url": env.str("DEFAULT_MAVEN_REPOSITORY_URL", ""),
-        "repository_id": env.str("DEFAULT_MAVEN_REPOSITORY_ID", "bkpaas-maven"),
-        "username": env.str("DEFAULT_MAVEN_USERNAME", "bk_apigateway"),
-        "password": env.str("DEFAULT_MAVEN_PASSWORD", "bk_apigateway"),
-    }
-}
+_bkrepo = get_bkrepo_config(env)
+BKREPO_ENDPOINT_URL = _bkrepo["BKREPO_ENDPOINT_URL"]
+BKREPO_USERNAME = _bkrepo["BKREPO_USERNAME"]
+BKREPO_PASSWORD = _bkrepo["BKREPO_PASSWORD"]
+BKREPO_PROJECT = _bkrepo["BKREPO_PROJECT"]
+BKREPO_GENERIC_BUCKET = _bkrepo["BKREPO_GENERIC_BUCKET"]
+PYPI_MIRRORS_CONFIG = _bkrepo["PYPI_MIRRORS_CONFIG"]
+PYPI_MIRRORS_REPOSITORY = _bkrepo["PYPI_MIRRORS_REPOSITORY"]
+MAVEN_MIRRORS_CONFIG = _bkrepo["MAVEN_MIRRORS_CONFIG"]
 
 # ==============================================================================
 # 蓝鲸通知中心配置
@@ -774,6 +784,11 @@ BK_ESB_ACCESS_LOG_CONFIG = {
     "es_index": env.str("BK_ESB_API_LOG_ES_INDEX", "2_bklog_bkapigateway_esb_container*"),
 }
 
+MCP_SERVER_ACCESS_LOG_CONFIG = {
+    "es_time_field_name": "dtEventTimeStamp",
+    "es_index": env.str("BK_APIGW_MCP_SERVER_LOG_ES_INDEX", "2_bklog_bkapigateway_mcp_proxy_container*"),
+}
+
 
 # ==============================================================================
 # prometheus 配置
@@ -810,90 +825,7 @@ BCS_CLUSTER_BK_BIZ_ID = env.str("BCS_CLUSTER_BK_BIZ_ID", "2")
 # ==============================================================================
 # apisix
 # ==============================================================================
-PLUGIN_METADATA_CONFIG = {
-    "file-logger": {
-        "log_format": {
-            # 请求信息
-            "proto": "$server_protocol",
-            "method": "$request_method",
-            "http_host": "$host",
-            "http_path": "$uri",
-            # "headers": "-",
-            "params": "$args",
-            "body": "$bk_log_request_body",
-            "app_code": "$bk_app_code",
-            "client_ip": "$remote_addr",
-            "request_id": "$bk_request_id",
-            "x_request_id": "$x_request_id",
-            "request_duration": "$bk_log_request_duration",
-            "bk_username": "$bk_username",
-            "bk_tenant_id": "$bk_tenant_id",
-            # 网关信息
-            # FIXME: remove api_id and api_name, from 1.23
-            # FIXME: change the access_log filter / metrics filter to gateway_id and gateway_name, from 1.23
-            "api_id": "$bk_gateway_id",
-            "api_name": "$bk_gateway_name",
-            # rename to gateway_id and gateway_name, from 1.19
-            "gateway_id": "$bk_gateway_id",
-            "gateway_name": "$bk_gateway_name",
-            "resource_id": "$bk_resource_id",
-            "resource_name": "$bk_resource_name",
-            "stage": "$bk_stage_name",
-            # 后端服务
-            "backend_name": "$bk_backend_name",
-            "backend_scheme": "$upstream_scheme",
-            "backend_method": "$method",
-            # 后端服务 Host，即后端服务配置中的域名或 IP+Port
-            "backend_host": "$bk_backend_host",
-            # 后端服务地址，请求后端时，实际请求的 IP+Port，若后端服务配置中为域名，则为域名解析后的地址
-            "backend_addr": "$upstream_addr",
-            "backend_path": "$bk_log_backend_path",
-            "backend_duration": "$bk_log_upstream_duration",
-            # 响应
-            "response_body": "$bk_log_response_body",
-            "response_size": "$body_bytes_sent",
-            "status": "$status",
-            # 其它
-            "msg": "-",
-            "level": "info",
-            "code_name": "$bk_apigw_error_code_name",
-            "error": "$bk_apigw_error_message",
-            "proxy_error": "$proxy_error",
-            "instance": "$instance_id",
-            "timestamp": "$bk_log_request_timestamp",
-            # 临时字段，用于记录请求时，认证参数的位置，便于推动认证参数优化
-            "auth_location": "$auth_params_location",
-            # opentelemetry traceparent
-            "traceparent": "$http_traceparent",
-        }
-    },
-    "bk-concurrency-limit": {
-        "conn": env.int("GATEWAY_CONCURRENCY_LIMIT_CONN", 2000),
-        "burst": env.int("GATEWAY_CONCURRENCY_LIMIT_BURST", 1000),
-        "default_conn_delay": env.int("GATEWAY_CONCURRENCY_LIMIT_DEFAULT_CONN_DELAY", 1),  # second
-        "key_type": "var",
-        "key": "bk_concurrency_limit_key",
-        "allow_degradation": True,
-    },
-    "bk-real-ip": {
-        "recursive": env.bool("GATEWAY_REAL_IP_RECURSIVE", False),
-        "source": env.str("GATEWAY_REAL_IP_SOURCE", "http_x_forwarded_for"),
-        "trusted_addresses": env.list("GATEWAY_REAL_IP_TRUSTED_ADDRESSES", default=["127.0.0.1", "::1"]),
-    },
-    "bk-opentelemetry": {
-        "sampler": {
-            # change to always_off/always_on/parent_base if needed!
-            "name": env.str("GATEWAY_OTEL_SAMPLER_NAME", "always_off"),
-            "options": {
-                "root": {
-                    "name": "trace_id_ratio",
-                    "options": {"fraction": env.float("GATEWAY_OTEL_ROOT_SAMPLER_RATIO", default=0.01)},
-                }
-            },
-        },
-        "additional_attributes": [],
-    },
-}
+PLUGIN_METADATA_CONFIG = get_plugin_metadata_config(env)
 
 # 是否启用网关并发限制，默认启用；
 # 目前这个插件有缺陷，暂时支持关闭; https://github.com/apache/apisix/issues/11868
@@ -901,57 +833,59 @@ GATEWAY_CONCURRENCY_LIMIT_ENABLED = env.bool("GATEWAY_CONCURRENCY_LIMIT_ENABLED"
 
 BK_GATEWAY_ETCD_NAMESPACE_PREFIX = env.str("BK_GATEWAY_ETCD_NAMESPACE_PREFIX", default="/bk-gateway-apigw")
 
+# BK plugins gateway data plane routing
+BK_PLUGINS_DATA_PLANE_NAME = env.str("BK_PLUGINS_DATA_PLANE_NAME", default="bk-plugins")
+BK_PLUGINS_DATA_PLANE_GRAY_STAGE = env.str("BK_PLUGINS_DATA_PLANE_GRAY_STAGE", default="not_start")
+
 # ==============================================================================
 # Feature Flag
 # ==============================================================================
 # 全局功能开关，用于控制站点全局性的一些功能，将与 DEFAULT_USER_FEATURE_FLAG、Model UserFeatureFlag 中数据合并
 # 优先级：Model UserFeatureFlag > DEFAULT_USER_FEATURE_FLAG > DEFAULT_FEATURE_FLAG
-DEFAULT_FEATURE_FLAG = {
-    # 是否展示"监控告警“子菜单
-    "ENABLE_MONITOR": env.bool("FEATURE_FLAG_ENABLE_MONITOR", False),
-    # 是否展示”运行数据“子菜单
-    "ENABLE_RUN_DATA": env.bool("FEATURE_FLAG_ENABLE_RUN_DATA", True),
-    # 是否展示 "运行数据" => 仪表盘 子菜单
-    "ENABLE_RUN_DATA_METRICS": env.bool("FEATURE_FLAG_ENABLE_RUN_DATA_METRICS", True),
-    # 是否展示”组件管理“菜单项，企业版展示，上云版不展示
-    "MENU_ITEM_ESB_API": env.bool("FEATURE_FLAG_MENU_ITEM_ESB_API", True),
-    # 是否展示”组件 API 文档“菜单项
-    "MENU_ITEM_ESB_API_DOC": env.bool("FEATURE_FLAG_MENU_ITEM_ESB_API_DOC", True),
-    # 是否将 ESB 数据同步到网关。需要考虑这个是否还需要
-    "SYNC_ESB_TO_APIGW_ENABLED": env.bool("FEATURE_FLAG_SYNC_ESB_TO_APIGW_ENABLED", True),
-    # 网关编辑页，是否支持填写网关“绑定应用”
-    "GATEWAY_APP_BINDING_ENABLED": env.bool("FEATURE_FLAG_GATEWAY_APP_BINDING_ENABLED", False),
-    # FIXME: 为什么有两个 SDK 特性变量，并且容器化版本有 bkrepo 配置的话，默认应该都是 true?
-    # 为 False，表示不启用 SDK 功能，网关 API 文档、组件 API 文档中，不展示 SDK 相关页面，隐藏“网关 APISDK”、“组件 APISDK”菜单项，隐藏网关中 SDK 创建、SDK 列表等功能项
-    "ENABLE_SDK": env.bool("FEATURE_FLAG_ENABLE_SDK", False),
-    # 隐藏 SDK 列表 相关功能
-    "ALLOW_UPLOAD_SDK_TO_REPOSITORY": env.bool("FEATURE_FLAG_ALLOW_UPLOAD_SDK_TO_REPOSITORY", False),
-    # 是否允许创建企业微信群，上云版一键拉群功能
-    "ALLOW_CREATE_APPCHAT": env.bool("FEATURE_FLAG_ALLOW_CREATE_APPCHAT", False),
-    # ----------------------------------------------------------------------------
-    # 是否展示蓝鲸通知中心组件
-    "ENABLE_BK_NOTICE": ENABLE_BK_NOTICE,
-    # 是否开启多租户模式
-    "ENABLE_MULTI_TENANT_MODE": ENABLE_MULTI_TENANT_MODE,
-    # 是否开启网关 AI 相关功能
-    "ENABLE_AI_COMPLETION": AI_OPEN_API_BASE_URL != "",
-    # 前端是否渲染 display_name
-    "ENABLE_DISPLAY_NAME_RENDER": (
-        ENABLE_MULTI_TENANT_MODE or env.bool("FEATURE_FLAG_ENABLE_DISPLAY_NAME_RENDER", True)
-    ),
-    # 是否展示网关运营状态
-    "ENABLE_GATEWAY_OPERATION_STATUS": env.bool("FEATURE_FLAG_ENABLE_GATEWAY_OPERATION_STATUS", False),
-    # 是否启用 MCP Prompt 功能
-    "ENABLE_MCP_SERVER_PROMPT": env.bool("FEATURE_FLAG_ENABLE_MCP_SERVER_PROMPT", False),
-    # 是否启用健康检查
-    "ENABLE_HEALTH_CHECK": env.bool("FEATURE_FLAG_ENABLE_HEALTH_CHECK", False),
-}
+
+ENABLE_RUN_DATA_METRICS = env.bool("FEATURE_FLAG_ENABLE_RUN_DATA_METRICS", False)
+ENABLE_GATEWAY_OPERATION_STATUS = env.bool("FEATURE_FLAG_ENABLE_GATEWAY_OPERATION_STATUS", False)
+
+DEFAULT_FEATURE_FLAG = get_default_feature_flags(
+    env,
+    enable_bk_notice=ENABLE_BK_NOTICE,
+    enable_multi_tenant_mode=ENABLE_MULTI_TENANT_MODE,
+    ai_open_api_base_url=AI_OPEN_API_BASE_URL,
+    enable_gateway_operation_status=ENABLE_GATEWAY_OPERATION_STATUS,
+    enable_run_data_metrics=ENABLE_RUN_DATA_METRICS,
+    enable_itsm4_permission_apply=ENABLE_ITSM4_PERMISSION_APPLY,
+)
 
 # 用户功能开关，将与 DEFAULT_FEATURE_FLAG 合并
 DEFAULT_USER_FEATURE_FLAG = {}
 
 # 网关功能开关
-GLOBAL_GATEWAY_FEATURE_FLAG = {}
+# GLOBAL_GATEWAY_FEATURE_FLAG = {}
+
+if ENABLE_RUN_DATA_METRICS:
+    CELERY_BEAT_SCHEDULE.update(
+        {
+            "apigateway.apps.metrics.tasks.statistics_request_by_day": {
+                "task": "apigateway.apps.metrics.tasks.statistics_request_by_day",
+                "schedule": crontab(minute=30, hour=8),  # noqa: F405
+            },
+            "apigateway.apps.permission.tasks.renew_app_resource_permission": {
+                "task": "apigateway.apps.permission.tasks.renew_app_resource_permission",
+                "schedule": crontab(minute=50, hour=10),
+            },
+        }
+    )
+
+    # NOTE: only enable the task when not in multi-tenant mode
+    if ENABLE_GATEWAY_OPERATION_STATUS and not ENABLE_MULTI_TENANT_MODE:
+        CELERY_BEAT_SCHEDULE.update(  # noqa: F405
+            {
+                "apigateway.apps.gateway.tasks.notify_inactive_gateway_maintainers": {
+                    "task": "apigateway.apps.gateway.tasks.notify_inactive_gateway_maintainers",
+                    "schedule": crontab(minute=0, hour=10, day_of_month=1),  # noqa: F405
+                },
+            }
+        )
 
 # ==============================================================================
 # 提供给前端的环境变量值
@@ -959,73 +893,42 @@ GLOBAL_GATEWAY_FEATURE_FLAG = {}
 # 后续前端环境变量尽量走这个接口，而不是通过 src/dashboard-front/index.html + src/constant/config.ts 传入
 BK_DOCS_URL_PREFIX = env.str("BK_DOCS_URL_PREFIX", default="https://bk.tencent.com/docs")
 BK_APIGATEWAY_VERSION = env.str("BK_APIGATEWAY_VERSION", default="1.17.0")
-ENV_VARS_FOR_FRONTEND = {
-    "EDITION": EDITION,
-    "BK_APP_CODE": BK_APP_CODE,
-    "BK_DEFAULT_TEST_APP_CODE": DEFAULT_TEST_APP["bk_app_code"],
-    "BK_API_RESOURCE_URL_TMPL": BK_API_URL_TMPL + "/{stage_name}/{resource_path}",
-    "BK_COMPONENT_API_URL": BK_COMPONENT_API_URL,
-    "BK_PAAS_APP_REPO_URL_TMPL": env.str(
-        "BK_PAAS_APP_REPO_URL_TMPL", "https://example.com/groups/blueking-plugins/apigw/{{gateway_name}}.git"
-    ),
-    "BK_DASHBOARD_FE_URL": DASHBOARD_FE_URL,
-    "BK_DASHBOARD_URL": DASHBOARD_URL,
-    "BK_DASHBOARD_CSRF_COOKIE_NAME": CSRF_COOKIE_NAME,
-    "BK_DASHBOARD_CSRF_COOKIE_DOMAIN": CSRF_COOKIE_DOMAIN,
-    "BK_DASHBOARD_COOKIE_DOMAIN": CSRF_COOKIE_DOMAIN,
-    "BK_APIGATEWAY_VERSION": BK_APIGATEWAY_VERSION,
-    "BK_DOCS_URL_PREFIX": BK_DOCS_URL_PREFIX,
-    "BK_USER_WEB_API_URL": BK_API_URL_TMPL.format(api_name="bk-user-web") + "/prod",
-    # 登录地址，带 /login/
-    "BK_LOGIN_URL": BK_LOGIN_URL,
-    # 微网关主站地址
-    "BK_APISIX_URL": env.str("BK_APISIX_URL", default=""),
-    "BK_APISIX_DOC_URL": env.str("BK_APISIX_DOC_URL", default=""),
-    # 访问统计
-    "BK_ANALYSIS_SCRIPT_SRC": env.str("BK_ANALYSIS_SCRIPT_SRC", default=""),
-    "CREATE_CHAT_API": env.str("CREATE_CHAT_API", default=""),
-    "SEND_CHAT_API": env.str("SEND_CHAT_API", default=""),
-    "HELPER": {
-        "name": env.str("HELPER_NAME", default=""),
-        "href": env.str("HELPER_HREF", default=""),
-    },
-    "BK_SHARED_RES_URL": env.str("BK_SHARED_RES_URL", default=""),
-}
+
+# SDK 支持的语言列表
+BK_SDK_LANGUAGES = env.list("BK_SDK_LANGUAGES", default=["python", "golang", "java"])
+
+ENV_VARS_FOR_FRONTEND = get_frontend_env_vars(
+    env,
+    edition=EDITION,
+    bk_app_code=BK_APP_CODE,
+    default_test_app_code=DEFAULT_TEST_APP["bk_app_code"],
+    bk_api_url_tmpl=BK_API_URL_TMPL,
+    bk_component_api_url=BK_COMPONENT_API_URL,
+    dashboard_fe_url=DASHBOARD_FE_URL,
+    dashboard_url=DASHBOARD_URL,
+    csrf_cookie_name=CSRF_COOKIE_NAME,
+    csrf_cookie_domain=CSRF_COOKIE_DOMAIN,
+    bk_apigateway_version=BK_APIGATEWAY_VERSION,
+    bk_docs_url_prefix=BK_DOCS_URL_PREFIX,
+    bk_login_url=BK_LOGIN_URL,
+    bk_sdk_languages=BK_SDK_LANGUAGES,
+    bk_paas3_url=BK_PAAS3_URL,
+)
 
 
 # ==============================================================================
 # 网关资源数量限制
 # ==============================================================================
-MAX_STAGE_COUNT_PER_GATEWAY = env.int("MAX_STAGE_COUNT_PER_GATEWAY", 20)
-API_GATEWAY_RESOURCE_LIMITS = {
-    "max_gateway_count_per_app": env.int("MAX_GATEWAY_COUNT_PER_APP", 10),  # 每个 app 最多创建的网关数量
-    "max_resource_count_per_gateway": env.int("MAX_RESOURCE_COUNT_PER_GATEWAY", 1000),  # 每个网关最多创建的 api 数量
-    # 配置 app 的特殊规则
-    "max_gateway_count_per_app_whitelist": {
-        "bk_sops": 1000000,  # 标准运维网关数量无限制
-        "data": 1000000,
-    },
-    # 配置网关的特殊规则
-    "max_resource_count_per_gateway_whitelist": {
-        "bk-esb": 5000,
-        "bk-base": 2000,
-    },
-}
-for k, v in env.dict("MAX_GATEWAY_COUNT_PER_APP_WHITELIST", default={}).items():
-    API_GATEWAY_RESOURCE_LIMITS["max_gateway_count_per_app_whitelist"][k] = int(v)
-for k, v in env.dict("MAX_RESOURCE_COUNT_PER_GATEWAY_WHITELIST", default={}).items():
-    API_GATEWAY_RESOURCE_LIMITS["max_resource_count_per_gateway_whitelist"][k] = int(v)
-
-# 网关下对象的最大数量
-MAX_LABEL_COUNT_PER_GATEWAY = env.int("MAX_LABEL_COUNT_PER_GATEWAY", 100)
-# 管理端支持的最大超时时间
-MAX_BACKEND_TIMEOUT_IN_SECOND = env.int("MAX_BACKEND_TIMEOUT_IN_SECOND", 600)
-# 每一个版本能生成的最大 python sdk 数量
-MAX_PYTHON_SDK_COUNT_PER_RESOURCE_VERSION = env.int("MAX_PYTHON_SDK_COUNT_PER_RESOURCE_VERSION", 99)
+_gateway_quota = get_gateway_quota_config(env)
+MAX_STAGE_COUNT_PER_GATEWAY = _gateway_quota["MAX_STAGE_COUNT_PER_GATEWAY"]
+API_GATEWAY_RESOURCE_LIMITS = _gateway_quota["API_GATEWAY_RESOURCE_LIMITS"]
+MAX_LABEL_COUNT_PER_GATEWAY = _gateway_quota["MAX_LABEL_COUNT_PER_GATEWAY"]
+MAX_BACKEND_TIMEOUT_IN_SECOND = _gateway_quota["MAX_BACKEND_TIMEOUT_IN_SECOND"]
+MAX_PYTHON_SDK_COUNT_PER_RESOURCE_VERSION = _gateway_quota["MAX_PYTHON_SDK_COUNT_PER_RESOURCE_VERSION"]
 
 # DB 操作大小配置
-RELEASED_RESOURCE_CREATE_BATCH_SIZE = env.int("RELEASED_RESOURCE_CREATE_BATCH_SIZE", 50)
-RELEASED_RESOURCE_DOC_CREATE_BATCH_SIZE = env.int("RELEASED_RESOURCE_DOC_CREATE_BATCH_SIZE", 50)
+# RELEASED_RESOURCE_CREATE_BATCH_SIZE = env.int("RELEASED_RESOURCE_CREATE_BATCH_SIZE", 50)
+# RELEASED_RESOURCE_DOC_CREATE_BATCH_SIZE = env.int("RELEASED_RESOURCE_DOC_CREATE_BATCH_SIZE", 50)
 
 # ==============================================================================
 # ESB 配置
@@ -1060,38 +963,7 @@ SYNC_ESB_JWT_KEY_GATEWAY_NAMES = {
     },
 }
 
-# django translation, 避免循环引用
-gettext = lambda s: s  # noqa
-
-ESB_BOARD_CONFIGS = {
-    "default": {
-        "name": "default",
-        "label": gettext("蓝鲸智云"),
-        # envs
-        "api_envs": [
-            {
-                "name": "prod",
-                "label": gettext("正式环境"),
-                "host": env.str("ESB_DEFAULT_BOARD_PROD_URL", "") or BK_COMPONENT_API_URL,
-                "description": gettext("访问后端正式环境"),
-            },
-            {
-                "name": "test",
-                "label": gettext("测试环境"),
-                "host": env.str("ESB_DEFAULT_BOARD_TEST_URL", ""),
-                "description": gettext("访问后端测试环境"),
-            },
-        ],
-        # sdk
-        "has_sdk": env.bool("ESB_DEFAULT_BOARD_HAS_SDK", True),
-        "sdk_name": "bkapi-component-open",
-        "sdk_package_prefix": "bkapi_component.open",
-        "sdk_doc_templates": {
-            "python_sdk_usage_example": "python_sdk_usage_example_v2.md",
-        },
-        "sdk_description": gettext("访问蓝鲸智云组件 API"),
-    },
-}
+ESB_BOARD_CONFIGS = get_esb_board_configs(env, bk_component_api_url=BK_COMPONENT_API_URL)
 
 # ==============================================================================
 # 版本差异配置

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -81,6 +81,7 @@ import {
   getStageList,
 } from '@/services/source/stage';
 import { getVersionDetail } from '@/services/source/resource';
+import type { IExtractApiReturn } from '@/services/types/utils.ts';
 import ResourceDetails from './ResourceDetails.vue';
 import CreateStage from '../../components/CreateStage.vue';
 import { copy } from '@/utils';
@@ -91,6 +92,9 @@ import { METHOD_THEMES } from '@/enums';
 import { HTTP_METHODS } from '@/constants';
 import { cloneDeep } from 'lodash-es';
 import TableEmpty from '@/components/table-empty/Index.vue';
+
+type IGatewayLabelItem = IExtractApiReturn<typeof getGatewayLabels>[number];
+type IVersionResource = IExtractApiReturn<typeof getVersionDetail>['resources'][number];
 
 interface IProps {
   stageAddress: string
@@ -118,11 +122,11 @@ const stageSidesliderRef = ref();
 const highlightRowId = ref(0);
 
 // 网关标签
-const labels = ref<any[]>([]);
+const labels = ref<IGatewayLabelItem[]>([]);
 
 // 资源信息
-const tableData = ref<any[]>([]);
-const initTableData = ref<any[]>([]);
+const tableData = ref<IVersionResource[]>([]);
+const initTableData = ref<IVersionResource[]>([]);
 const stageList = ref<IStageListItem[]>([]);
 
 const gatewayId = computed<number>(() => gatewayStore.apigwId);
@@ -152,11 +156,11 @@ const renderResourceTag = computed(() => {
   return <span class="inline-block bg-#EDF4FF color-#3A84FF rounded-2px text-10px w-18px! h-16px! line-height-16px text-center">{ t('资') }</span>;
 });
 
-const columns = computed<PrimaryTableProps['columns']>(() => [
+const columns = computed<any>(() => [
   {
     colKey: 'backend',
     title: t('后端服务'),
-    cell: (h, { row }) => (
+    cell: (_h: any, { row }: { row: any }) => (
       <bk-button
         theme="primary"
         text
@@ -175,9 +179,9 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'name',
     title: t('资源名称'),
-    ellipsis: (h, { row }) => row.name,
+    ellipsis: (h: any, { row }: { row: IVersionResource }) => row.name,
     minWidth: 150,
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: { row: IVersionResource }) => (
       <span
         class="color-#3A84FF cursor-pointer"
         onClick={() => showDetails(row)}
@@ -202,7 +206,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'method',
     title: t('前端请求方法'),
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: { row: IVersionResource }) => (
       <bk-tag theme={METHOD_THEMES[row.method as keyof typeof METHOD_THEMES]}>
         {row.method}
       </bk-tag>
@@ -228,11 +232,13 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
       resetValue: [],
       list: labelsList.value,
     },
-    cell: (h, { row }) => (
-      labels.value?.filter(label => row.gateway_label_ids?.includes(label.id)).map(label => label.name).length
+    cell: (h: any, { row }: { row: any }) => (
+      labels.value?.filter((label: IGatewayLabelItem) =>
+        row.gateway_label_ids?.includes(label.id)).map((label: IGatewayLabelItem) => label.name).length
         ? (
           <RenderTagOverflow
-            data={labels.value?.filter(label => row.gateway_label_ids?.includes(label.id)).map(label => label.name)}
+            data={labels.value?.filter((label: IGatewayLabelItem) =>
+              row.gateway_label_ids?.includes(label.id)).map((label: IGatewayLabelItem) => label.name)}
           />
         )
         : <span>--</span>
@@ -272,11 +278,11 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
       );
     },
     ellipsis: true,
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: { row: IVersionResource }) => (
       row.plugins?.length
         ? (
           <div class="flex items-center">
-            {row.plugins.map(plugin => (
+            {row.plugins.map((plugin: IVersionResource['plugins'][number]) => (
               <div class="flex items-center" key={plugin.id}>
                 {plugin.binding_type === 'stage' ? renderStageTag.value : ''}
                 {plugin.binding_type === 'resource' ? renderResourceTag.value : ''}
@@ -291,7 +297,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'is_public',
     title: t('是否公开'),
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: { row: IVersionResource }) => (
       <span class={{
         'color-#FE9C00': row.is_public,
         'color-#63656e': !row.is_public,
@@ -305,7 +311,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     colKey: 'act',
     title: t('操作'),
     width: 200,
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: { row: IVersionResource }) => (
       <>
         <bk-button
           text
@@ -345,19 +351,20 @@ const currentStageVersionId = computed(() => {
 });
 
 watch(filterValue, () => {
-  tableData.value = initTableData.value.filter((row) => {
+  tableData.value = initTableData.value.filter((row: any) => {
     let result = true;
     if (filterValue.value.keyword) {
-      result = !!(row.proxy?.backend?.name?.toLowerCase()?.includes(filterValue.value.keyword)
-        || row.name.toLowerCase()?.includes(filterValue.value.keyword)
-        || row.path.toLowerCase()?.includes(filterValue.value.keyword));
+      const keywordInLowerCase = filterValue.value.keyword.toLowerCase();
+      result = !!(row.proxy?.backend?.name?.toLowerCase()?.includes(keywordInLowerCase)
+        || row.name.toLowerCase()?.includes(keywordInLowerCase)
+        || row.path.toLowerCase()?.includes(keywordInLowerCase));
     }
     if (result && filterValue.value.method && filterValue.value.method.length) {
       result = filterValue.value.method.includes(row.method);
     }
     if (result && filterValue.value.label_ids && filterValue.value.label_ids.length) {
       result = filterValue.value.label_ids.some(
-        (checkedLabelId: number) => row.gateway_label_ids.some(id => id === checkedLabelId),
+        (checkedLabelId: number) => row.gateway_label_ids.some((id: number) => id === checkedLabelId),
       );
     }
     return result;
@@ -412,9 +419,9 @@ async function init() {
 
 async function getLabels() {
   labels.value = await getGatewayLabels(gatewayId.value);
-};
+}
 
-const getRowClassName = ({ row }) => {
+const getRowClassName = ({ row }: { row: IVersionResource }) => {
   return row.id === highlightRowId.value ? 'highlight-row' : '';
 };
 
@@ -445,7 +452,11 @@ const handleClearQueries = () => {
 };
 
 const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filters) => {
-  Object.assign(filterValue.value, filters);
+  Object.assign(
+    filterValue.value,
+    filters,
+    { method: filters.method?.filter((item: string | undefined) => !!item) || [] },
+  );
 };
 
 const hasNoVerification = (row: any) => {

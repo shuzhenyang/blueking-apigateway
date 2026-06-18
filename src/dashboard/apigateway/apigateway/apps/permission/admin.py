@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -29,9 +29,9 @@ from apigateway.apps.permission.models import (
 
 class AppAPIPermissionAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
     djangoql_completion_enabled_by_default = False
-    list_display = ["id", "bk_app_code", "gateway", "expires"]
+    list_display = ["id", "bk_app_code", "gateway", "expires", "grant_type"]
     search_fields = ["bk_app_code", "gateway__id", "gateway__name"]
-    list_filter = ["gateway", "expires"]
+    list_filter = ["gateway", "expires", "grant_type"]
 
 
 class AppResourcePermissionAdmin(DjangoQLSearchMixin, admin.ModelAdmin):

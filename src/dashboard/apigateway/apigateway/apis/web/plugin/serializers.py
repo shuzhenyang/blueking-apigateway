@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -32,15 +32,17 @@ from apigateway.apps.plugin.constants import (
     PluginBindingScopeEnum,
     PluginTypeCodeEnum,
 )
-from apigateway.apps.plugin.models import PluginConfig, PluginForm, PluginType
+from apigateway.apps.plugin.models import PluginConfig, PluginType
 from apigateway.common.fields import CurrentGatewayDefault
-from apigateway.service.plugin.validator import PluginConfigYamlValidator
+from apigateway.service.plugin import PluginConfigYamlValidator
 
 
 class PluginTypeOutputSLZ(serializers.ModelSerializer):
     name = serializers.CharField(source="name_i18n", help_text="插件类型名称")
+    description = serializers.CharField(source="description_i18n", help_text="插件类型描述")
 
-    notes = serializers.SerializerMethodField(help_text="插件类型备注")
+    # NOTE: deprecated, use description instead
+    notes = serializers.CharField(source="description_i18n", help_text="插件类型备注")
     related_scope_count = serializers.SerializerMethodField(help_text="插件类型绑定的环境及资源数量")
     is_bound = serializers.SerializerMethodField(help_text="插件类型是否已绑定到当前环境或资源")
     tags = serializers.SerializerMethodField(help_text="插件类型标签")
@@ -53,15 +55,12 @@ class PluginTypeOutputSLZ(serializers.ModelSerializer):
             "name",
             "code",
             "is_public",
+            "description",
             "notes",
             "related_scope_count",
             "is_bound",
             "tags",
         )
-
-    def get_notes(self, obj):
-        notes = self.context.get("plugin_type_notes", {})
-        return notes.get(obj.id, "")
 
     def get_related_scope_count(self, obj):
         related_scope_count = self.context.get("type_related_scope_count", {})
@@ -94,28 +93,6 @@ class PluginTypeQueryInputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.plugin.serializers.PluginTypeQueryInputSLZ"
-
-
-class PluginFormOutputSLZ(serializers.ModelSerializer):
-    type_code = serializers.CharField(source="type.code", read_only=True, help_text="插件类型编码")
-    type_name = serializers.CharField(source="type.name_i18n", read_only=True, help_text="插件类型名称")
-    config = serializers.DictField(help_text="插件配置")
-
-    class Meta:
-        ref_name = "apigateway.apis.web.plugin.serializers.PluginFormOutputSLZ"
-        model = PluginForm
-        fields = (
-            "id",
-            "language",
-            "notes",
-            "example",
-            "style",
-            "default_value",
-            "config",
-            "type_id",
-            "type_code",
-            "type_name",
-        )
 
 
 class PluginConfigBaseSLZ(serializers.ModelSerializer):

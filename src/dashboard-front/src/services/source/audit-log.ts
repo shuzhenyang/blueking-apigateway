@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -16,6 +16,9 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import http from '../http';
+import type { ICountAndResults } from '@/services/types/utils.ts';
+import type { IAuditEventLogOutput } from '@/services/types/responses/gateways.ts';
+import type { IGatewaysAuditsLogsListQuery } from '@/services/types/query/gateways.ts';
 
 export interface IAuditLog {
   // 操作类型
@@ -44,6 +47,6 @@ export interface IAuditLog {
  * @param params
  * @returns
  */
-export async function getAuditLogList(apigwId: number, params: IAuditLog) {
-  return http.get(`/gateways/${apigwId}/audits/logs/`, params);
+export async function getAuditLogList(apigwId: number, params: IGatewaysAuditsLogsListQuery) {
+  return http.get<ICountAndResults<IAuditEventLogOutput>>(`/gateways/${apigwId}/audits/logs/`, params);
 }

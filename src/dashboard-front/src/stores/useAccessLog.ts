@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -16,13 +16,15 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import { defineStore } from 'pinia';
-
 import { t } from '@/locales';
+import router from '@/router';
 
 export const useAccessLog = defineStore('useAccessLog', {
   state: () => ({
+    // 是否展示今天选项
+    isEnabledToday: ['MCPServerObservability', 'MyApply', 'MyPending', 'MyHandled'].includes(router?.currentRoute?.value?.name as string),
     // 日期选择快捷方式
-    datepickerShortcuts: [
+    baseDatepickerShortcuts: [
       {
         text: t('最近5分钟'),
         value() {
@@ -458,8 +460,23 @@ export const useAccessLog = defineStore('useAccessLog', {
      * @param {Object} state - store 的状态对象
      * @returns {Array} 日期选择快捷方式数组
      */
-    getDatepickerShortcuts(state) {
-      return state.datepickerShortcuts;
+    datepickerShortcuts(state): Array<any> {
+      return computed(() => {
+        const routeName = router?.currentRoute?.value?.name as string;
+        const todayShortcut = {
+          text: t('今天'),
+          value() {
+            const end = new Date();
+            const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+            return [start, end];
+          },
+        };
+        // 满足路由条件则添加“今天”
+        if (routeName && state.isEnabledToday) {
+          return [todayShortcut, ...state.baseDatepickerShortcuts];
+        }
+        return [...state.baseDatepickerShortcuts];
+      }).value;
     },
     /**
      * 获取一天内的快捷方式

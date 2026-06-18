@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -34,6 +34,7 @@ CELERY_IMPORTS = [
     "apigateway.apps.monitor.tasks",
     "apigateway.apps.metrics.tasks",
     "apigateway.apps.permission.tasks",
+    "apigateway.apps.gateway.tasks",
     "apigateway.apps.mcp_server.tasks",
     "apigateway.controller.tasks",
 ]
@@ -73,6 +74,10 @@ CELERY_BEAT_SCHEDULE = {
     "apigateway.controller.tasks.clean_task.delete_old_stats_records": {
         "task": "apigateway.controller.tasks.clean_task.delete_old_stats_records",
         "schedule": crontab(day_of_week="*", hour=1, minute=25),
+    },
+    "apigateway.controller.tasks.clean_task.delete_old_app_resource_permission_records": {
+        "task": "apigateway.controller.tasks.clean_task.delete_old_app_resource_permission_records",
+        "schedule": crontab(day_of_week="*", hour=1, minute=30),
     },
     "apigateway.apps.mcp_server.tasks.sync_mcp_server_prompts": {
         "task": "apigateway.apps.mcp_server.tasks.sync_mcp_server_prompts",

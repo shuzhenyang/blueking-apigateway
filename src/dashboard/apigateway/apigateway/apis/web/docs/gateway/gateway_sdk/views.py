@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,13 +23,14 @@ from django.utils.timezone import now as timezone_now
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
+from apigateway.apis.web.docs.gateway.mixins import GatewayDocsPermissionMixin
 from apigateway.apps.support.models import GatewaySDK
+from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
-from apigateway.biz.sdk.gateway_sdk import GatewaySDKHandler
-from apigateway.biz.sdk.models import SDKDocContext
+from apigateway.biz.sdk import GatewaySDKHandler, SDKDocContext
 from apigateway.common.django.translation import get_current_language_code
-from apigateway.common.permissions import GatewayDisplayablePermission
 from apigateway.core.models import Release
+from apigateway.service.resource_version import get_resource_schema
 from apigateway.utils import openapi
 from apigateway.utils.responses import OKJsonResponse
 
@@ -45,9 +46,7 @@ from .serializers import SDKListInputSLZ, SDKUsageExampleInputSLZ, SDKUsageExamp
         tags=["WebAPI.Docs.Gateway.SDK"],
     ),
 )
-class SDKListApi(generics.ListAPIView):
-    permission_classes = [GatewayDisplayablePermission]
-
+class SDKListApi(GatewayDocsPermissionMixin, generics.ListAPIView):
     def list(self, request, gateway_name: str, *args, **kwargs):
         """获取网关SDK列表"""
         slz = SDKListInputSLZ(data=request.query_params)
@@ -70,9 +69,7 @@ class SDKListApi(generics.ListAPIView):
         tags=["WebAPI.Docs.Gateway.SDK"],
     ),
 )
-class SDKUsageExampleApi(generics.RetrieveAPIView):
-    permission_classes = [GatewayDisplayablePermission]
-
+class SDKUsageExampleApi(GatewayDocsPermissionMixin, generics.RetrieveAPIView):
     def retrieve(self, request, gateway_name: str, *args, **kwargs):
         """获取网关SDK示例"""
         slz = SDKUsageExampleInputSLZ(data=request.query_params)
@@ -96,7 +93,7 @@ class SDKUsageExampleApi(generics.RetrieveAPIView):
         if not resource_id and resource_version_id:
             resource_id = ResourceVersionHandler.get_resource_id(resource_version_id, resource_name)
             # 获取对应资源的schema
-            resource_schema = ResourceVersionHandler.get_resource_schema(resource_version_id, resource_id)
+            resource_schema = get_resource_schema(resource_version_id, resource_id)
             example = openapi.get_openapi_example(resource_schema)
 
         content = render_to_string(
@@ -110,6 +107,7 @@ class SDKUsageExampleApi(generics.RetrieveAPIView):
                 path_params=example.get("path_params", {}),
                 query_params=example.get("query_params", {}),
                 headers=example.get("headers", {}),
+                bk_api_url_tmpl=GatewayHandler.get_bk_api_url_tmpl(request.gateway.id),
             ).as_dict(),
         )
 

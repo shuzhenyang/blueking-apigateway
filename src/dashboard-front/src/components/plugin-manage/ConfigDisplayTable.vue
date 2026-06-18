@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -35,6 +35,7 @@ import ConfigDisplayTableRateLimit from './ConfigDisplayTableRateLimit.vue';
 import ConfigDisplayTableIpRestriction from './ConfigDisplayTableIpRestriction.vue';
 import ConfigDisplayTableStatusRewrite from './ConfigDisplayTableStatusRewrite.vue';
 import ConfigDisplayTableGeneric from './ConfigDisplayTableGeneric.vue';
+import ConfigDisplayTableBkTrafficLabel from './ConfigDisplayTableBkTrafficLabel.vue';
 import type {
   IBaseTableRow,
   IColumn,
@@ -81,6 +82,10 @@ const tableComponentMap: { [key: string]: Component } = {
   'bk-ip-restriction': ConfigDisplayTableIpRestriction,
   'bk-status-rewrite': ConfigDisplayTableStatusRewrite,
   'bk-username-required': ConfigDisplayTableStatusRewrite,
+  'bk-oauth2-verify': ConfigDisplayTableStatusRewrite,
+  'bk-oauth2-protected-resource': ConfigDisplayTableStatusRewrite,
+  'bk-oauth2-audience-validate': ConfigDisplayTableStatusRewrite,
+  'bk-traffic-label': ConfigDisplayTableBkTrafficLabel,
 };
 
 // 根据 code 或 type 动态获取表格组件

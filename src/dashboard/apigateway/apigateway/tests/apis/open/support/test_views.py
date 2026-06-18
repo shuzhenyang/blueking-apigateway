@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,8 +18,6 @@
 #
 
 import pytest
-
-from apigateway.biz.sdk.helper import SDKInfo
 
 pytestmark = pytest.mark.django_db
 
@@ -43,8 +41,14 @@ class TestSDKGenerateViewSet:
         rf,
         request_to_view,
     ):
-        MockSDKHelper = mocker.patch("apigateway.apis.open.support.views.SDKHelper")  # noqa: N806
-        helper = MockSDKHelper.return_value.__enter__.return_value
+        generate_sdks = mocker.patch("apigateway.apis.open.support.views.generate_sdks_for_resource_version")
+        generate_sdks.return_value = [
+            {
+                "name": fake_sdk.name,
+                "version": fake_sdk.version_number,
+                "url": fake_sdk.url,
+            }
+        ]
 
         request = rf.post(
             "",
@@ -54,20 +58,16 @@ class TestSDKGenerateViewSet:
             },
         )
         request.gateway = fake_gateway
-        helper.create.return_value = SDKInfo(
-            context=mocker.MagicMock(),
-            sdk=fake_sdk,
-        )
 
         response = request_to_view(
             request=request,
             view_name="openapi.support.sdk.generate",
             path_params={"gateway_name": fake_gateway.name},
         )
-        helper.create.assert_called_with(
-            language="python",
-            version=fake_resource_version.version,
-            operator=None,
+        generate_sdks.assert_called_with(
+            resource_version=fake_resource_version,
+            languages=["python"],
+            version="",
         )
 
         assert response.status_code == 200

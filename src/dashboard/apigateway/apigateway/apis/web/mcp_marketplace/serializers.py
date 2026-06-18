@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,11 +22,15 @@ from rest_framework import serializers
 
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
+    MCP_AGENT_CLIENT_CHOICES_WITHOUT_AIDEV,
     OFFICIAL_MCP_CATEGORY_NAME,
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
 )
-from apigateway.service.mcp.mcp_server import build_mcp_server_url
+from apigateway.biz.mcp_server import MCPServerHandler
+from apigateway.biz.validators import BKAppCodeValidator
+from apigateway.common.constants import LanguageCodeEnum
+from apigateway.common.django.translation import get_current_language_code
 
 
 class MCPServerCategoryOutputSLZ(serializers.Serializer):
@@ -34,13 +38,21 @@ class MCPServerCategoryOutputSLZ(serializers.Serializer):
 
     id = serializers.IntegerField(read_only=True, help_text="分类 ID")
     name = serializers.CharField(read_only=True, help_text="分类名称（英文标识）")
-    display_name = serializers.CharField(read_only=True, help_text="分类显示名称")
+    display_name = serializers.SerializerMethodField(help_text="分类显示名称（根据语言环境返回）")
     description = serializers.CharField(read_only=True, help_text="分类描述")
     sort_order = serializers.IntegerField(read_only=True, help_text="排序顺序")
     mcp_server_count = serializers.SerializerMethodField(help_text="该分类下的 MCPServer 数量")
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerCategoryOutputSLZ"
+
+    def get_display_name(self, obj) -> str:
+        """根据当前语言环境返回分类名称：英文环境返回 name，中文环境返回 display_name"""
+        language_code = get_current_language_code()
+        # 英文环境返回 name，否则返回 display_name
+        if language_code == LanguageCodeEnum.EN.value:
+            return obj.name
+        return obj.display_name
 
     def get_mcp_server_count(self, obj) -> int:
         """获取该分类下的 MCPServer 数量"""
@@ -79,6 +91,16 @@ class MCPServerListInputSLZ(serializers.Serializer):
             return []
         # 解析逗号分隔的分类名称，去除空白
         return [cat.strip() for cat in value.split(",") if cat.strip()]
+
+
+class MCPMarketplaceServerAppPermissionApplyCreateInputSLZ(serializers.Serializer):
+    bk_app_code = serializers.CharField(required=True, validators=[BKAppCodeValidator()], help_text="蓝鲸应用 ID")
+    reason = serializers.CharField(required=True, help_text="申请原因")
+
+    class Meta:
+        ref_name = (
+            "apigateway.apis.web.mcp_marketplace.serializers.MCPMarketplaceServerAppPermissionApplyCreateInputSLZ"
+        )
 
 
 def _get_active_categories_from_prefetch(obj) -> List:
@@ -130,6 +152,8 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
     updated_time = serializers.DateTimeField(read_only=True, help_text="MCPServer 更新时间")
     created_time = serializers.DateTimeField(read_only=True, help_text="MCPServer 创建时间")
 
+    oauth2_public_client_enabled = serializers.BooleanField(read_only=True, help_text="是否开启 OAuth2 公开客户端模式")
+
     # 分类信息
     categories = serializers.SerializerMethodField(help_text="MCPServer 分类列表")
     is_official = serializers.SerializerMethodField(help_text="是否为官方")
@@ -145,7 +169,9 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
         return self.context["gateways"][obj.gateway.id]
 
     def get_url(self, obj) -> str:
-        return build_mcp_server_url(obj.name, obj.protocol_type)
+        least_privileges = self.context.get("least_privileges", {})
+        least_privilege = least_privileges.get((obj.gateway.id, obj.stage.id), "")
+        return MCPServerHandler.get_mcp_server_url(obj, least_privilege)
 
     def get_prompts_count(self, obj) -> int:
         prompts_count_map = self.context.get("prompts_count_map", {})
@@ -251,3 +277,45 @@ class MCPServerToolDocOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerToolDocOutputSLZ"
+
+
+class MCPServerBatchConfigInputSLZ(serializers.Serializer):
+    """批量获取 MCPServer 配置输入序列化器"""
+
+    mcp_server_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True,
+        min_length=1,
+        max_length=100,
+        help_text="MCPServer ID 列表",
+    )
+    client_type = serializers.ChoiceField(
+        required=True,
+        choices=MCP_AGENT_CLIENT_CHOICES_WITHOUT_AIDEV,
+        help_text="客户端类型",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerBatchConfigInputSLZ"
+
+
+class MCPServerBatchConfigOutputSLZ(serializers.Serializer):
+    """批量获取 MCPServer 配置输出序列化器"""
+
+    client_type = serializers.CharField(read_only=True, help_text="客户端类型")
+    display_name = serializers.CharField(read_only=True, help_text="客户端显示名称")
+    config = serializers.DictField(read_only=True, help_text="客户端配置（JSON 格式）")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerBatchConfigOutputSLZ"
+
+
+class MCPMarketplaceApplicableAppOutputSLZ(serializers.Serializer):
+    """发起 MCPServer 权限申请时，可选择的蓝鲸应用列表"""
+
+    bk_app_code = serializers.CharField(help_text="应用代码")
+    name = serializers.CharField(help_text="应用名称")
+    logo_url = serializers.CharField(help_text="应用 Logo 地址", allow_blank=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPMarketplaceApplicableAppOutputSLZ"

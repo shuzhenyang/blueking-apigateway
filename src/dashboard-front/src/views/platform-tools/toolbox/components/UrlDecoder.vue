@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -139,13 +139,13 @@ const mltUrlDecode = (str: string) => {
     return decodeURIComponent(str.replace(/\+/g, '%20'));
   }
   catch (e) {
-    console.error('Invalid URL encoding:', e.message);
+    console.error('Invalid URL encoding:', (e as Error).message);
     return str;
   }
 };
 
 const handleInputClick = () => {
-  urlInputRef.value?.focus();
+  (urlInputRef.value as any)?.focus();
 };
 
 // url编码
@@ -155,7 +155,7 @@ const handleEncodeClick = () => {
     result.value = mltUrlEncode(urlContent.value);
   }
   catch (err) {
-    errorMsg.value = err.message;
+    errorMsg.value = (err as Error).message;
     result.value = '';
   }
 };
@@ -166,8 +166,8 @@ const handleDecodeClick = () => {
   try {
     result.value = mltUrlDecode(urlContent.value);
   }
-  catch (err: Error) {
-    errorMsg.value = err.message;
+  catch (err) {
+    errorMsg.value = (err as Error).message;
     result.value = '';
   }
 };

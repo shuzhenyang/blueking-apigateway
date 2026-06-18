@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,9 +22,9 @@ import textwrap
 from django.conf import settings
 
 from apigateway.biz.released_resource import ReleasedResourceData
-from apigateway.biz.resource import ResourceURLHandler
 from apigateway.core.models import Gateway
 from apigateway.core.utils import get_path_display
+from apigateway.service.resource import get_resource_url_tmpl
 from apigateway.service.utils import get_resource_url
 from apigateway.utils.jinja2 import render_to_string
 
@@ -97,7 +97,7 @@ class DocGenerator:
 
     def _get_resource_url(self):
         return get_resource_url(
-            resource_url_tmpl=ResourceURLHandler.get_resource_url_tmpl(),
+            resource_url_tmpl=get_resource_url_tmpl(),
             gateway_name=self.gateway.name,
             stage_name=self.stage_name,
             resource_path=get_path_display(self.resource_data.path, self.resource_data.match_subpath),

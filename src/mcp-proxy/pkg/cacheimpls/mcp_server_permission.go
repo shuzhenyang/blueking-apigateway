@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -43,9 +43,12 @@ func (k MCPPermissionCacheKey) Key() string {
 }
 
 // This function retrieves a permission from the cache using a given key
-func retrieveMCPServerPermission(ctx context.Context, k cache.Key) (interface{}, error) {
+func retrieveMCPServerPermission(ctx context.Context, k cache.Key) (any, error) {
 	// Cast the key to the correct type
-	key := k.(MCPPermissionCacheKey)
+	key, ok := k.(MCPPermissionCacheKey)
+	if !ok {
+		return nil, errors.New("invalid cache key type for MCPPermissionCacheKey")
+	}
 	// Set the repository to the McpServerAppPermission
 	r := repo.MCPServerAppPermission
 	// Use the CoreJWT repository to query the database for the permission
@@ -62,17 +65,17 @@ func GetMCPServerPermission(ctx context.Context, bkAppCode string, mcpServerID i
 		MCPServerID: mcpServerID,
 		AppCode:     bkAppCode,
 	}
-	var value interface{}
+	var value any
 	value, err = cacheGet(ctx, appMCPServerPermission, key)
 	if err != nil {
-		return
+		return permission, err
 	}
 
 	var ok bool
 	permission, ok = value.(*model.MCPServerAppPermission)
 	if !ok {
-		err = errors.New("not model.McpServerAppPermission in cache")
-		return
+		err = errors.New("invalid cache value: expected *model.MCPServerAppPermission")
+		return permission, err
 	}
-	return
+	return permission, err
 }

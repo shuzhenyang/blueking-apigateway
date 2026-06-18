@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,7 +16,6 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import pytest
-from django.utils.translation import override
 
 from apigateway.apis.web.plugin.views import PluginConfigRetrieveUpdateDestroyApi
 from apigateway.apps.plugin.models import PluginBinding
@@ -268,49 +267,6 @@ class TestPluginConfigRetrieveUpdateDestroyApi:
         assert not view._check_if_changed(fake_input_data4, fake_plugin_bk_header_rewrite)
 
 
-class TestPluginFormRetrieveApi:
-    @pytest.mark.parametrize(
-        "language, form_id_tmpl",
-        [
-            [None, "{default.pk}"],
-            ["zh", "{default.pk}"],
-            ["jp", "{default.pk}"],
-            ["en", "{en.pk}"],
-        ],
-    )
-    def test_retrieve_form_by_language(
-        self,
-        fake_gateway,
-        request_view,
-        echo_plugin_type,
-        echo_plugin_default_form,
-        echo_plugin_en_form,
-        language,
-        form_id_tmpl,
-    ):
-        with override(language):
-            response = request_view(
-                "GET",
-                "plugins.form",
-                gateway=fake_gateway,
-                path_params={
-                    "gateway_id": fake_gateway.id,
-                    "code": echo_plugin_type.code,
-                },
-            )
-
-        assert response.status_code == 200
-
-        result = response.json()
-
-        assert result["data"]["id"] == int(
-            form_id_tmpl.format(
-                default=echo_plugin_default_form,
-                en=echo_plugin_en_form,
-            )
-        )
-
-
 class TestPluginBindingListApi:
     def test_retrieve(
         self,
@@ -322,9 +278,6 @@ class TestPluginBindingListApi:
         echo_plugin_stage_binding,
         echo_plugin_resource_binding,
     ):
-        # setup with these two bindings:
-        # - echo_plugin_stage_binding
-        # - echo_plugin_resource_binding
         response = request_view(
             "GET",
             "plugins.bindings",

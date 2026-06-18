@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -24,20 +24,17 @@ from django.utils.translation import gettext_lazy as _
 from apigateway.apps.plugin.constants import (
     PluginBindingScopeEnum,
     PluginBindingSourceEnum,
-    PluginStyleEnum,
     PluginTypeScopeEnum,
 )
 from apigateway.apps.plugin.managers import (
     PluginBindingManager,
     PluginConfigManager,
-    PluginFormManager,
     PluginTypeManager,
 )
 from apigateway.common.i18n.field import I18nProperty
 from apigateway.common.mixins.models import OperatorModelMixin, TimestampedModelMixin
 from apigateway.core.models import Gateway
 from apigateway.schema.models import Schema
-from apigateway.utils.django import JSONField
 from apigateway.utils.yaml import yaml_loads
 
 logger = logging.getLogger(__name__)
@@ -54,6 +51,9 @@ class PluginType(models.Model):
     name_i18n = I18nProperty(models.CharField(max_length=128, help_text="dashboard display name"))
     name = name_i18n.default_field()
     name_en = name_i18n.field("en", default=None, blank=True, null=True)
+    description_i18n = I18nProperty(models.TextField(default="", blank=True, help_text="plugin type description"))
+    description = description_i18n.default_field()
+    description_en = description_i18n.field("en", default=None, blank=True, null=True)
     is_public = models.BooleanField(default=False)
     schema = models.ForeignKey(
         Schema,
@@ -93,44 +93,6 @@ class PluginType(models.Model):
         db_table = "plugin_type"
         verbose_name = _("插件类型")
         verbose_name_plural = _("插件类型")
-
-
-class PluginForm(models.Model):
-    """
-    插件表单配置
-    专用于插件配置页面，描述了配置时的表单布局，对应的默认值和注意事项。
-    因为是 UI 相关的模型，因此针对不同语言应该提供不同版本的配置。
-    对于动态生成的表单，config 字段保存了整体表单结构，default_value 字段为 json
-    对于使用 YAML 配置的插件（自定义插件等），config 保持为空，default_value 字段为 YAML，方便添加注释
-    """
-
-    language = models.CharField(max_length=16, blank=True)
-    type = models.ForeignKey(PluginType, on_delete=models.CASCADE)
-    notes = models.TextField(help_text="notes for this plugin", default="", blank=True)
-    example = models.TextField(help_text="example for this plugin", default="", blank=True)
-    style = models.CharField(max_length=32, choices=PluginStyleEnum.get_choices(), help_text="表单样式")
-    default_value = models.TextField(help_text="default value", default=None, blank=True, null=True)
-    config = JSONField(
-        default=dict,
-        dump_kwargs={"indent": 2, "ensure_ascii": False},
-        null=True,
-        blank=True,
-        help_text="ui schema for config form",
-    )
-
-    objects: ClassVar[PluginFormManager] = PluginFormManager()
-
-    class Meta:
-        db_table = "plugin_form"
-        verbose_name = _("插件表单")
-        verbose_name_plural = _("插件表单")
-        unique_together = ("language", "type")
-
-    def __str__(self) -> str:
-        return f"<PluginForm {self.pk}/{self.type.name}>"
-
-    def natural_key(self):
-        return (self.language, self.type.code)
 
 
 class PluginConfig(OperatorModelMixin, TimestampedModelMixin):

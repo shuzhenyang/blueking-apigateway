@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -20,6 +20,7 @@ package metric_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"mcp_proxy/pkg/metric"
 )
@@ -27,7 +28,34 @@ import (
 var _ = Describe("Metric", func() {
 	Describe("InitMetrics", func() {
 		It("should initialize metrics without panic", func() {
-			metric.InitMetrics()
+			metric.InitMetrics("bk_apigateway_")
+		})
+	})
+
+	Describe("MCP Protocol Metrics", func() {
+		BeforeEach(func() {
+			// Metrics are already initialized by the test above via MustRegister,
+			// just verify they are not nil.
+		})
+
+		It("MCPRequestTotal should be valid", func() {
+			Expect(metric.MCPRequestTotal).NotTo(BeNil())
+		})
+
+		It("MCPRequestDuration should be valid", func() {
+			Expect(metric.MCPRequestDuration).NotTo(BeNil())
+		})
+
+		It("MCPToolCallTotal should be valid", func() {
+			Expect(metric.MCPToolCallTotal).NotTo(BeNil())
+		})
+
+		It("MCPSessionTotal should be valid", func() {
+			Expect(metric.MCPSessionTotal).NotTo(BeNil())
+		})
+
+		It("MCPErrorTotal should be valid", func() {
+			Expect(metric.MCPErrorTotal).NotTo(BeNil())
 		})
 	})
 })

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -44,6 +44,13 @@ class PluginTypeCodeEnum(StructuredEnum):
     PROXY_CACHE = EnumField("proxy-cache", label=_("代理缓存"))
     AI_PROXY = EnumField("ai-proxy", label=_("AI 代理"))
     AI_RATE_LIMITING = EnumField("ai-rate-limiting", label=_("AI 速率限制"))
+    BK_TRAFFIC_LABEL = EnumField("bk-traffic-label", label=_("流量染色"))
+
+    BK_OAUTH2_PROTECTED_RESOURCE = EnumField("bk-oauth2-protected-resource", label=_("OAuth2 保护资源"))
+    BK_OAUTH2_VERIFY = EnumField("bk-oauth2-verify", label=_("OAuth2 验证"))
+    BK_OAUTH2_AUDIENCE_VALIDATE = EnumField("bk-oauth2-audience-validate", label=_("OAuth2 受众验证"))
+
+    URI_BLOCKER = EnumField("uri-blocker", label=_("URI 阻断"))
 
 
 class PluginTypeScopeEnum(StructuredEnum):
@@ -56,12 +63,6 @@ class PluginTypeScopeEnum(StructuredEnum):
 class PluginBindingScopeEnum(StructuredEnum):
     STAGE = EnumField(ScopeTypeEnum.STAGE.value, label=_("环境"))
     RESOURCE = EnumField(ScopeTypeEnum.RESOURCE.value, label=_("资源"))
-
-
-class PluginStyleEnum(StructuredEnum):
-    RAW = EnumField("raw", label=_("原生"))
-    DYNAMIC = EnumField("dynamic", label=_("动态"))
-    FIX = EnumField("fix", label=_("固定"))
 
 
 class PluginBindingSourceEnum(StructuredEnum):

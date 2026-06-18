@@ -29,3 +29,10 @@ coverage
 
 *.tsbuildinfo
 index.html.backup
+
+.claude
+.codebuddy
+.codebuddy.backup
+
+src/services/temp/open-api.json
+src/types/auto-imports.d.ts

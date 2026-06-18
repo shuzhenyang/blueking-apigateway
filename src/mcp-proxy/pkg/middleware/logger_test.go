@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -29,6 +29,7 @@ import (
 
 	"mcp_proxy/pkg/config"
 	"mcp_proxy/pkg/infra/logging"
+	"mcp_proxy/pkg/infra/trace"
 	"mcp_proxy/pkg/middleware"
 	"mcp_proxy/pkg/util"
 )
@@ -89,6 +90,7 @@ var _ = Describe("Logger", func() {
 			r := gin.New()
 			r.Use(func(c *gin.Context) {
 				util.SetGatewayID(c, 123)
+				util.SetGatewayName(c, "test-gateway")
 				util.SetMCPServerID(c, 456)
 				util.SetMCPServerName(c, "test-server")
 				c.Next()
@@ -104,6 +106,26 @@ var _ = Describe("Logger", func() {
 			r.ServeHTTP(w, req)
 
 			Expect(w.Code).To(Equal(200))
+		})
+
+		It("should persist trace ID from traceparent header into request context", func() {
+			r := gin.New()
+			r.Use(middleware.APILogger())
+
+			var capturedTraceID string
+			r.GET("/test", func(c *gin.Context) {
+				capturedTraceID = trace.GetTraceIDFromContext(c.Request.Context())
+				c.String(http.StatusOK, "ok")
+			})
+
+			req, _ := http.NewRequest("GET", "/test", nil)
+			req.Header.Set("Traceparent", "00-11223344556677889900aabbccddeeff-aabbccddeeff0011-01")
+			w := httptest.NewRecorder()
+
+			r.ServeHTTP(w, req)
+
+			Expect(w.Code).To(Equal(200))
+			Expect(capturedTraceID).To(Equal("11223344556677889900aabbccddeeff"))
 		})
 
 		It("should log error responses", func() {

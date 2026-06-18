@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -203,7 +203,7 @@ const init = async () => {
 };
 
 const getResourceDetails = async () => {
-  const res = await getResourceDetail(gatewayId.value, resourceId.value);
+  const res: any = await getResourceDetail(gatewayId.value, resourceId.value);
   if (res.schema?.none_schema) {
     hasNoRequestParams.value = true;
   }
@@ -228,9 +228,9 @@ const handleSubmit = async () => {
   catch {
     // 校验失败，获取非法表单项的 #id
     const invalidFormElementIds = [
-      ...baseInfoRef.value?.invalidFormElementIds,
-      ...frontConfigRef.value?.invalidFormElementIds,
-      ...backConfigRef.value?.invalidFormElementIds,
+      ...(baseInfoRef.value?.invalidFormElementIds ?? []),
+      ...(frontConfigRef.value?.invalidFormElementIds ?? []),
+      ...(backConfigRef.value?.invalidFormElementIds ?? []),
     ];
     if (invalidFormElementIds.length) {
       // 根据表单项 #id 获取元素，滚动到视图中间，并 focus

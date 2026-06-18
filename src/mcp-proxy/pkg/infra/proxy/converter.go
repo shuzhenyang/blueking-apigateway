@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -25,6 +25,124 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	jsonschema "github.com/swaggest/jsonschema-go"
 )
+
+const bodyParamDefaultDescription = "HTTP request body in JSON format, " +
+	"containing the main data payload for the API request."
+
+func openapiSchemaRefToJSONSchema(schemaRef *openapi3.SchemaRef) jsonschema.Schema {
+	var jsonSchema jsonschema.Schema
+	schemaJSON, err := marshalOpenAPISchemaRefJSON(schemaRef)
+	if err != nil || len(schemaJSON) == 0 {
+		return jsonSchema
+	}
+
+	schemaJSON = normalizeOpenAPIJSONSchema(schemaJSON)
+	if err := json.Unmarshal(schemaJSON, &jsonSchema); err != nil {
+		return fallbackOpenAPIJSONSchema(schemaJSON)
+	}
+	return jsonSchema
+}
+
+func marshalOpenAPISchemaRefJSON(schemaRef *openapi3.SchemaRef) ([]byte, error) {
+	if schemaRef == nil {
+		return nil, nil
+	}
+	if schemaRef.Value != nil {
+		return schemaRef.Value.MarshalJSON()
+	}
+	return schemaRef.MarshalJSON()
+}
+
+func fallbackOpenAPIJSONSchema(schemaJSON []byte) jsonschema.Schema {
+	var rawSchema map[string]any
+	if err := json.Unmarshal(schemaJSON, &rawSchema); err != nil {
+		return jsonschema.Schema{}
+	}
+
+	jsonSchema := jsonschema.Schema{ExtraProperties: rawSchema}
+	if description, ok := rawSchema["description"].(string); ok && description != "" {
+		jsonSchema.Description = &description
+		delete(rawSchema, "description")
+	}
+	return jsonSchema
+}
+
+func normalizeOpenAPIJSONSchema(schemaJSON []byte) []byte {
+	var schema any
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		return schemaJSON
+	}
+	normalizeOpenAPIJSONSchemaValue(schema)
+
+	normalizedJSON, err := json.Marshal(schema)
+	if err != nil {
+		return schemaJSON
+	}
+	return normalizedJSON
+}
+
+func normalizeOpenAPIJSONSchemaValue(schema any) {
+	switch value := schema.(type) {
+	case map[string]any:
+		normalizeOpenAPIJSONSchemaObject(value)
+	case []any:
+		for _, item := range value {
+			normalizeOpenAPIJSONSchemaValue(item)
+		}
+	}
+}
+
+func normalizeOpenAPIJSONSchemaObject(schema map[string]any) {
+	normalizeOpenAPIExclusiveBound(schema, "exclusiveMinimum", "minimum")
+	normalizeOpenAPIExclusiveBound(schema, "exclusiveMaximum", "maximum")
+
+	for _, key := range []string{"properties", "patternProperties", "definitions", "$defs", "dependentSchemas"} {
+		childSchemas, ok := schema[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, childSchema := range childSchemas {
+			normalizeOpenAPIJSONSchemaValue(childSchema)
+		}
+	}
+
+	for _, key := range []string{
+		"items", "additionalProperties", "additionalItems", "contains", "propertyNames", "if", "then", "else", "not",
+		"allOf", "anyOf", "oneOf",
+	} {
+		normalizeOpenAPIJSONSchemaValue(schema[key])
+	}
+
+	dependencies, ok := schema["dependencies"].(map[string]any)
+	if !ok {
+		return
+	}
+	for _, dependency := range dependencies {
+		normalizeOpenAPIJSONSchemaValue(dependency)
+	}
+}
+
+func normalizeOpenAPIExclusiveBound(schema map[string]any, exclusiveKey, boundKey string) {
+	exclusive, ok := schema[exclusiveKey].(bool)
+	if !ok {
+		return
+	}
+	if !exclusive {
+		delete(schema, exclusiveKey)
+		return
+	}
+
+	bound, ok := schema[boundKey]
+	if !ok {
+		delete(schema, exclusiveKey)
+		return
+	}
+	schema[exclusiveKey] = bound
+}
+
+func jsonSchemaDescriptionIsEmpty(schema *jsonschema.Schema) bool {
+	return schema.Description == nil || *schema.Description == ""
+}
 
 // OpenapiToMcpToolConfig ...
 // nolint:gocyclo
@@ -83,18 +201,6 @@ func OpenapiToMcpToolConfig(
 			paramSchema := jsonschema.Schema{
 				Type: j.WithSimpleTypes(jsonschema.Object),
 			}
-			// 暂时只支持json格式的请求体
-			if operation.RequestBody != nil && operation.RequestBody.Value != nil {
-				if content, ok := operation.RequestBody.Value.Content["application/json"]; ok && content != nil {
-					schema := content.Schema.Value
-					marshalJSON, _ := schema.MarshalJSON()
-					var jsonSchema jsonschema.Schema
-					_ = json.Unmarshal(marshalJSON, &jsonSchema)
-					paramSchema.WithPatternPropertiesItem("body_param", jsonschema.SchemaOrBool{
-						TypeObject: &jsonSchema,
-					})
-				}
-			}
 			if operation.Parameters != nil {
 				headerParamSchema := jsonschema.Schema{
 					Type: j.WithSimpleTypes(jsonschema.Object),
@@ -107,40 +213,62 @@ func OpenapiToMcpToolConfig(
 				}
 				for _, param := range operation.Parameters {
 					if param.Value.Schema != nil {
-						schema := param.Value.Schema.Value
-						schema.Description = param.Value.Description
-						schema.Example = param.Value.Example
-						if param.Value.Required {
-							schema.Required = []string{param.Value.Name}
+						jsonSchema := openapiSchemaRefToJSONSchema(param.Value.Schema)
+						if param.Value.Description != "" {
+							jsonSchema.Description = &param.Value.Description
 						}
-						marshalJSON, _ := schema.MarshalJSON()
-						var jsonSchema jsonschema.Schema
-						_ = jsonSchema.UnmarshalJSON(marshalJSON)
+						if param.Value.Example != nil {
+							if jsonSchema.ExtraProperties == nil {
+								jsonSchema.ExtraProperties = map[string]any{}
+							}
+							jsonSchema.ExtraProperties["example"] = param.Value.Example
+						}
 						if param.Value.In == "header" {
-							headerParamSchema.WithPropertiesItem(param.Value.Name, jsonschema.SchemaOrBool{
-								TypeObject: &jsonSchema,
-							})
+							headerParamSchema.WithPropertiesItem(
+								param.Value.Name,
+								jsonschema.SchemaOrBool{
+									TypeObject: &jsonSchema,
+								},
+							)
 							if param.Value.Required {
-								headerParamSchema.Required = append(headerParamSchema.Required, param.Value.Name)
+								headerParamSchema.Required = append(
+									headerParamSchema.Required,
+									param.Value.Name,
+								)
 							}
 						}
 						if param.Value.In == "query" {
-							queryParamSchema.WithPropertiesItem(param.Value.Name, jsonschema.SchemaOrBool{
-								TypeObject: &jsonSchema,
-							})
+							queryParamSchema.WithPropertiesItem(
+								param.Value.Name,
+								jsonschema.SchemaOrBool{
+									TypeObject: &jsonSchema,
+								},
+							)
 							if param.Value.Required {
-								queryParamSchema.Required = append(queryParamSchema.Required, param.Value.Name)
+								queryParamSchema.Required = append(
+									queryParamSchema.Required,
+									param.Value.Name,
+								)
 							}
 						}
 						if param.Value.In == "path" {
-							pathParamSchema.Required = append(pathParamSchema.Required, param.Value.Name)
-							pathParamSchema.WithPropertiesItem(param.Value.Name, jsonschema.SchemaOrBool{
-								TypeObject: &jsonSchema,
-							})
+							pathParamSchema.Required = append(
+								pathParamSchema.Required,
+								param.Value.Name,
+							)
+							pathParamSchema.WithPropertiesItem(
+								param.Value.Name,
+								jsonschema.SchemaOrBool{
+									TypeObject: &jsonSchema,
+								},
+							)
 						}
 					}
 				}
 				if len(headerParamSchema.Properties) > 0 {
+					headerParamDesc := "HTTP request header parameters, " +
+						"used to pass metadata such as authentication tokens, content type, etc."
+					headerParamSchema.Description = &headerParamDesc
 					paramSchema.WithPropertiesItem("header_param", jsonschema.SchemaOrBool{
 						TypeObject: &headerParamSchema,
 					})
@@ -149,6 +277,9 @@ func OpenapiToMcpToolConfig(
 					}
 				}
 				if len(queryParamSchema.Properties) > 0 {
+					queryParamDesc := "URL query string parameters, " +
+						"appended to the request URL after '?' for filtering, pagination, sorting, etc."
+					queryParamSchema.Description = &queryParamDesc
 					paramSchema.WithPropertiesItem("query_param", jsonschema.SchemaOrBool{
 						TypeObject: &queryParamSchema,
 					})
@@ -157,6 +288,8 @@ func OpenapiToMcpToolConfig(
 					}
 				}
 				if len(pathParamSchema.Properties) > 0 {
+					pathParamDesc := "URL path parameters, used to identify specific resources in the URL path (e.g., /users/{id})."
+					pathParamSchema.Description = &pathParamDesc
 					paramSchema.WithPropertiesItem("path_param", jsonschema.SchemaOrBool{
 						TypeObject: &pathParamSchema,
 					})
@@ -165,20 +298,20 @@ func OpenapiToMcpToolConfig(
 			}
 
 			if operation.RequestBody != nil && operation.RequestBody.Value != nil {
-				if content, ok := operation.RequestBody.Value.Content["application/json"]; ok && content != nil {
-					schema := content.Schema
-					marshalJSON, _ := schema.MarshalJSON()
-					var jsonSchema jsonschema.Schema
-					_ = json.Unmarshal(marshalJSON, &jsonSchema)
+				if content, ok := operation.RequestBody.Value.Content["application/json"]; ok &&
+					content != nil {
+					jsonSchema := openapiSchemaRefToJSONSchema(content.Schema)
+					if jsonSchemaDescriptionIsEmpty(&jsonSchema) {
+						bodyParamDesc := bodyParamDefaultDescription
+						jsonSchema.Description = &bodyParamDesc
+					}
 					paramSchema.WithPropertiesItem("body_param", jsonschema.SchemaOrBool{
 						TypeObject: &jsonSchema,
 					})
+					if operation.RequestBody.Value.Required {
+						paramSchema.Required = append(paramSchema.Required, "body_param")
+					}
 				}
-			}
-
-			if operation.Responses != nil {
-				marshalJSON, _ := operation.Responses.MarshalJSON()
-				toolConfig.OutputSchema = marshalJSON
 			}
 
 			toolConfig.ParamSchema = paramSchema

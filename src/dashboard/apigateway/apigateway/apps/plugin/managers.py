@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,6 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from django.db import models
-from django.utils.translation import get_language
 
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 
@@ -72,24 +71,6 @@ class PluginBindingManager(models.Manager):
             scope_id_to_binding[binding.scope_id].append(binding)
 
         return scope_id_to_binding
-
-
-class PluginFormManager(models.Manager):
-    def with_language(self, language=None):
-        if language is None:
-            language = get_language()
-
-        # default language is always available(as a blank string)
-        q = models.Q(language="")
-
-        if language:
-            q |= models.Q(language=language)
-
-        # sorting the query results by language make the default language(the blank string) always at the end
-        return self.filter(q).order_by("-language")
-
-    def get_by_natural_key(self, language: str, type_code: str):
-        return self.get(language=language, type__code=type_code)
 
 
 class PluginTypeManager(models.Manager):

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,6 +21,8 @@ package util_test
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -156,6 +158,25 @@ var _ = Describe("Cryptography", func() {
 
 			_, err := util.ParsePrivateKey(pemData)
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail with PKCS8 non-RSA key (ECDSA)", func() {
+			// Generate an ECDSA key (non-RSA)
+			ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			Expect(err).NotTo(HaveOccurred())
+
+			privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+			Expect(err).NotTo(HaveOccurred())
+
+			pemBlock := &pem.Block{
+				Type:  "PRIVATE KEY",
+				Bytes: privateKeyBytes,
+			}
+			pemData := pem.EncodeToMemory(pemBlock)
+
+			_, err = util.ParsePrivateKey(pemData)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("expected RSA private key"))
 		})
 	})
 })

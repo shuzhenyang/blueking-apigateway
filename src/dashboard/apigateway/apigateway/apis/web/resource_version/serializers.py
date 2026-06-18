@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,7 +20,7 @@ from rest_framework import serializers
 
 from apigateway.apis.web.constants import PLUGIN_MERGE_TYPE
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
-from apigateway.apps.support.constants import OpenAPIFormatEnum
+from apigateway.apps.support.constants import DocArchiveTypeEnum, OpenAPIFormatEnum
 from apigateway.biz.constants import SEMVER_PATTERN
 from apigateway.biz.resource import ResourceOpenAPISchemaHandler
 from apigateway.biz.validators import ResourceVersionValidator
@@ -84,7 +84,9 @@ class ResourceInfoSLZ(serializers.Serializer):
 
             # 后端服务配置
             if backend and "resource_backend_configs" in self.context:
-                backend_info["config"] = self.context["resource_backend_configs"][backend_id].config
+                backend_config = self.context["resource_backend_configs"].get(backend_id)
+                if backend_config:
+                    backend_info["config"] = backend_config.config
 
             proxy["backend"] = backend_info
 
@@ -168,6 +170,7 @@ class ResourceVersionListOutputSLZ(serializers.Serializer):
     comment = serializers.CharField(help_text="版本日志")
     created_time = serializers.DateTimeField(help_text="创建时间")
     created_by = serializers.CharField(help_text="创建人")
+    deletable = serializers.SerializerMethodField(help_text="是否可以删除")
 
     class Meta:
         ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionListOutputSLZ"
@@ -186,6 +189,11 @@ class ResourceVersionListOutputSLZ(serializers.Serializer):
             title = obj.get("title")
             return f"{title}({name})"
         return version
+
+    def get_deletable(self, obj):
+        released_stages = self.context["released_stages"].get(obj["id"], [])
+        sdk_count = self.context["resource_version_ids_sdk_count"].get(obj["id"], 0)
+        return len(released_stages) == 0 and sdk_count == 0
 
 
 class NeedNewVersionOutputSLZ(serializers.Serializer):
@@ -242,3 +250,23 @@ class ResourceVersionExportInputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionExportInputSLZ"
+
+
+class ResourceVersionBatchDeleteInputSLZ(serializers.Serializer):
+    ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), min_length=1, max_length=100, help_text="资源版本 ID 列表"
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionBatchDeleteInputSLZ"
+
+
+class ResourceVersionDocExportInputSLZ(serializers.Serializer):
+    file_type = serializers.ChoiceField(
+        choices=DocArchiveTypeEnum.get_choices(),
+        default=DocArchiveTypeEnum.ZIP.value,
+        help_text="导出的文件类型，支持 zip/tgz",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource_version.serializers.ResourceVersionDocExportInputSLZ"

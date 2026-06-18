@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -42,7 +42,10 @@ func (k ResourceVersionMappingKey) Key() string {
 }
 
 func retrieveResourceVersionMapping(ctx context.Context, k cache.Key) (any, error) {
-	key := k.(ResourceVersionMappingKey)
+	key, ok := k.(ResourceVersionMappingKey)
+	if !ok {
+		return nil, errors.New("invalid key type, expected ResourceVersionMappingKey")
+	}
 
 	manager := dao.NewResourceVersionManager()
 
@@ -62,14 +65,21 @@ func retrieveResourceVersionMapping(ctx context.Context, k cache.Key) (any, erro
 
 	resourceNameToID := make(map[string]int64, len(releaseResourcesData))
 	for _, d := range releaseResourcesData {
-		valueID := d["id"].(json.Number)
+		valueID, ok := d["id"].(json.Number)
+		if !ok {
+			return nil, errors.New("resource id is not a json.Number")
+		}
 
 		id, err := valueID.Int64()
 		if err != nil {
 			return nil, err
 		}
 
-		resourceNameToID[d["name"].(string)] = id
+		name, ok := d["name"].(string)
+		if !ok {
+			return nil, errors.New("resource name is not a string")
+		}
+		resourceNameToID[name] = id
 	}
 
 	logging.GetLogger().Debugw("retrieveResourceVersionMapping",

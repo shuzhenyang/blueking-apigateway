@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -30,6 +30,7 @@ import (
 	"mcp_proxy/pkg/config"
 	"mcp_proxy/pkg/constant"
 	sty "mcp_proxy/pkg/infra/sentry"
+	"mcp_proxy/pkg/infra/trace"
 	"mcp_proxy/pkg/util"
 )
 
@@ -42,6 +43,8 @@ var (
 	apiLogger *zap.Logger
 	// for audit logger
 	auditLogger *zap.Logger
+	// for database logger
+	databaseLogger *zap.Logger
 )
 
 // InitLogger ...
@@ -64,6 +67,7 @@ func InitLogger(config *config.Config) {
 		defaultLogger = newZapJSONLogger(&config.Logger.Default, options).Sugar()
 		apiLogger = newZapJSONLogger(&config.Logger.API, options)
 		auditLogger = newZapJSONLogger(&config.Logger.Audit, options)
+		databaseLogger = newZapJSONLogger(&config.Logger.Database, options)
 	})
 }
 
@@ -76,7 +80,13 @@ func GetLogger() *zap.SugaredLogger {
 func GetLoggerWithContext(ctx context.Context) *zap.SugaredLogger {
 	ctxLogger := defaultLogger
 	if requestID, ok := ctx.Value(util.RequestIDKey).(string); ok {
-		ctxLogger = defaultLogger.With(zap.String("request_id", requestID))
+		ctxLogger = ctxLogger.With(zap.String("request_id", requestID))
+	}
+	if xRequestID, ok := ctx.Value(constant.XRequestID).(string); ok && xRequestID != "" {
+		ctxLogger = ctxLogger.With(zap.String("x_request_id", xRequestID))
+	}
+	if username, ok := ctx.Value(constant.BkUsername).(string); ok && username != "" {
+		ctxLogger = ctxLogger.With(zap.String("bk_username", username))
 	}
 	return ctxLogger
 }
@@ -86,14 +96,28 @@ func GetAPILogger() *zap.Logger {
 	return apiLogger
 }
 
+// GetDatabaseLogger will return the database logger
+func GetDatabaseLogger() *zap.Logger {
+	return databaseLogger
+}
+
 // GetAuditLoggerWithContext ...
 func GetAuditLoggerWithContext(ctx context.Context) *zap.Logger {
 	ctxLogger := auditLogger
 	if requestID, ok := ctx.Value(util.RequestIDKey).(string); ok {
 		ctxLogger = ctxLogger.With(zap.String("request_id", requestID))
 	}
+	if xRequestID, ok := ctx.Value(constant.XRequestID).(string); ok && xRequestID != "" {
+		ctxLogger = ctxLogger.With(zap.String("x_request_id", xRequestID))
+	}
+	if traceID := trace.GetTraceIDFromContext(ctx); traceID != "" {
+		ctxLogger = ctxLogger.With(zap.String("trace_id", traceID))
+	}
 	if appCode, ok := ctx.Value(constant.BkAppCode).(string); ok {
-		ctxLogger = ctxLogger.With(zap.String("bk_app_code", appCode))
+		ctxLogger = ctxLogger.With(zap.String("app_code", appCode))
+	}
+	if username, ok := ctx.Value(constant.BkUsername).(string); ok && username != "" {
+		ctxLogger = ctxLogger.With(zap.String("bk_username", username))
 	}
 	if mcpServerID, ok := ctx.Value(constant.MCPServerID).(int); ok {
 		ctxLogger = ctxLogger.With(zap.Int("mcp_server_id", mcpServerID))

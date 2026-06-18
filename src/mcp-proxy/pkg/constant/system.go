@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -35,6 +35,9 @@ const (
 	// BkApiAllowedHeadersKey is a key to set the allowed headers in header
 	BkApiAllowedHeadersKey = "X-Bkapi-Allowed-Headers"
 
+	// BkApiItsmFlexKey is a key to set the itsm flex info in header
+	BkApiItsmFlexKey = "X-Bkapi-ItsmFlex"
+
 	// BkApiMCPServerIDKey is a key to set the mcp server id in header
 	BkApiMCPServerIDKey = "X-Bkapi-Mcp-Server-Id"
 	// BkApiMCPServerNameKey is a key to set the mcp server name in header
@@ -54,8 +57,15 @@ const (
 	MCPServerID         CtxKey = "mcp_server_id"
 	MCPServerName       CtxKey = "mcp_server_name"
 	GatewayID           CtxKey = "gateway_id"
+	GatewayName         CtxKey = "gateway_name"
+	RequestID           CtxKey = "request_id"
+	XRequestID          CtxKey = "x_request_id"
+	TraceID             CtxKey = "trace_id"
 	BkApiTimeout        CtxKey = "bk_api_timeout"
 	BkApiAllowedHeaders CtxKey = "bk_api_allowed_headers"
+	BkApiItsmFlexData   CtxKey = "bk_api_itsm_flex_data"
+	ClientIP            CtxKey = "client_ip"
+	ClientID            CtxKey = "client_id"
 )
 
 // BkVirtualAppCodeFormat ...

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,6 +27,7 @@ from django.utils import timezone
 from apigateway.apps.api_debug.models import APIDebugHistory
 from apigateway.apps.metrics.models import StatisticsAppRequestByDay, StatisticsGatewayRequestByDay
 from apigateway.apps.monitor.models import AlarmRecord
+from apigateway.apps.permission.models import AppResourcePermission
 from apigateway.apps.support.models import ReleasedResourceDoc, ResourceDocVersion
 from apigateway.core.constants import ResourceVersionSchemaEnum
 from apigateway.core.models import PublishEvent, Release, ReleasedResource, ResourceVersion
@@ -81,15 +82,15 @@ def delete_old_resource_doc_version_records():
 @shared_task(ignore_result=True)
 def delete_old_debug_history():
     """
-    清理在线调试 6 个月前的调用历史
+    清理在线调试 3 个月前的调用历史
     """
     logger.info("begin clean debug old history")
 
-    # 获取 6 个月的前一天日期
-    delete_end_time = timezone.now() - relativedelta(months=6) - relativedelta(days=1)
+    # 获取 3 个月的前一天日期
+    delete_end_time = timezone.now() - relativedelta(months=3) - relativedelta(days=1)
 
     # 每次删除 1000 条记录
-    debug_history_to_delete = APIDebugHistory.objects.filter(created_time__lte=delete_end_time)[:1000]
+    debug_history_to_delete = APIDebugHistory.objects.filter(created_time__lte=delete_end_time)[:2000]
 
     # 要删除的 ID 列表
     ids_to_delete = list(debug_history_to_delete.values_list("id", flat=True))
@@ -101,16 +102,57 @@ def delete_old_debug_history():
 
 @shared_task(ignore_result=True)
 def delete_old_alarm_records():
-    """清理 6 个月前的告警记录"""
+    """清理 3 个月前的告警记录"""
     logger.info("begin clean alarm old records")
-    delete_end_time = timezone.now() - relativedelta(months=6) - relativedelta(days=1)
+    delete_end_time = timezone.now() - relativedelta(months=3) - relativedelta(days=1)
 
-    alarm_records_to_delete = AlarmRecord.objects.filter(created_time__lte=delete_end_time)[:1000]
+    alarm_records_to_delete = AlarmRecord.objects.filter(created_time__lte=delete_end_time)[:2000]
     ids_to_delete = list(alarm_records_to_delete.values_list("id", flat=True))
 
     count, _ = AlarmRecord.objects.filter(id__in=ids_to_delete).delete()
 
     logger.info("deleted %s alarm records older than %s", count, delete_end_time)
+
+
+@shared_task(ignore_result=True)
+def delete_old_app_resource_permission_records():
+    """Clean expired app resource permission records."""
+    logger.info("begin clean app resource permission old records")
+
+    now = timezone.now()
+
+    # 1. delete the test_app expired records
+    default_test_app_delete_end_time = now - timedelta(days=30) - relativedelta(days=1)
+    default_test_app_permission_ids_to_delete = list(
+        AppResourcePermission.objects.filter(
+            bk_app_code=settings.DEFAULT_TEST_APP["bk_app_code"],
+            expires__lt=default_test_app_delete_end_time,
+        )
+        .order_by("id")
+        .values_list("id", flat=True)[:2000]
+    )
+
+    count, _ = AppResourcePermission.objects.filter(id__in=default_test_app_permission_ids_to_delete).delete()
+    logger.info(
+        "deleted %s default test app resource permission records older than %s",
+        count,
+        default_test_app_delete_end_time,
+    )
+
+    # 2. delete the expired 3 years before records
+    all_app_delete_end_time = now - relativedelta(years=3) - relativedelta(days=1)
+    app_resource_permission_ids_to_delete = list(
+        AppResourcePermission.objects.filter(expires__lt=all_app_delete_end_time)
+        .order_by("id")
+        .values_list("id", flat=True)[:2000]
+    )
+
+    count, _ = AppResourcePermission.objects.filter(id__in=app_resource_permission_ids_to_delete).delete()
+    logger.info(
+        "deleted %s app resource permission records older than %s",
+        count,
+        all_app_delete_end_time,
+    )
 
 
 @shared_task(ignore_result=True)
@@ -182,7 +224,7 @@ def delete_old_stats_records():
     """
     logger.info("begin clean old stats records")
 
-    max_records_per_time = 10000
+    max_records_per_time = 100000
 
     delete_end_time = timezone.now() - relativedelta(years=5) - relativedelta(days=1)
 

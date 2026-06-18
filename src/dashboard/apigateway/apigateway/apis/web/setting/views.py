@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -24,25 +24,10 @@ from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
+from apigateway.apps.data_plane.models import DataPlane
 from apigateway.apps.feature.models import UserFeatureFlag
 from apigateway.conf.utils import get_doc_links
 from apigateway.utils.responses import OKJsonResponse
-
-from .serializers import UserAuthTypeOutputSLZ
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        responses={status.HTTP_200_OK: UserAuthTypeOutputSLZ},
-        operation_description="获取 user_auth_type",
-        tags=["WebAPI.Settings"],
-    ),
-)
-class UserAuthTypeRetrieveApi(generics.RetrieveAPIView):
-    def get(self, request, *args, **kwargs):
-        slz = UserAuthTypeOutputSLZ(settings.USER_AUTH_TYPE)
-        return OKJsonResponse(data=slz.data)
 
 
 @method_decorator(
@@ -60,6 +45,10 @@ class EnvVarListApi(generics.ListAPIView):
         lang = "EN" if translation.get_language() == "en" else "ZH"
         doc_links = get_doc_links(settings.BK_APIGATEWAY_VERSION, settings.BK_DOCS_URL_PREFIX, lang)
         env_vars["DOC_LINKS"] = doc_links
+
+        env_vars["BK_DATA_PLANE_API_URL_TMPL_MAP"] = {
+            dp.name: dp.bk_api_url_tmpl for dp in DataPlane.objects.get_active_data_planes() if dp.bk_api_url_tmpl
+        }
 
         return OKJsonResponse(data=env_vars)
 

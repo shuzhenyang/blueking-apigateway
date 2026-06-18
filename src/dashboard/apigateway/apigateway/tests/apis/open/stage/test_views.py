@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -96,7 +96,7 @@ class TestStageSyncViewSet:
         )
 
         mocker.patch(
-            "apigateway.service.plugin.header_rewrite.HeaderRewriteConvertor.sync_plugins",
+            "apigateway.service.plugin.HeaderRewriteConvertor.sync_plugins",
             return_value=True,
         )
 
@@ -134,6 +134,31 @@ class TestStageSyncViewSet:
         assert result["code"] == 0
         assert stage.status == 0
 
+    def test_sync_with_empty_backends_returns_error(self, mocker, unique_gateway_name, request_factory):
+        mocker.patch(
+            "apigateway.apis.open.stage.views.OpenAPIGatewayRelatedAppPermission.has_permission",
+            return_value=True,
+        )
+
+        gateway = G(Gateway, name=unique_gateway_name, is_public=False)
+        request = request_factory.post(
+            f"/api/v1/apis/{unique_gateway_name}/stages/sync/",
+            data={
+                "name": "prod",
+                "description": "desc",
+                "vars": {},
+                "backends": [],
+            },
+        )
+        request.gateway = gateway
+
+        view = views.StageSyncViewSet.as_view({"post": "sync"})
+        response = view(request, gateway_name=unique_gateway_name)
+        result = get_response_json(response)
+
+        assert response.status_code == 400
+        assert "backends" in str(result)
+
     def test_sync_backends(self, fake_plugin_type_bk_header_rewrite, mocker, unique_gateway_name, request_factory):
         mocker.patch(
             "apigateway.apis.open.stage.views.OpenAPIGatewayRelatedAppPermission.has_permission",
@@ -141,11 +166,12 @@ class TestStageSyncViewSet:
         )
 
         mocker.patch(
-            "apigateway.service.plugin.header_rewrite.HeaderRewriteConvertor.sync_plugins",
+            "apigateway.service.plugin.HeaderRewriteConvertor.sync_plugins",
             return_value=True,
         )
 
         gateway = G(Gateway, name=unique_gateway_name, is_public=False)
+        omitted_backend = G(Backend, gateway=gateway, name="service2")
 
         request = request_factory.post(
             f"/api/v1/apis/{unique_gateway_name}/stages/sync/",
@@ -204,6 +230,7 @@ class TestStageSyncViewSet:
         assert stage.status == 0
         assert len(Backend.objects.filter(gateway=gateway, name__in=["default", "service1"])) == 2
         assert len(BackendConfig.objects.filter(backend__name__in=["default", "service1"])) == 2
+        assert not BackendConfig.objects.filter(backend=omitted_backend, stage=stage).exists()
         assert BackendConfig.objects.get(backend__name="default").config == {
             "type": "node",
             "timeout": 60,

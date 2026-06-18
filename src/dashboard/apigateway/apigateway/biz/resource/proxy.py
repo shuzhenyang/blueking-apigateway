@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,18 +20,9 @@ from typing import Dict, List
 from django.db.models import Count
 
 from apigateway.core.models import Proxy
-from apigateway.schema.models import Schema
 
 
 class ProxyHandler:
-    @staticmethod
-    def get_resource_id_to_snapshot(resource_ids: List[int]) -> Dict[int, Dict]:
-        schemas = Schema.objects.filter_id_snapshot_map()
-        return {
-            proxy.resource_id: proxy.snapshot(as_dict=True, schemas=schemas)
-            for proxy in Proxy.objects.filter(resource_id__in=resource_ids).prefetch_related("backend")
-        }
-
     @staticmethod
     def get_resource_count_by_backend(backend_ids: List[int]) -> Dict[int, int]:
         """获取每个 backend 对应的资源个数"""

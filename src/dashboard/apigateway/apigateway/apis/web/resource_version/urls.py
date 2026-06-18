@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -21,11 +21,13 @@ from django.urls import path
 from .views import (
     NextProgramGatewayResourceVersionRetrieveApi,
     NextResourceVersionRetrieveApi,
+    ResourceVersionBatchDeleteApi,
     ResourceVersionDiffRetrieveApi,
+    ResourceVersionDocExportApi,
     ResourceVersionExportApi,
     ResourceVersionListCreateApi,
     ResourceVersionNeedNewVersionRetrieveApi,
-    ResourceVersionRetrieveApi,
+    ResourceVersionRetrieveDestroyApi,
 )
 
 urlpatterns = [
@@ -36,10 +38,16 @@ urlpatterns = [
         name="gateway.resource_version.export",
     ),
     path(
-        "<int:id>/",
-        ResourceVersionRetrieveApi.as_view(),
-        name="gateway.resource_version.retrieve",
+        "<int:id>/export-docs/",
+        ResourceVersionDocExportApi.as_view(),
+        name="gateway.resource_version.export_docs",
     ),
+    path(
+        "<int:id>/",
+        ResourceVersionRetrieveDestroyApi.as_view(),
+        name="gateway.resource_version.retrieve_destroy",
+    ),
+    path("batch/", ResourceVersionBatchDeleteApi.as_view(), name="gateway.resource_version.batch_delete"),
     path(
         "need-new-version/",
         ResourceVersionNeedNewVersionRetrieveApi.as_view(),

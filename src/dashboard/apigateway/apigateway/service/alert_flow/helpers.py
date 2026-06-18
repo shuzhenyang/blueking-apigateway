@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -71,8 +71,14 @@ class MonitorEvent:
     def alarm_subtype(self) -> str:
         code_name = self.event_dimensions.get("code_name", "")
 
+        status = self.event_dimensions.get("status", -1)
+        try:
+            status_code = int(status)
+        except (TypeError, ValueError):
+            status_code = -1
+
         # in apisix, upstream 500 has no code_name, so we need to convert it to status_code_5xx here
-        if code_name == "" and self.event_dimensions.get("status", -1) >= 500:
+        if code_name == "" and status_code >= 500:
             code_name = "REQUEST_RESOURCE_5xx"
 
         return ERROR_CODE_NAME_TO_ALARM_SUBTYPE.get(code_name, "")

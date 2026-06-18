@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional
 from django.db import transaction
 from django.utils.translation import gettext as _
 
+import apigateway.biz.release as release_biz
 from apigateway.apps.esb.bkcore.models import ComponentReleaseHistory
-from apigateway.biz.gateway import release
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.core.constants import ReleaseStatusEnum
 from apigateway.core.models import Gateway, ResourceVersion, Stage
@@ -67,7 +67,7 @@ class ComponentReleaser:
         assert self.resource_version
 
         for stage_id in Stage.objects.get_ids(self.gateway.id):
-            release(
+            release_biz.release_gateway(
                 gateway=self.gateway,
                 stage_id=stage_id,
                 resource_version_id=self.resource_version.id,

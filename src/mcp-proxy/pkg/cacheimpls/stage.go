@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -39,8 +39,11 @@ func (k StageKey) Key() string {
 	return cast.ToString(k.ID)
 }
 
-func retrieveStageByID(ctx context.Context, k cache.Key) (interface{}, error) {
-	key := k.(StageKey)
+func retrieveStageByID(ctx context.Context, k cache.Key) (any, error) {
+	key, ok := k.(StageKey)
+	if !ok {
+		return nil, errors.New("invalid cache key type for StageKey")
+	}
 	r := repo.Stage
 	return repo.Stage.WithContext(ctx).Where(r.ID.Eq(key.ID)).Take()
 }
@@ -50,17 +53,17 @@ func GetStageByID(ctx context.Context, id int) (stage *model.Stage, err error) {
 	key := StageKey{
 		ID: id,
 	}
-	var value interface{}
+	var value any
 	value, err = cacheGet(ctx, stageCache, key)
 	if err != nil {
-		return
+		return stage, err
 	}
 
 	var ok bool
 	stage, ok = value.(*model.Stage)
 	if !ok {
 		err = errors.New("not model.Stage in cache")
-		return
+		return stage, err
 	}
-	return
+	return stage, err
 }

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -56,7 +56,7 @@ const tableCols = ref<IColumn[]>([
     field: 'key',
     width: firstColWidth,
     index: 0,
-    rowspan: ({ row }) => row.rowSpan || 1,
+    rowspan: ({ row }: any) => row.rowSpan || 1,
   },
   {
     label: t('值'),

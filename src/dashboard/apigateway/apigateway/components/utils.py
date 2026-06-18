@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -174,8 +174,16 @@ def do_blueking_http_request(
     headers: Optional[Dict] = None,
     timeout: Optional[int] = None,
     request_session=None,
+    **kwargs,
 ) -> List | Dict:
-    kwargs = {"url": url, "data": data, "headers": headers, "timeout": timeout, "request_session": request_session}
+    kwargs = {
+        "url": url,
+        "data": data,
+        "headers": headers,
+        "timeout": timeout,
+        "request_session": request_session,
+        **kwargs,
+    }
 
     ok, resp_data = http_func(**kwargs)
     if not ok:

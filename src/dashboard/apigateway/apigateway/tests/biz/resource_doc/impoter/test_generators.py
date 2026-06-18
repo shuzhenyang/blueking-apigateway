@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -25,7 +25,7 @@ from apigateway.biz.resource_doc.exceptions import (
     ResourceDocJinja2TemplateNotFound,
     ResourceDocJinja2TemplateSyntaxError,
 )
-from apigateway.biz.resource_doc.importer.generators import Jinja2ToMarkdownGenerator
+from apigateway.biz.resource_doc.importer import Jinja2ToMarkdownGenerator
 from apigateway.utils.file import write_to_file
 
 

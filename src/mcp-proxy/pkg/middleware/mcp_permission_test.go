@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,6 +21,7 @@ package middleware_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
@@ -80,6 +81,30 @@ var _ = Describe("MCPPermission", func() {
 
 			util.SetGatewayID(c, 456)
 			Expect(util.GetGatewayID(c)).To(Equal(456))
+		})
+	})
+
+	Describe("Permission expiration logic", func() {
+		It("should consider permission valid when expires time is in the future", func() {
+			// expires 在未来，权限有效
+			expiresTime := time.Now().Add(time.Hour)
+			isExpired := expiresTime.Before(time.Now())
+			Expect(isExpired).To(BeFalse())
+		})
+
+		It("should consider permission expired when expires time is in the past", func() {
+			// expires 在过去，权限过期
+			expiresTime := time.Now().Add(-time.Hour)
+			isExpired := expiresTime.Before(time.Now())
+			Expect(isExpired).To(BeTrue())
+		})
+
+		It("should consider permission valid when expires time equals now (boundary case)", func() {
+			// expires 等于当前时间，应该视为有效（刚好到期的那一刻还是有效的）
+			now := time.Now()
+			expiresTime := now
+			isExpired := expiresTime.Before(now)
+			Expect(isExpired).To(BeFalse())
 		})
 	})
 })

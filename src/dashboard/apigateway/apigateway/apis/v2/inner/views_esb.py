@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -26,7 +26,7 @@ from rest_framework import generics, status
 
 from apigateway.apis.v2.permissions import OpenAPIV2Permission
 from apigateway.apps.esb.bkcore.models import AppPermissionApplyRecord, ComponentSystem, ESBChannel
-from apigateway.biz.esb.permissions import ComponentPermissionManager
+from apigateway.biz.esb import ComponentPermissionManager
 from apigateway.common.error_codes import error_codes
 from apigateway.core.models import Gateway
 from apigateway.utils.responses import OKJsonResponse
@@ -245,7 +245,7 @@ class EsbAppPermissionApplyRecordListApi(generics.ListAPIView):
         manager.patch_permission_apply_records(page)
 
         slz = serializers.EsbAppPermissionApplyRecordListOutputSLZ(page, many=True)
-        return OKJsonResponse(data=slz.data)
+        return self.get_paginated_response(slz.data)
 
 
 @method_decorator(

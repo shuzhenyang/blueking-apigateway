@@ -5,6 +5,8 @@ build.yml
 .codecc
 .idea
 .vscode
+.cursor/
+.codebuddy/
 
 .envrc
 src/dashboard/apigateway/apigateway/editions/te
@@ -14,3 +16,8 @@ src/dashboard-front/.bk.local.env
 pre-*-bkcodeai
 
 bkcodeai.json
+.worktrees
+
+*.png
+docs/superpowers
+specs/

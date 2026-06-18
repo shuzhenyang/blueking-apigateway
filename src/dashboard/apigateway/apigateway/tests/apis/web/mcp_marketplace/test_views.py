@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -24,11 +24,20 @@ from ddf import G
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
     OFFICIAL_MCP_CATEGORY_NAME,
+    MCPServerAppPermissionApplyStatusEnum,
     MCPServerExtendTypeEnum,
     MCPServerStatusEnum,
 )
-from apigateway.apps.mcp_server.models import MCPServer, MCPServerCategory, MCPServerExtend
+from apigateway.apps.mcp_server.models import (
+    MCPServer,
+    MCPServerAppPermissionApply,
+    MCPServerCategory,
+    MCPServerExtend,
+)
+from apigateway.common.tenant.constants import TenantModeEnum
 from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
+from apigateway.core.models import Gateway, Stage
+from apigateway.utils.time import now_datetime
 
 pytestmark = pytest.mark.django_db
 
@@ -116,6 +125,27 @@ class TestMCPMarketplaceServerListApi:
         assert "categories" in mcp_server_data
         assert "is_official" in mcp_server_data
         assert "is_featured" in mcp_server_data
+        assert "oauth2_public_client_enabled" in mcp_server_data
+        assert mcp_server_data["oauth2_public_client_enabled"] is False
+
+    def test_list_with_oauth2_public_client_enabled(self, request_view, fake_public_mcp_server):
+        """测试列表接口返回 oauth2_public_client_enabled 字段"""
+        fake_public_mcp_server.oauth2_public_client_enabled = True
+        fake_public_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.server.list",
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        mcp_server_data = next(
+            (item for item in result["data"]["results"] if item["id"] == fake_public_mcp_server.id),
+            None,
+        )
+        assert mcp_server_data is not None
+        assert mcp_server_data["oauth2_public_client_enabled"] is True
 
     def test_list_with_categories(self, request_view, fake_public_mcp_server, fake_categories):
         """测试列表接口返回分类信息"""
@@ -411,7 +441,7 @@ class TestMCPMarketplaceServerListApi:
 class TestMCPMarketplaceServerRetrieveApi:
     def test_retrieve(self, mocker, request_view, fake_public_mcp_server, fake_categories):
         mocker.patch(
-            "apigateway.apis.web.mcp_marketplace.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
         mocker.patch(
@@ -444,10 +474,38 @@ class TestMCPMarketplaceServerRetrieveApi:
         assert result["data"]["is_official"] is True
         assert result["data"]["is_featured"] is False
 
+        # 验证 oauth2_public_client_enabled 字段
+        assert "oauth2_public_client_enabled" in result["data"]
+        assert result["data"]["oauth2_public_client_enabled"] is False
+
+    def test_retrieve_with_oauth2_public_client_enabled(self, mocker, request_view, fake_public_mcp_server):
+        """测试详情接口返回 oauth2_public_client_enabled 字段"""
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
+            return_value="# Guideline Content",
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([], {}),
+        )
+
+        fake_public_mcp_server.oauth2_public_client_enabled = True
+        fake_public_mcp_server.save()
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.server.retrieve",
+            path_params={"mcp_server_id": fake_public_mcp_server.id},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["oauth2_public_client_enabled"] is True
+
     def test_retrieve_with_prompts(self, mocker, request_view, fake_public_mcp_server):
         """测试详情接口返回 prompts 列表（私有 prompt 的 content 为空）"""
         mocker.patch(
-            "apigateway.apis.web.mcp_marketplace.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
         mocker.patch(
@@ -562,7 +620,7 @@ class TestMCPMarketplaceServerRetrieveApi:
     def test_retrieve_with_user_custom_doc(self, mocker, request_view, fake_public_mcp_server):
         """测试详情接口返回用户自定义文档"""
         mocker.patch(
-            "apigateway.apis.web.mcp_marketplace.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
         mocker.patch(
@@ -593,7 +651,7 @@ class TestMCPMarketplaceServerRetrieveApi:
     def test_retrieve_without_user_custom_doc(self, mocker, request_view, fake_public_mcp_server):
         """测试详情接口在没有用户自定义文档时返回空字符串"""
         mocker.patch(
-            "apigateway.apis.web.mcp_marketplace.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Guideline Content",
         )
         mocker.patch(
@@ -643,7 +701,7 @@ class TestMCPMarketplaceServerConfigListApi:
     def test_retrieve_config_list(self, mocker, request_view, fake_public_mcp_server):
         """测试获取配置列表"""
         mocker.patch(
-            "apigateway.apis.web.mcp_marketplace.views.render_to_string",
+            "apigateway.biz.mcp_server.mcp_server.render_to_string",
             return_value="# Config Content",
         )
 
@@ -742,6 +800,76 @@ class TestMCPMarketplaceCategoryListApi:
         assert devops_category is not None
         assert devops_category["mcp_server_count"] == 0
 
+    def test_list_categories_count_includes_global_and_user_tenant_servers(
+        self, request_view, fake_categories, fake_public_mcp_server, faker
+    ):
+        """普通租户统计分类时，应包含全租户网关和本租户网关下的 MCPServer"""
+        fake_public_mcp_server.gateway.tenant_mode = TenantModeEnum.GLOBAL.value
+        fake_public_mcp_server.gateway.tenant_id = ""
+        fake_public_mcp_server.gateway.save()
+        fake_public_mcp_server.categories.add(fake_categories["devops"])
+
+        same_tenant_gateway = G(
+            Gateway,
+            name=faker.pystr()[:20],
+            _maintainers="admin",
+            status=GatewayStatusEnum.ACTIVE.value,
+            is_public=True,
+            tenant_mode=TenantModeEnum.SINGLE.value,
+            tenant_id="default",
+        )
+        same_tenant_stage = G(
+            Stage,
+            gateway=same_tenant_gateway,
+            status=StageStatusEnum.ACTIVE.value,
+            name=faker.pystr()[:20],
+        )
+        same_tenant_server = G(
+            MCPServer,
+            name=faker.pystr()[:20],
+            gateway=same_tenant_gateway,
+            stage=same_tenant_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        same_tenant_server.categories.add(fake_categories["devops"])
+
+        other_tenant_gateway = G(
+            Gateway,
+            name=faker.pystr()[:20],
+            _maintainers="admin",
+            status=GatewayStatusEnum.ACTIVE.value,
+            is_public=True,
+            tenant_mode=TenantModeEnum.SINGLE.value,
+            tenant_id="other",
+        )
+        other_tenant_stage = G(
+            Stage,
+            gateway=other_tenant_gateway,
+            status=StageStatusEnum.ACTIVE.value,
+            name=faker.pystr()[:20],
+        )
+        other_tenant_server = G(
+            MCPServer,
+            name=faker.pystr()[:20],
+            gateway=other_tenant_gateway,
+            stage=other_tenant_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        other_tenant_server.categories.add(fake_categories["devops"])
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        devops_category = next((cat for cat in result["data"] if cat["name"] == "DevOps"), None)
+        assert devops_category is not None
+        assert devops_category["mcp_server_count"] == 2
+
     def test_list_categories_empty(self, request_view):
         """测试没有分类时的情况"""
         # 先清理已有的分类数据（可能由迁移文件创建）
@@ -755,6 +883,187 @@ class TestMCPMarketplaceCategoryListApi:
 
         assert resp.status_code == 200
         assert len(result["data"]) == 0
+
+    def test_list_categories_with_keyword_filter(self, request_view, fake_categories, fake_public_mcp_server):
+        """测试分类列表关键字筛选 - 统计数量应根据关键字过滤"""
+        # 给 mcp_server 添加分类
+        fake_public_mcp_server.categories.add(fake_categories["official"])
+
+        # 创建另一个 mcp_server，名称不同
+        other_server = G(
+            MCPServer,
+            name="other_unique_name",
+            gateway=fake_public_mcp_server.gateway,
+            stage=fake_public_mcp_server.stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        other_server.categories.add(fake_categories["official"])
+
+        # 不带关键字，应该统计 2 个
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        assert official_category["mcp_server_count"] == 2
+
+        # 带关键字筛选，只匹配 other_unique_name
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"keyword": "other_unique"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        assert official_category["mcp_server_count"] == 1
+
+        # 带不匹配的关键字，应该统计 0 个
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"keyword": "nonexistent_keyword"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        assert official_category["mcp_server_count"] == 0
+
+    def test_list_categories_with_keyword_filter_by_title(self, request_view, fake_categories, fake_public_mcp_server):
+        """测试分类列表关键字筛选 - 按 title 筛选"""
+        fake_public_mcp_server.title = "特殊标题测试"
+        fake_public_mcp_server.save()
+        fake_public_mcp_server.categories.add(fake_categories["official"])
+
+        # 按 title 筛选
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"keyword": "特殊标题"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        assert official_category["mcp_server_count"] == 1
+
+    def test_list_categories_with_keyword_filter_by_description(
+        self, request_view, fake_categories, fake_public_mcp_server
+    ):
+        """测试分类列表关键字筛选 - 按 description 筛选"""
+        fake_public_mcp_server.description = "独特描述内容用于测试"
+        fake_public_mcp_server.save()
+        fake_public_mcp_server.categories.add(fake_categories["official"])
+
+        # 按 description 筛选
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"keyword": "独特描述"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        assert official_category["mcp_server_count"] == 1
+
+    def test_list_categories_with_keyword_filter_by_labels(
+        self, request_view, fake_categories, fake_public_mcp_server
+    ):
+        """测试分类列表关键字筛选 - 按 labels 筛选"""
+        fake_public_mcp_server.labels = ["unique_test_label", "other"]
+        fake_public_mcp_server.save()
+        fake_public_mcp_server.categories.add(fake_categories["official"])
+
+        # 按 labels 筛选
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"keyword": "unique_test_label"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        assert official_category["mcp_server_count"] == 1
+
+    def test_list_categories_excludes_inactive_mcp_servers(
+        self, request_view, fake_categories, fake_public_mcp_server
+    ):
+        """测试分类列表统计不包含未启用的 MCPServer"""
+        fake_public_mcp_server.categories.add(fake_categories["official"])
+
+        # 创建一个未启用的 mcp_server
+        inactive_server = G(
+            MCPServer,
+            name="inactive_server",
+            gateway=fake_public_mcp_server.gateway,
+            stage=fake_public_mcp_server.stage,
+            status=MCPServerStatusEnum.INACTIVE.value,
+            is_public=True,
+        )
+        inactive_server.categories.add(fake_categories["official"])
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        # 只统计启用的
+        assert official_category["mcp_server_count"] == 1
+
+    def test_list_categories_excludes_non_public_mcp_servers(
+        self, request_view, fake_categories, fake_public_mcp_server
+    ):
+        """测试分类列表统计不包含非公开的 MCPServer"""
+        fake_public_mcp_server.categories.add(fake_categories["official"])
+
+        # 创建一个非公开的 mcp_server
+        private_server = G(
+            MCPServer,
+            name="private_server",
+            gateway=fake_public_mcp_server.gateway,
+            stage=fake_public_mcp_server.stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=False,
+        )
+        private_server.categories.add(fake_categories["official"])
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        official_category = next(
+            (cat for cat in result["data"] if cat["name"] == OFFICIAL_MCP_CATEGORY_NAME),
+            None,
+        )
+        # 只统计公开的
+        assert official_category["mcp_server_count"] == 1
 
 
 class TestMCPServerCategoryModel:
@@ -795,3 +1104,305 @@ class TestMCPServerCategoryModel:
         )
         fake_public_mcp_server.categories.add(featured_category)
         assert fake_public_mcp_server.is_featured() is True
+
+
+class TestMCPMarketplaceBatchConfigApi:
+    """测试 MCP 市场批量获取 MCPServer 配置 API"""
+
+    def test_batch_config_success(self, request_view, fake_public_mcp_server):
+        """测试批量获取配置成功"""
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [fake_public_mcp_server.id],
+                "client_type": "cursor",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["client_type"] == "cursor"
+        assert result["data"]["display_name"] == "Cursor"
+        assert "config" in result["data"]
+        assert "mcpServers" in result["data"]["config"]
+        assert fake_public_mcp_server.name in result["data"]["config"]["mcpServers"]
+
+    def test_batch_config_codebuddy(self, request_view, fake_public_mcp_server):
+        """测试批量获取 CodeBuddy 配置"""
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [fake_public_mcp_server.id],
+                "client_type": "codebuddy",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["client_type"] == "codebuddy"
+        assert result["data"]["display_name"] == "CodeBuddy"
+
+        # CodeBuddy 配置应该包含 transportType
+        server_config = result["data"]["config"]["mcpServers"][fake_public_mcp_server.name]
+        assert "transportType" in server_config
+
+    def test_batch_config_multiple_servers(self, request_view, fake_public_mcp_server):
+        """测试批量获取多个 MCPServer 配置"""
+        other_server = G(
+            MCPServer,
+            name="other-marketplace-server",
+            gateway=fake_public_mcp_server.gateway,
+            stage=fake_public_mcp_server.stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+            _resource_names="resource3",
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [fake_public_mcp_server.id, other_server.id],
+                "client_type": "cursor",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert fake_public_mcp_server.name in result["data"]["config"]["mcpServers"]
+        assert other_server.name in result["data"]["config"]["mcpServers"]
+
+    def test_batch_config_not_public(self, request_view, fake_public_mcp_server):
+        """测试非公开的 MCPServer 不会被包含"""
+        fake_public_mcp_server.is_public = False
+        fake_public_mcp_server.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [fake_public_mcp_server.id],
+                "client_type": "cursor",
+            },
+        )
+
+        assert resp.status_code == 404
+
+    def test_batch_config_inactive(self, request_view, fake_public_mcp_server):
+        """测试未启用的 MCPServer 不会被包含"""
+        fake_public_mcp_server.status = MCPServerStatusEnum.INACTIVE.value
+        fake_public_mcp_server.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [fake_public_mcp_server.id],
+                "client_type": "cursor",
+            },
+        )
+
+        assert resp.status_code == 404
+
+    def test_batch_config_invalid_input(self, request_view):
+        """测试无效输入时返回 400"""
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [],
+                "client_type": "cursor",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_batch_config_oauth2_public_client_enabled(self, request_view, fake_public_mcp_server):
+        """测试 OAuth2 公开客户端模式开启时配置中不包含认证请求头"""
+        fake_public_mcp_server.oauth2_public_client_enabled = True
+        fake_public_mcp_server.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.batch_configs",
+            data={
+                "mcp_server_ids": [fake_public_mcp_server.id],
+                "client_type": "cursor",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        server_config = result["data"]["config"]["mcpServers"][fake_public_mcp_server.name]
+        if "headers" in server_config:
+            assert "X-Bkapi-Authorization" not in server_config["headers"]
+
+
+class TestMCPMarketplaceServerAppPermissionApplyCreateApi:
+    def test_create(self, mocker, request_view, fake_public_mcp_server):
+        mocker.patch(
+            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
+            return_value=[{"code": "test-app"}],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.permission.MCPServerPermissionHandler._create_itsm_tickets_for_applies"
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.server.app_permission_apply.create",
+            path_params={"mcp_server_id": fake_public_mcp_server.id},
+            data={
+                "bk_app_code": "test-app",
+                "reason": "for test",
+            },
+        )
+        result = resp.json()
+
+        assert resp.status_code == 201
+        assert result["data"][0]["bk_app_code"] == "test-app"
+        assert result["data"][0]["mcp_server_id"] == fake_public_mcp_server.id
+
+        apply = MCPServerAppPermissionApply.objects.get(
+            bk_app_code="test-app",
+            mcp_server=fake_public_mcp_server,
+        )
+        assert apply.reason == "for test"
+        assert apply.applied_by == "admin"
+        assert apply.status == MCPServerAppPermissionApplyStatusEnum.PENDING.value
+
+    def test_create_rejects_app_without_user_permission(self, mocker, request_view, fake_public_mcp_server):
+        mocker.patch(
+            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
+            return_value=[{"code": "other-app"}],
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.server.app_permission_apply.create",
+            path_params={"mcp_server_id": fake_public_mcp_server.id},
+            data={
+                "bk_app_code": "test-app",
+                "reason": "for test",
+            },
+        )
+
+        assert resp.status_code == 400
+        assert not MCPServerAppPermissionApply.objects.filter(bk_app_code="test-app").exists()
+
+    def test_create_rejects_non_public_mcp_server(self, mocker, request_view, fake_public_mcp_server):
+        mocker.patch(
+            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
+            return_value=[{"code": "test-app"}],
+        )
+        fake_public_mcp_server.is_public = False
+        fake_public_mcp_server.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.server.app_permission_apply.create",
+            path_params={"mcp_server_id": fake_public_mcp_server.id},
+            data={
+                "bk_app_code": "test-app",
+                "reason": "for test",
+            },
+        )
+
+        assert resp.status_code == 404
+        assert not MCPServerAppPermissionApply.objects.filter(bk_app_code="test-app").exists()
+
+    def test_create_rejects_invalid_mcp_server_id(self, mocker, request_view, fake_public_mcp_server):
+        mocker.patch(
+            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
+            return_value=[{"code": "test-app"}],
+        )
+        inactive_server = G(
+            MCPServer,
+            gateway=fake_public_mcp_server.gateway,
+            stage=fake_public_mcp_server.stage,
+            status=MCPServerStatusEnum.INACTIVE.value,
+            is_public=True,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.server.app_permission_apply.create",
+            path_params={"mcp_server_id": inactive_server.id},
+            data={
+                "bk_app_code": "test-app",
+                "reason": "for test",
+            },
+        )
+
+        result = resp.json()
+        assert resp.status_code == 404
+        assert str(inactive_server.id) in result["error"]["message"]
+        assert not MCPServerAppPermissionApply.objects.filter(bk_app_code="test-app").exists()
+
+    def test_create_rejects_existing_pending_apply(self, mocker, request_view, fake_public_mcp_server):
+        mocker.patch(
+            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
+            return_value=[{"code": "test-app"}],
+        )
+        G(
+            MCPServerAppPermissionApply,
+            bk_app_code="test-app",
+            mcp_server=fake_public_mcp_server,
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+            applied_by="admin",
+            applied_time=now_datetime(),
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="mcp_marketplace.server.app_permission_apply.create",
+            path_params={"mcp_server_id": fake_public_mcp_server.id},
+            data={
+                "bk_app_code": "test-app",
+                "reason": "for test",
+            },
+        )
+
+        assert resp.status_code == 400
+        assert (
+            MCPServerAppPermissionApply.objects.filter(
+                bk_app_code="test-app",
+                mcp_server=fake_public_mcp_server,
+            ).count()
+            == 1
+        )
+
+
+class TestMCPMarketplaceApplicableAppListApi:
+    def test_list_passes_user_tenant_id_to_paas_component(self, mocker, request_view, settings):
+        settings.ENABLE_MULTI_TENANT_MODE = True
+
+        user = mocker.MagicMock(username="alice", tenant_id="tenant-a")
+        mock_get_apps = mocker.patch(
+            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
+            return_value=[
+                {
+                    "code": "app-001",
+                    "name": "App 001",
+                    "logo_url": "https://example.com/logo.png",
+                }
+            ],
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.applicable_apps",
+            user=user,
+        )
+
+        result = resp.json()
+        assert resp.status_code == 200
+        assert result["data"] == [
+            {
+                "bk_app_code": "app-001",
+                "name": "App 001",
+                "logo_url": "https://example.com/logo.png",
+            }
+        ]
+        mock_get_apps.assert_called_once_with("alice", "tenant-a")

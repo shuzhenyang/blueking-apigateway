@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,7 +20,7 @@
 import pytest
 from ddf import G
 
-from apigateway.biz.resource.importer.parser import BaseParser, ResourceDataConvertor
+from apigateway.biz.openapi import BaseParser, ResourceDataConvertor
 from apigateway.core.models import Backend, Resource
 
 
@@ -275,6 +275,23 @@ class TestBaseParser:
     def test_adapt_backend(self, fake_openapi_content, backend, expected):
         importer = BaseParser(fake_openapi_content)
         result = importer._adapt_backend(backend)
+        assert result == expected
+
+    @pytest.mark.parametrize(
+        "summary, description, expected",
+        [
+            (None, None, ""),
+            ("summary text", None, "summary text"),
+            (None, "description text", "description text"),
+            ("summary text", "description text", "description text"),
+            ("", "", ""),
+            ("summary text", "", "summary text"),
+            ("", "description text", "description text"),
+        ],
+    )
+    def test_adapt_description(self, summary, description, expected):
+        parser = BaseParser(_openapi_data={})
+        result = parser._adapt_description(summary, description)
         assert result == expected
 
     @pytest.mark.parametrize(

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -89,6 +89,7 @@ class TestAppPermissionOutputSLZ(TestCase):
             gateway=gateway,
             bk_app_code="test",
             expires=None,
+            grant_type="apply",
         )
 
         app_resource_permission = G(
@@ -120,9 +121,10 @@ class TestAppPermissionOutputSLZ(TestCase):
                 "resource_method": "",
                 "expires": None,
                 "grant_dimension": "api",
-                "grant_type": "initialize",
+                "grant_type": "apply",
                 "renewable": False,
                 "id": app_api_permission.id,
+                "handled_by": "",
             },
             {
                 "bk_app_code": "test",
@@ -135,6 +137,7 @@ class TestAppPermissionOutputSLZ(TestCase):
                 "grant_type": "apply",
                 "renewable": True,
                 "id": app_resource_permission.id,
+                "handled_by": "",
             },
         ]
 

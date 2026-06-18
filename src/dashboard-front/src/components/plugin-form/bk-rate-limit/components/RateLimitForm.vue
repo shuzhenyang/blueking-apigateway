@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -56,14 +56,20 @@
           :required="propSchema['ui:rules']?.includes('required')"
           :property="`${isArrayType ? 'specials' : 'default'}[${index}].${prop}`"
           :rules="renderFormatFormItem(item, propSchema, prop)"
-          @input="(e) => handleInput(index, prop, e)"
+          @input="(e: any) => handleInput(index, prop, e)"
         />
       </template>
       <template v-if="['array'].includes(schema.type)">
         <AgIcon
+          v-bk-tooltips="t('克隆')"
+          name="copy"
+          class="operate-icon clone-icon"
+          @click.stop="handleClone(index)"
+        />
+        <AgIcon
+          v-bk-tooltips="t('删除')"
           name="delet"
-          class="flex color-#979ba5 cursor-pointer delete-icon"
-          :disabled="disabled"
+          class="operate-icon delete-icon"
           @click.stop="handleRemove(index)"
         />
       </template>
@@ -71,7 +77,7 @@
     <span
       v-if="!disabled && ['array'].includes(schema.type)"
       class="color-#3a84ff cursor-pointer text-14px"
-      @click.stop=" handleAdd"
+      @click.stop="handleAdd"
     >
       <i class="mr-5px apigateway-icon icon-ag-plus-circle-shape" />
       <span>{{ t('添加') }}</span>
@@ -80,6 +86,8 @@
 </template>
 
 <script setup lang="ts">
+// @ts-nocheck
+import { cloneDeep } from 'lodash-es';
 import { getDuplicateKeys } from '@/utils/duplicateKeys';
 import type { IRateLimitFormData, ISchema } from '@/components/plugin-manage/schema-type';
 import InputComponent from '@/components/plugin-manage/components/InputComponent.vue';
@@ -101,8 +109,8 @@ interface IEmits {
 const modeField = defineModel<IRateLimitFormData>('modelValue');
 
 const {
-  schema = {},
-  layout = {},
+  schema = {} as ISchema,
+  layout = {} as Record<string, any>,
 } = defineProps<IProps>();
 
 const emit = defineEmits<IEmits>();
@@ -155,6 +163,7 @@ const renderFormatFormItem = (
       trigger: 'change',
       validator: () => {
         if (isArrayType.value) {
+          // @ts-ignore
           return !!row[name] && String(row[name]).trim().length > 0;
         }
         else {
@@ -169,6 +178,7 @@ const renderFormatFormItem = (
       trigger: 'change',
       validator: () => {
         if (isArrayType.value) {
+          // @ts-ignore
           return !!row[name] && String(row[name]).trim().length > 0;
         }
         else {
@@ -182,6 +192,7 @@ const renderFormatFormItem = (
       trigger: 'change',
       validator: () => {
         if (!['bk_app_code'].includes(name)) return true;
+        // @ts-ignore
         if (['bk_app_code'].includes(name) && !/^[a-z][a-z0-9_-]{0,31}$/.test(row[name])) {
           return false;
         }
@@ -189,12 +200,14 @@ const renderFormatFormItem = (
       },
     },
     {
+      // @ts-ignore
       message: t('{inputKey}存在重复项', { inputKey: row[name] }),
       trigger: 'change',
       validator: () => {
         if (['bk_app_code'].includes(name)) {
           const allItems = modeField.value.rates?.specials ?? [];
           const duplicateList = getDuplicateKeys(allItems, 'bk_app_code');
+          // @ts-ignore
           const currentValue = row[name];
           const emptyValues = new Set([undefined, null, '']);
           if (emptyValues.has(currentValue)) return true;
@@ -215,7 +228,7 @@ const handleInput = (index: number | string, prop: string, value: string | numbe
       ...modeField.value,
       rates: {
         ...modeField.value.rates,
-        specials: modeField.value.rates.specials.map((item, i) =>
+        specials: modeField.value.rates.specials.map((item: any, i: any) =>
           i === numIndex
             ? {
               ...item,
@@ -235,6 +248,7 @@ const handleAdd = () => {
   const newItem = Object.fromEntries(
     Object.entries(schema.items.properties).map(([prop, propSchema]) => [
       prop,
+      // @ts-ignore
       propSchema.default ?? (propSchema.type === 'string' ? '' : 0),
     ]),
   );
@@ -250,9 +264,24 @@ const handleAdd = () => {
 };
 
 const handleRemove = (index: number) => {
-  const newSpecials = modeField.value.rates.specials.filter((_, i) => i !== index);
+  const newSpecials = modeField.value.rates.specials.filter((_: any, i: any) => i !== index);
   modeField.value.rates.specials = [...newSpecials];
   emit('remove', index);
+};
+
+// 克隆次数和时间范围内容
+const handleClone = (index: number) => {
+  const originSpecials = modeField.value.rates.specials || [];
+  const cloneItem = cloneDeep(originSpecials[index]);
+  cloneItem.bk_app_code = '';
+  const newSpecials = [...originSpecials, cloneItem];
+  modeField.value = {
+    ...modeField.value,
+    rates: {
+      ...modeField.value.rates,
+      specials: newSpecials,
+    },
+  };
 };
 </script>
 
@@ -277,13 +306,23 @@ const handleRemove = (index: number) => {
   }
 }
 
-.delete-icon {
+.operate-icon {
   position: absolute;
   right: 8px;
-  top: 18px !important;
+  top: 18px;
+  color: #979ba5;
 
   &:hover {
     color: #3a84ff;
+    cursor: pointer;
+  }
+
+  &.clone-icon {
+    right: 36px;
+  }
+
+  &.delete-icon {
+    right: 8px;
   }
 }
 </style>

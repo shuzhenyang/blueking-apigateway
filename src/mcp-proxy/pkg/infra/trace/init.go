@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -22,6 +22,7 @@ package trace
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go.opentelemetry.io/otel"
@@ -29,12 +30,14 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	tc "go.opentelemetry.io/otel/trace"
 
 	"mcp_proxy/pkg/config"
+	"mcp_proxy/pkg/constant"
 )
 
 const (
@@ -85,6 +88,12 @@ func InitTrace(config config.Tracing) error {
 		tp := trace.NewTracerProvider(traceOptions...)
 		// set  global provider
 		otel.SetTracerProvider(tp)
+		// Set global propagator so trace context (traceparent/tracestate) is injected
+		// into outgoing HTTP requests and extracted from incoming ones.
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+			propagation.Baggage{},
+		))
 		globalTracer = &Trace{
 			Tracer: tp.Tracer(config.ServiceName),
 			config: config,
@@ -97,7 +106,7 @@ func InitTrace(config config.Tracing) error {
 }
 
 // getExporterClient Get exporter client
-func getExporterClient(protocolType string, endpoint string) (otlptrace.Client, error) {
+func getExporterClient(protocolType, endpoint string) (otlptrace.Client, error) {
 	switch protocolType {
 	case "http":
 		return otlptracehttp.NewClient(
@@ -121,6 +130,51 @@ func StartTrace(ctx context.Context, name string) (context.Context, tc.Span) {
 	} else {
 		return ctx, nil
 	}
+}
+
+// ExtractTraceIDFromTraceparent extracts the trace ID from a W3C traceparent header.
+func ExtractTraceIDFromTraceparent(traceparent string) string {
+	parts := strings.Split(strings.TrimSpace(traceparent), "-")
+	if len(parts) != 4 {
+		return ""
+	}
+	traceID, err := tc.TraceIDFromHex(parts[1])
+	if err != nil || !traceID.IsValid() {
+		return ""
+	}
+	return traceID.String()
+}
+
+// GetTraceIDFromContext extracts the trace ID from the context.
+// It first prefers a trace_id stored explicitly in context, then falls back to the active span.
+func GetTraceIDFromContext(ctx context.Context) string {
+	if traceID, ok := ctx.Value(constant.TraceID).(string); ok && traceID != "" {
+		return traceID
+	}
+	span := tc.SpanFromContext(ctx)
+	if span == nil {
+		return ""
+	}
+	sc := span.SpanContext()
+	if !sc.TraceID().IsValid() {
+		return ""
+	}
+	return sc.TraceID().String()
+}
+
+// WrapErrorWithTraceID wraps an error with trace_id if available in the context.
+// NOTE: The returned error preserves the original error chain via %w, so callers
+// can still use errors.Is / errors.As on the result. The appended "(trace_id=...)"
+// text appears only in the error message string.
+func WrapErrorWithTraceID(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	traceID := GetTraceIDFromContext(ctx)
+	if traceID == "" {
+		return err
+	}
+	return fmt.Errorf("%w (trace_id=%s)", err, traceID)
 }
 
 // getTraceSampler get the sampler strategy

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,12 +16,12 @@
 # to the current version of the project delivered to anyone in the future.
 #
 from apigateway.apps.support.constants import ProgrammingLanguageEnum
-from apigateway.biz.sdk.distributors.bkrepo import GenericDistributor
-from apigateway.biz.sdk.distributors.pypi import PypiSourceDistributor
-from apigateway.biz.sdk.generators.openapi import PythonTemplateGenerator
-from apigateway.biz.sdk.managers.base import BaseSDKManager
-from apigateway.biz.sdk.managers.mixins import SDKManagerMixin
-from apigateway.biz.sdk.packagers.python import PythonPackager
+from apigateway.biz.sdk.distributors import GenericDistributor, PypiSourceDistributor
+from apigateway.biz.sdk.generators import PythonTemplateGenerator
+from apigateway.biz.sdk.packagers import PythonPackager
+
+from .base import BaseSDKManager
+from .mixins import SDKManagerMixin
 
 
 class SDKManager(SDKManagerMixin, BaseSDKManager):

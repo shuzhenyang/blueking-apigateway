@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -31,30 +31,31 @@
     </div>
     <div
       v-if="!readonly && !disabled"
-      class="text-right mb-6px"
+      class="mb-16px"
     >
       <IconButton
-        text
         theme="primary"
-        icon="upload"
-        @click="handleImportSchema"
+        @click="handleEditJSON"
       >
         {{ t('通过 JSON 生成') }}
       </IconButton>
     </div>
-    <BkTable
+    <AgTable
       v-if="!disabled"
-      ref="tableRef"
-      :cell-class="getCellClass"
       :data="tableData"
-      :border="['outer', 'row']"
       class="request-params-table"
-      row-hover="auto"
-      @vue:mounted="handleTableMounted"
+      :immediate="false"
+      :show-pagination="false"
+      :resizable="false"
+      table-layout="auto"
+      bordered
+      :expand-icon="false"
+      :expanded-row-keys="expandedRowKeys"
     >
-      <BkTableColumn
-        :label="t('参数名')"
+      <TableColumn
+        :title="t('参数名')"
         prop="name"
+        width="140"
       >
         <template #default="{ row }">
           <div
@@ -88,18 +89,18 @@
             </template>
           </BkInput>
         </template>
-      </BkTableColumn>
-      <BkTableColumn
-        :label="t('位置')"
+      </TableColumn>
+      <TableColumn
+        :title="t('位置')"
         prop="in"
-        width="100"
+        width="140"
       >
         <template #default="{ row }">
           <div
             v-if="readonly"
             class="readonly-value-wrapper"
           >
-            {{ inList.find(item => item.value === row.in)?.label || '--' }}
+            {{ inList.find((item: any) => item.value === row.in)?.label || '--' }}
           </div>
           <BkSelect
             v-else
@@ -114,44 +115,52 @@
               v-for="item in inList"
               :id="item.value"
               :key="item.value"
-              :disabled="tableData.find((dataRow) => dataRow.in === 'body') && item.value === 'body'"
+              :disabled="tableData.find((dataRow: any) => dataRow.in === 'body') && item.value === 'body'"
               :name="item.label"
             />
           </BkSelect>
         </template>
-      </BkTableColumn>
-      <BkTableColumn
-        :label="t('类型')"
+      </TableColumn>
+      <TableColumn
+        :title="t('类型')"
         prop="type"
-        width="100"
+        width="140"
       >
         <template #default="{ row }">
           <div
             v-if="readonly"
             class="readonly-value-wrapper"
           >
-            {{ typeList.find(item => item.value === row.type)?.label || '--' }}
+            {{ typeList.find((item: any) => item.value === row.type)?.label || '--' }}
           </div>
-          <BkSelect
+          <div
             v-else
-            v-model="row.type"
-            :clearable="false"
-            :filterable="false"
-            class="edit-select"
-            @change="() => handleTypeChange(row)"
+            class="h-full flex items-center"
           >
-            <BkOption
-              v-for="item in typeList"
-              :id="item.value"
-              :key="item.value"
-              :disabled="isTypeDisabled(row.in, item.value)"
-              :name="item.label"
+            <BkSelect
+              v-model="row.type"
+              :clearable="false"
+              :filterable="false"
+              class="edit-select"
+              @change="() => handleTypeChange(row)"
+            >
+              <BkOption
+                v-for="item in typeList"
+                :id="item.value"
+                :key="item.value"
+                :disabled="isTypeDisabled(row.in, item.value)"
+                :name="item.label"
+              />
+            </BkSelect>
+            <ParamsRowConfig
+              :row="row"
+              @change="(config: any) => handleConfigChange(row, config)"
             />
-          </BkSelect>
+          </div>
         </template>
-      </BkTableColumn>
-      <BkTableColumn
-        :label="t('必填')"
+      </TableColumn>
+      <TableColumn
+        :title="t('必填')"
         prop="required"
         width="100"
       >
@@ -170,33 +179,41 @@
             theme="primary"
           />
         </template>
-      </BkTableColumn>
-      <BkTableColumn
-        :label="t('默认值')"
-        :width="readonly ? 150 : 300"
-        prop="default"
+      </TableColumn>
+      <TableColumn
+        :title="t('默认值')"
+        :width="readonly ? 160 : 300"
       >
         <template #default="{ row }">
           <div
             v-if="readonly"
             class="readonly-value-wrapper"
           >
-            {{ row.default || '--' }}
+            {{ (isBoolean(row.default) || row.default) ? row.default : '--' }}
           </div>
-          <BkInput
-            v-else
-            v-model="row.default"
-            :disabled="row.in === 'body'"
-            :clearable="false"
-            :placeholder="row.in === 'body' ? '--' : t('默认值')"
-            class="edit-input"
-          />
+          <template v-else>
+            <BkSelect
+              v-if="row.type === 'boolean'"
+              v-model="row.default"
+              clearable
+              :filterable="false"
+              class="edit-select"
+              :list="[{value: true, label: 'true'}, {value: false, label: 'false'}]"
+              :allow-empty-values="[false]"
+            />
+            <BkInput
+              v-else
+              v-model="row.default"
+              :disabled="row.in === 'body'"
+              :clearable="false"
+              :placeholder="row.in === 'body' ? '--' : t('默认值')"
+              class="edit-input"
+            />
+          </template>
         </template>
-      </BkTableColumn>
-      <BkTableColumn
-        :label="t('备注')"
-        prop="description"
-        width="300"
+      </TableColumn>
+      <TableColumn
+        :title="t('备注')"
       >
         <template #default="{ row }">
           <div
@@ -213,15 +230,15 @@
             class="edit-input"
           />
         </template>
-      </BkTableColumn>
-      <BkTableColumn
+      </TableColumn>
+      <TableColumn
         v-if="!readonly"
-        :label="t('操作')"
+        :title="t('操作')"
         fixed="right"
-        width="110"
+        width="140"
       >
-        <template #default="{ row, index }">
-          <div>
+        <template #default="{ row, rowIndex }: any">
+          <div class="pl-16px">
             <AgIcon
               v-if="isAddFieldVisible(row)"
               v-bk-tooltips="t('添加字段')"
@@ -233,21 +250,23 @@
               v-bk-tooltips="t('删除参数')"
               class="tb-btn delete-btn"
               name="minus-circle-shape"
-              @click="() => delRow(row, index)"
+              @click="() => delRow(row, rowIndex)"
             />
           </div>
         </template>
-      </BkTableColumn>
-      <template #expandRow="row">
+      </TableColumn>
+      <template #expandedRow="{row}">
         <div v-if="row?.in === 'body'">
           <RequestParamsTable
             ref="sub-table-ref"
             v-model="row.body"
+            :parent="row"
             :readonly="readonly"
+            @last-row-removed="() => handleRowBodyEmptied(row)"
           />
         </div>
       </template>
-    </BkTable>
+    </AgTable>
     <div
       v-if="!disabled && !readonly"
       class="add-param-btn-row"
@@ -262,24 +281,32 @@
       </BkButton>
     </div>
   </div>
+  <JsonEditorSlider
+    v-model="isEditorSliderVisible"
+    @confirm="handleEditorConfirm"
+  />
 </template>
 
 <script lang="ts" setup>
 import { Message } from 'bkui-vue';
-import { uniqueId } from 'lodash-es';
+import { isBoolean, isNil, pull, uniqueId } from 'lodash-es';
 import RequestParamsTable from './RequestParamsTable.vue';
 import {
   type JSONSchema7,
   type JSONSchema7TypeName,
 } from 'json-schema';
-import { useFileSystemAccess } from '@vueuse/core';
 import toJsonSchema from 'to-json-schema';
+import JsonEditorSlider from '../JsonEditorSlider.vue';
+import AgTable from '@/components/ag-table/Index.vue';
+import { TableColumn } from '@blueking/tdesign-ui';
+import ParamsRowConfig, { type IConfig } from '../ParamsRowConfig.vue';
 
 interface ITableRow {
   id: string
   name: string
   in: string
   type: JSONSchema7TypeName
+  enum?: any[]
   required?: boolean
   default?: string
   description: string
@@ -290,6 +317,7 @@ interface IBodyRow {
   id: string
   name: string
   type: JSONSchema7TypeName
+  enum?: any[]
   required?: boolean
   default?: string
   description: string
@@ -327,17 +355,8 @@ const {
   readonly = false,
 } = defineProps<IProp>();
 
-const { data: importedJsonText, fileSize, open } = useFileSystemAccess({
-  dataType: 'Text',
-  types: [{
-    description: 'text',
-    accept: { 'text/plain': ['.txt', '.json'] },
-  }],
-});
-
 const { t } = useI18n();
 
-const tableRef = ref();
 const subTableRef = useTemplateRef('sub-table-ref');
 
 const tableData = ref<ITableRow[]>([
@@ -351,8 +370,11 @@ const tableData = ref<ITableRow[]>([
     description: '',
   },
 ]);
+const expandedRowKeys = ref<string[]>([]);
 
 const invalidRowIdMap = ref<Record<string, boolean>>({});
+
+const isEditorSliderVisible = ref(false);
 
 const inList = [
   {
@@ -421,37 +443,69 @@ const convertSchemaToBodyRow = (schema: JSONSchema7) => {
   const body: IBodyRow[] = [];
   if (Object.keys(schema.properties || {}).length) {
     for (const propertyName in schema.properties) {
-      const property = schema.properties[propertyName];
+      const property = schema.properties[propertyName] as JSONSchema7;
       const row: IBodyRow = {
         id: uniqueId(),
         name: propertyName,
-        type: convertPropertyType(property.type),
+        type: convertPropertyType(property.type as string),
         required: schema?.required?.includes(propertyName) ?? false,
-        default: property.default ?? '',
+        default: (property.default as string) ?? '',
         description: property.description ?? '',
       };
+      // 处理枚举值
+      if (property.enum?.length) {
+        row.enum = property.enum;
+      }
+      // 处理嵌套的属性
       if (Object.keys(property.properties || {}).length) {
-        row.body = convertSchemaToBodyRow(property);
+        row.body = convertSchemaToBodyRow(property) ?? undefined;
       }
       else if (property.type === 'array' && Object.keys(property.items || {}).length) {
-        if (property.items.type === 'object') {
+        const items = property.items as JSONSchema7;
+        if (items.type === 'object') {
           row.body = [{
             id: uniqueId(),
             name: '',
             type: 'object',
             required: false,
             default: '',
-            description: property.items.description ?? '',
+            description: items.description ?? '',
             body: [],
           }];
-          row.body[0].body = convertSchemaToBodyRow(property.items);
+          row.body[0].body = convertSchemaToBodyRow(items) ?? undefined;
         }
         else {
-          row.body = convertSchemaToBodyRow(property.items);
+          row.body = convertSchemaToBodyRow(items) ?? undefined;
         }
       }
       body.push(row);
     }
+  }
+  // 处理根节点为数组的情况
+  else if (schema.type === 'array' && Object.keys(schema.items || {}).length) {
+    const items = schema.items as JSONSchema7;
+    const row: IBodyRow = {
+      id: uniqueId(),
+      name: '',
+      type: items.type ? convertPropertyType(items.type as string) : 'string',
+      required: false,
+      default: '',
+      description: schema.description ?? '',
+    };
+    if (row.type === 'object') {
+      row.body = convertSchemaToBodyRow(items) ?? undefined;
+    }
+    body.push(row);
+  }
+  else if (['string', 'number', 'integer', 'boolean'].includes(schema.type as string)) {
+    body.push({
+      id: uniqueId(),
+      name: '',
+      type: schema.type as JSONSchema7TypeName,
+      required: false,
+      default: schema.default as string ?? '',
+      description: schema.description ?? '',
+    });
   }
   else {
     return null;
@@ -463,9 +517,9 @@ watch(() => detail, () => {
   if (detail?.schema || detail.openapi_schema) {
     const resourceSchema = detail.schema || detail.openapi_schema;
     tableData.value = [];
-    if (resourceSchema.parameters?.length) {
-      tableData.value = resourceSchema.parameters.map(parameter => (
-        {
+    if (resourceSchema!.parameters?.length) {
+      tableData.value = resourceSchema!.parameters.map((parameter: any) => {
+        const row = {
           id: uniqueId(),
           name: parameter.name,
           in: parameter.in,
@@ -473,32 +527,38 @@ watch(() => detail, () => {
           required: parameter.required ?? false,
           default: parameter.schema?.default ?? '',
           description: parameter.description ?? '',
+        };
+        // 处理 enum
+        if (parameter.schema?.enum?.length) {
+          Object.assign(row, { enum: parameter.schema.enum });
         }
-      ));
+        return row;
+      }) as ITableRow[];
     }
-    if (resourceSchema.requestBody) {
-      const body = resourceSchema.requestBody;
-      const row = {
-        id: uniqueId(),
-        name: t('根节点'),
-        in: 'body',
-        type: 'object' as JSONSchema7TypeName,
-        required: body.required ?? false,
-        description: body.description ?? '',
-      };
-      const subBody = convertSchemaToBodyRow(body?.content?.['application/json']?.schema);
-      if (subBody) {
-        Object.assign(row, { body: subBody });
+    if (resourceSchema!.requestBody) {
+      const body = resourceSchema!.requestBody;
+      const rootRowSchema = body?.content?.['application/json']?.schema;
+      if (rootRowSchema) {
+        const row = {
+          id: uniqueId(),
+          name: t('根节点'),
+          in: 'body',
+          type: (rootRowSchema.type || 'object') as JSONSchema7TypeName,
+          required: body.required ?? false,
+          description: body.description ?? '',
+        };
+        const subBody = convertSchemaToBodyRow(rootRowSchema);
+        if (subBody) {
+          Object.assign(row, { body: subBody });
+        }
+        tableData.value.push(row);
+        expandedRowKeys.value.push(row.id);
       }
-      tableData.value.push(row);
     }
-    nextTick(() => {
-      tableRef.value?.setAllRowExpand(true);
-    });
   }
 }, { immediate: true });
 
-const genRow = () => {
+const genRow = (): ITableRow => {
   return {
     id: uniqueId(),
     name: '',
@@ -507,7 +567,6 @@ const genRow = () => {
     required: false,
     default: '',
     description: '',
-    isEdit: true,
   };
 };
 
@@ -523,15 +582,8 @@ const genBodyRow = (id?: string) => {
   };
 };
 
-const getCellClass = (payload: { index: number }) => {
-  if (payload.index !== 6) {
-    return 'custom-table-cell';
-  }
-  return '';
-};
-
 const handleInChange = (row: ITableRow) => {
-  const _row = tableData.value.find(data => data.id === row.id);
+  const _row = tableData.value.find((data: ITableRow) => data.id === row.id);
   if (_row) {
     if (row.in === 'body') {
       _row.name = t('根节点');
@@ -544,6 +596,7 @@ const handleInChange = (row: ITableRow) => {
       else {
         _row.body = [genBodyRow()];
       }
+      expandedRowKeys.value.push(_row.id);
     }
     else {
       if (row.in === 'path') {
@@ -555,17 +608,15 @@ const handleInChange = (row: ITableRow) => {
       delete _row.body;
     }
   }
-  nextTick(() => {
-    tableRef.value?.setAllRowExpand(true);
-  });
 };
 
 const handleTypeChange = (row: ITableRow) => {
-  const _row = tableData.value.find(data => data.id === row.id);
+  const _row = tableData.value.find((data: ITableRow) => data.id === row.id);
   if (_row) {
     if (_row.type === 'object' || _row.type === 'array') {
       _row.body = [genBodyRow()];
     }
+    delete _row.enum;
   }
 };
 
@@ -595,7 +646,7 @@ const isAddFieldVisible = (row: ITableRow) => {
 };
 
 const addField = (row: ITableRow) => {
-  const bodyRow = tableData.value.find(data => data.id === row.id);
+  const bodyRow = tableData.value.find((data: ITableRow) => data.id === row.id);
   if (bodyRow) {
     if (bodyRow.body) {
       bodyRow.body.push(genBodyRow());
@@ -603,10 +654,12 @@ const addField = (row: ITableRow) => {
     else {
       bodyRow.body = [genBodyRow()];
     }
+    expandedRowKeys.value.push(bodyRow.id);
   }
 };
 
-const genParameters = () => tableData.value.map(row => genParameterFromRow(row)).filter(item => item);
+const genParameters = () => tableData.value.map((row: ITableRow) =>
+  genParameterFromRow(row)).filter((item: any) => item);
 
 const genParameterFromRow = (row: ITableRow) => {
   if ([
@@ -623,6 +676,12 @@ const genParameterFromRow = (row: ITableRow) => {
       Object.assign(parameter, { required: true });
     }
     const schema = { type: row.type };
+
+    // 处理 enum
+    if (row.enum?.length) {
+      Object.assign(schema, { enum: row.enum });
+    }
+
     if (row.default !== undefined && row.default !== null && row.default !== '') {
       Object.assign(schema, { default: row.type === 'number' ? Number(row.default) : row.default });
     }
@@ -633,7 +692,7 @@ const genParameterFromRow = (row: ITableRow) => {
 };
 
 const genBody = () => {
-  const bodyRow = tableData.value.find(row => row.in === 'body');
+  const bodyRow = tableData.value.find((row: ITableRow) => row.in === 'body');
   if (bodyRow) {
     const requestBody = {
       description: bodyRow.description,
@@ -651,11 +710,15 @@ const genBody = () => {
 const genSchemaFromBodyRow = (row: IBodyRow) => {
   const schema: JSONSchema7 = { type: row.type };
 
+  if (row.enum?.length) {
+    schema.enum = row.enum;
+  }
+
   if (row.description) {
     schema.description = row.description;
   }
 
-  if (row.default) {
+  if (!isNil(row.default)) {
     schema.default = row.default;
   }
 
@@ -670,7 +733,7 @@ const genSchemaFromBodyRow = (row: IBodyRow) => {
       }
       schema.properties = {};
       row.body.forEach((item) => {
-        Object.assign(schema.properties, { [item.name]: genSchemaFromBodyRow(item) });
+        Object.assign(schema.properties!, { [item.name]: genSchemaFromBodyRow(item) });
       });
     }
   }
@@ -684,88 +747,68 @@ const isTypeDisabled = (paramIn: string, type: string) => {
   return type === 'object' || type === 'array';
 };
 
-const handleTableMounted = () => {
-  tableRef.value?.setAllRowExpand(true);
+const handleEditJSON = () => {
+  isEditorSliderVisible.value = true;
 };
 
-const handleImportSchema = async () => {
-  await open();
-  // 文件大小限制为 10KB
-  if (fileSize.value > 10 * 1024) {
-    Message({
-      theme: 'warning',
-      message: t('文件大小超过 10KB'),
-    });
-    return;
-  }
+const handleEditorConfirm = (jsonObject: Record<string, any>) => {
+  try {
+    const schema = toJsonSchema(jsonObject);
 
-  if (importedJsonText.value) {
-    let jsonObject: any = {};
-    try {
-      jsonObject = JSON.parse(importedJsonText.value);
-    }
-    catch {
-      Message({
-        theme: 'error',
-        message: t('请选择合法的 JSON'),
-      });
-      return;
+    const row = {
+      id: uniqueId(),
+      name: t('根节点'),
+      in: 'body',
+      type: 'object' as JSONSchema7TypeName,
+      required: false,
+      description: '',
+    };
+
+    // 是否已存在 request body 表格行
+    const currentBodyRowIndex = tableData.value.findIndex((item: ITableRow) => item.in === 'body');
+    if (currentBodyRowIndex > -1) {
+      Object.assign(row, tableData.value[currentBodyRowIndex]);
     }
 
-    try {
-      const schema = toJsonSchema(jsonObject);
-
-      const row = {
-        id: uniqueId(),
-        name: t('根节点'),
-        in: 'body',
-        type: 'object' as JSONSchema7TypeName,
-        required: false,
-        description: '',
-      };
-
-      // 是否已存在 request body 表格行
-      const currentBodyRowIndex = tableData.value.findIndex(item => item.in === 'body');
-      if (currentBodyRowIndex > -1) {
-        Object.assign(row, tableData.value[currentBodyRowIndex]);
-      }
-
-      const subBody = convertSchemaToBodyRow(schema);
-      if (subBody) {
-        Object.assign(row, { body: subBody });
-      }
-
-      // 替换行
-      if (currentBodyRowIndex > -1) {
-        tableData.value[currentBodyRowIndex] = row;
-      }
-      // 插入新行
-      else {
-        tableData.value.push(row);
-      }
-
-      nextTick(() => {
-        tableRef.value?.setAllRowExpand(true);
-      });
+    const subBody = convertSchemaToBodyRow(schema as unknown as JSONSchema7);
+    if (subBody) {
+      Object.assign(row, { body: subBody });
     }
-    catch {
-      Message({
-        theme: 'error',
-        message: t('生成 JSON Schema 失败'),
-      });
+
+    // 替换行
+    if (currentBodyRowIndex > -1) {
+      tableData.value[currentBodyRowIndex] = row;
+    }
+    // 插入新行
+    else {
+      tableData.value.push(row);
+      expandedRowKeys.value.push(row.id);
     }
   }
-  else {
+  catch {
     Message({
-      theme: 'warning',
-      message: t('请选择合法的 JSON'),
+      theme: 'error',
+      message: t('生成 JSON Schema 失败'),
     });
+  }
+};
+
+const handleConfigChange = (row: ITableRow, config: IConfig) => {
+  const { enums } = config;
+  const bodyRow = tableData.value!.find((data: ITableRow) => data.id === row.id);
+  if (bodyRow) {
+    if (enums?.enabled && enums.values?.length) {
+      bodyRow.enum = enums.values;
+    }
+    else {
+      delete bodyRow.enum;
+    }
   }
 };
 
 const setInvalidRowId = () => {
   invalidRowIdMap.value = {};
-  tableData.value?.forEach((row) => {
+  tableData.value?.forEach((row: ITableRow) => {
     if (!row.name) {
       invalidRowIdMap.value[row.id] = true;
     }
@@ -776,9 +819,10 @@ const clearInvalidState = (rowId: string) => {
   delete invalidRowIdMap.value[rowId];
 };
 
-onMounted(() => {
-  tableRef.value?.setAllRowExpand(true);
-});
+// 表格行中没有子内容后，把这一行折叠起来
+const handleRowBodyEmptied = (row: ITableRow) => {
+  pull(expandedRowKeys.value, row.id);
+};
 
 defineExpose({
   getValue: async () => {
@@ -889,44 +933,10 @@ defineExpose({
 .request-params-table {
 
   .readonly-value-wrapper {
-    padding-left: 16px;
     font-size: 12px;
     cursor: auto;
-  }
-
-  .td-text {
-    padding: 0 16px;
-  }
-
-  // :deep(.bk-table-body-content) {
-
-  :deep(.bk-table-body) {
-
-    .custom-table-cell {
-
-      .cell {
-        padding: 0;
-
-        &:hover {
-          cursor: pointer;
-        }
-      }
-    }
-
-    // 展开行样式
-
-    .row_expend {
-
-      td {
-        border-right: none;
-      }
-
-      // 展开行没有内容时，不应渲染，避免出现多余的 1px 高的元素
-
-      &:not(:has(.request-param-body-table)) {
-        display: none !important;
-      }
-    }
+    word-break: break-all;
+    white-space: normal;
   }
 }
 
@@ -949,4 +959,22 @@ defineExpose({
   border-top: none;
   align-content: center;
 }
+
+:deep(.t-table) {
+
+  .t-table__content {
+    border-radius: 0;
+
+    .t-table__body .t-table__expanded-row .t-table__expanded-row-inner .t-table__row-full-element {
+      padding: 0;
+    }
+
+    td {
+      height: auto;
+      white-space: normal;
+      word-break: break-all;
+    }
+  }
+}
+
 </style>

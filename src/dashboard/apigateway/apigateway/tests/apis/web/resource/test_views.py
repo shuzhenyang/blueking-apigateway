@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -29,10 +29,21 @@ from apigateway.apis.web.resource.views import (
     ResourceRetrieveUpdateDestroyApi,
 )
 from apigateway.apps.label.models import APILabel, ResourceLabel
-from apigateway.biz.resource import ResourceHandler
-from apigateway.biz.resource.savers import ResourcesSaver
+from apigateway.biz.resource import ResourceHandler, ResourcesSaver
 from apigateway.core import constants
-from apigateway.core.models import Backend, BackendConfig, Context, Proxy, Resource, Stage
+from apigateway.core.constants import StageStatusEnum
+from apigateway.core.models import (
+    Backend,
+    BackendConfig,
+    Context,
+    Gateway,
+    Proxy,
+    Release,
+    ReleasedResource,
+    Resource,
+    ResourceVersion,
+    Stage,
+)
 from apigateway.service.contexts import ResourceAuthContext
 
 
@@ -150,6 +161,38 @@ class TestResourceRetrieveUpdateDestroyApi:
 
         assert resp.status_code == 200
         assert result["data"]["id"] == fake_resource.id
+
+    def test_retrieve_with_released_stages(self, fake_resource, request_view):
+        fake_gateway = fake_resource.gateway
+        resource_version = G(ResourceVersion, gateway=fake_gateway)
+        G(
+            ReleasedResource,
+            gateway=fake_gateway,
+            resource_version_id=resource_version.id,
+            resource_id=fake_resource.id,
+            resource_name=fake_resource.name,
+            resource_method=fake_resource.method,
+            resource_path=fake_resource.path,
+            data={},
+        )
+        prod_stage = G(Stage, gateway=fake_gateway, name="prod", status=StageStatusEnum.ACTIVE.value)
+        G(Release, gateway=fake_gateway, stage=prod_stage, resource_version=resource_version)
+        offline_stage = G(Stage, gateway=fake_gateway, name="offline", status=StageStatusEnum.INACTIVE.value)
+        G(Release, gateway=fake_gateway, stage=offline_stage, resource_version=resource_version)
+
+        other_gateway = G(Gateway)
+        other_stage = G(Stage, gateway=other_gateway, name="other", status=StageStatusEnum.ACTIVE.value)
+        G(Release, gateway=other_gateway, stage=other_stage, resource_version=resource_version)
+
+        resp = request_view(
+            method="GET",
+            view_name="resource.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id, "id": fake_resource.id},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["released_stages"] == ["prod"]
 
     def test_update(self, request_view, fake_resource):
         fake_gateway = fake_resource.gateway

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -30,7 +30,7 @@ import (
 
 // tracedFuncWrapper
 func tracedFuncWrapper(name string, fn memory.RetrieveFunc) memory.RetrieveFunc {
-	return func(ctx context.Context, key cache.Key) (interface{}, error) {
+	return func(ctx context.Context, key cache.Key) (any, error) {
 		startTrace, span := trace.StartTrace(ctx, "cache_load")
 		if span != nil {
 			span.SetAttributes(attribute.String("cache_name", name))
@@ -41,7 +41,7 @@ func tracedFuncWrapper(name string, fn memory.RetrieveFunc) memory.RetrieveFunc 
 }
 
 // cacheGet
-func cacheGet(ctx context.Context, cache memory.Cache, key cache.Key) (interface{}, error) {
+func cacheGet(ctx context.Context, cache memory.Cache, key cache.Key) (any, error) {
 	startCtx, span := trace.StartTrace(ctx, "cache_get")
 	if span != nil {
 		span.SetAttributes(attribute.String("key", key.Key()))

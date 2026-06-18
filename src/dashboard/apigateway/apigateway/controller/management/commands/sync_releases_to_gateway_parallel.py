@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -37,7 +37,15 @@ def sync_gateway(gateway):
     connection.close()
 
     print(f"syncing release for gateway {gateway.name} ...")
-    ok = publish.trigger_gateway_publish(PublishSourceEnum.CLI_SYNC, author="cli", gateway_id=gateway.id, is_sync=True)
+    try:
+        ok = publish.trigger_gateway_publish(
+            PublishSourceEnum.CLI_SYNC, author="cli", gateway_id=gateway.id, is_sync=True
+        )
+    except Exception:
+        logger.exception("syncing release for gateway %s failed with exception", gateway.name)
+        print(f"[ERROR] syncing release for gateway {gateway.name} failed")
+        return gateway.name
+
     if not ok:
         print(f"[ERROR] syncing release for gateway {gateway.name} failed")
         return gateway.name

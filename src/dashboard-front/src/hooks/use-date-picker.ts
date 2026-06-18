@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -34,51 +34,68 @@ export const useDatePicker = (filterData?: any) => {
   const route = useRoute();
   const accessLogStore = useAccessLog();
 
-  const initShortcutSelectedIndex = shallowRef(['AccessLog'].includes(route.name as string) ? 1 : -1);
+  const isObservabilityRoute = computed(() => ['MCPServerObservability'].includes(route.name as string));
+
+  const initShortcutSelectedIndex = computed(() => {
+    const routeName = route.name as string;
+    if (['AccessLog'].includes(routeName)) {
+      return 1;
+    }
+
+    if (isObservabilityRoute.value) {
+      return 0;
+    }
+
+    return -1;
+  });
+
   const shortcutSelectedIndex = shallowRef(cloneDeep(initShortcutSelectedIndex.value));
   const isAccessLog = ref(!['StageReleaseRecord'].includes(route.name as string));
-  // 不同页面存在多种日期快捷选项
-  const shortcutsRange = reactive(isAccessLog.value
-    ? accessLogStore.datepickerShortcuts
-    : [
-      {
-        text: t('今天'), // 今天的快捷选项
-        value() {
-          const end = new Date();
-          const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-          return [start, end];
-        },
-      },
-      {
-        text: t('近7天'), // 近7天的快捷选项
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 3600 * 1000 * 24 * 7);
-          return [start, end];
-        },
-      },
-      {
-        text: t('近15天'), // 近15天的快捷选项
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 3600 * 1000 * 24 * 15);
-          return [start, end];
-        },
-      },
-      {
-        text: t('近30天'), // 近30天的快捷选项
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 3600 * 1000 * 24 * 30);
-          return [start, end];
-        },
-      },
-    ]);
 
-  const dateValue = ref<string[]>([]); // 日期值
+  // 不同页面存在多种日期快捷选项
+  const shortcutsRange = computed(() => {
+    return isAccessLog.value
+      ? accessLogStore.datepickerShortcuts
+      : [
+        {
+          text: t('今天'), // 今天的快捷选项
+          value() {
+            const end = new Date();
+            const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+            return [start, end];
+          },
+        },
+        {
+          text: t('近7天'), // 近7天的快捷选项
+          value() {
+            const end = new Date();
+            const start = new Date();
+            start.setTime(start.getTime() - 3600 * 1000 * 24 * 7);
+            return [start, end];
+          },
+        },
+        {
+          text: t('近15天'), // 近15天的快捷选项
+          value() {
+            const end = new Date();
+            const start = new Date();
+            start.setTime(start.getTime() - 3600 * 1000 * 24 * 15);
+            return [start, end];
+          },
+        },
+        {
+          text: t('近30天'), // 近30天的快捷选项
+          value() {
+            const end = new Date();
+            const start = new Date();
+            start.setTime(start.getTime() - 3600 * 1000 * 24 * 30);
+            return [start, end];
+          },
+        },
+      ];
+  });
+
+  const dateValue = ref<any>([]); // 日期值
   // 面板默认切换值
   const selectionMode = ref('date');
 
@@ -90,8 +107,8 @@ export const useDatePicker = (filterData?: any) => {
     dateValue.value = date;
     // 选择了同一天，则需要把开始时间的时分秒设置为 00:00:00
     if (dateValue.value?.length > 0 && dayjs(dateValue.value[0]).isSame(dateValue.value[1])) {
-      if (dateValue.value[0]?.setHours) {
-        dateValue.value[0]?.setHours(0, 0, 0);
+      if ((dateValue.value[0] as Date)?.setHours) {
+        (dateValue.value[0] as Date)?.setHours(0, 0, 0);
       }
       else {
         dateValue.value[0] = dayjs(dateValue.value[0])
@@ -153,7 +170,7 @@ export const useDatePicker = (filterData?: any) => {
    * @param {any[]} date - 日期数组
    */
   const setFilterDate = (date: any[]) => {
-    if (date[0] && date[1]) {
+    if (date?.[0] && date?.[1]) {
       // @ts-expect-error ignore
       filterData.value.time_start = parseInt((+new Date(date[0])) / 1000, 10);
       // @ts-expect-error ignore

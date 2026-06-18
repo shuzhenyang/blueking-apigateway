@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,8 +22,10 @@ from typing import Any, Dict, List
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apigateway.apis.web.constants import ExportTypeEnum
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
+    MCP_AGENT_CLIENT_CHOICES_WITHOUT_AIDEV,
     OFFICIAL_MCP_CATEGORY_NAME,
     MCPServerAppPermissionApplyProcessedStateEnum,
     MCPServerAppPermissionApplyStatusEnum,
@@ -36,11 +38,13 @@ from apigateway.apps.mcp_server.models import (
     MCPServerAppPermissionApply,
     MCPServerCategory,
 )
-from apigateway.biz.mcp_server.prompt import MCPServerPromptHandler
-from apigateway.biz.permission.permission import ResourcePermissionHandler
+from apigateway.biz.mcp_server import MCPServerPromptHandler
+from apigateway.biz.permission import ResourcePermissionHandler
 from apigateway.biz.validators import BKAppCodeValidator, MCPServerHandler, MCPServerValidator
+from apigateway.common.constants import LanguageCodeEnum
+from apigateway.common.django.translation import get_current_language_code
 from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
-from apigateway.service.mcp.mcp_server import build_mcp_server_url
+from apigateway.service.bk_itsm import ItsmPermissionApplyHelper
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +54,20 @@ class MCPServerCategoryOutputSLZ(serializers.Serializer):
 
     id = serializers.IntegerField(read_only=True, help_text="分类 ID")
     name = serializers.CharField(read_only=True, help_text="分类名称（英文标识）")
-    display_name = serializers.CharField(read_only=True, help_text="分类显示名称")
+    display_name = serializers.SerializerMethodField(help_text="分类显示名称（根据语言环境返回）")
     description = serializers.CharField(read_only=True, help_text="分类描述")
     sort_order = serializers.IntegerField(read_only=True, help_text="排序顺序")
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerCategoryOutputSLZ"
+
+    def get_display_name(self, obj) -> str:
+        """根据当前语言环境返回分类名称：英文环境返回 name，中文环境返回 display_name"""
+        language_code = get_current_language_code()
+        # 英文环境返回 name，否则返回 display_name
+        if language_code == LanguageCodeEnum.EN.value:
+            return obj.name
+        return obj.display_name
 
 
 class MCPServerListInputSLZ(serializers.Serializer):
@@ -214,6 +226,16 @@ class MCPServerCreateInputSLZ(serializers.ModelSerializer):
         default=list,
         help_text="MCPServer 分类 ID 列表",
     )
+    oauth2_public_client_enabled = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权",
+    )
+    raw_response_enabled = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否返回原始响应，开启后 mcp-proxy 将直接返回 API 响应结果，不添加 request_id 等额外信息",
+    )
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerCreateInputSLZ"
@@ -230,6 +252,8 @@ class MCPServerCreateInputSLZ(serializers.ModelSerializer):
             "prompts",
             "protocol_type",
             "category_ids",
+            "oauth2_public_client_enabled",
+            "raw_response_enabled",
         )
         lookup_field = "id"
         validators = [MCPServerValidator()]
@@ -331,6 +355,15 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
         read_only=True, help_text="MCP 协议类型", choices=MCPServerProtocolTypeEnum.get_choices()
     )
 
+    oauth2_public_client_enabled = serializers.BooleanField(
+        read_only=True, help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权"
+    )
+
+    raw_response_enabled = serializers.BooleanField(
+        read_only=True,
+        help_text="是否返回原始响应，开启后 mcp-proxy 将直接返回 API 响应结果，不添加 request_id 等额外信息",
+    )
+
     stage = serializers.SerializerMethodField(help_text="MCPServer 环境")
 
     updated_time = serializers.DateTimeField(read_only=True, help_text="MCPServer 更新时间")
@@ -341,6 +374,8 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
     is_official = serializers.SerializerMethodField(help_text="是否为官方")
     is_featured = serializers.SerializerMethodField(help_text="是否为精选")
 
+    app_permission_risk = serializers.SerializerMethodField(help_text="应用态权限安全风险信息")
+
     class Meta:
         ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerBaseOutputSLZ"
 
@@ -348,7 +383,9 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
         return self.context["stages"][obj.stage.id]
 
     def get_url(self, obj) -> str:
-        return build_mcp_server_url(obj.name, obj.protocol_type)
+        least_privileges = self.context.get("least_privileges", {})
+        least_privilege = least_privileges.get((obj.gateway.id, obj.stage.id), "")
+        return MCPServerHandler.get_mcp_server_url(obj, least_privilege)
 
     def get_categories(self, obj):
         """获取分类信息，利用预加载的数据避免 N+1 查询"""
@@ -370,6 +407,11 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
         """是否为精选，利用预加载的数据避免 N+1 查询"""
         categories = obj.categories.all()
         return any(cat.name == FEATURED_MCP_CATEGORY_NAME and cat.is_active for cat in categories)
+
+    def get_app_permission_risk(self, obj) -> Dict[str, Any]:
+        app_permission_risks = self.context.get("app_permission_risks", {})
+        risk_tools = app_permission_risks.get(obj.id, [])
+        return {"has_risk": bool(risk_tools), "risk_tools": risk_tools}
 
 
 class MCPServerListOutputSLZ(MCPServerBaseOutputSLZ):
@@ -415,6 +457,14 @@ class MCPServerUpdateInputSLZ(serializers.ModelSerializer):
         child=serializers.IntegerField(),
         required=False,
         help_text="MCPServer 分类 ID 列表",
+    )
+    oauth2_public_client_enabled = serializers.BooleanField(
+        required=False,
+        help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权",
+    )
+    raw_response_enabled = serializers.BooleanField(
+        required=False,
+        help_text="是否返回原始响应，开启后 mcp-proxy 将直接返回 API 响应结果，不添加 request_id 等额外信息",
     )
 
     def validate_resource_names(self, resource_names):
@@ -464,6 +514,8 @@ class MCPServerUpdateInputSLZ(serializers.ModelSerializer):
             "prompts",
             "protocol_type",
             "category_ids",
+            "oauth2_public_client_enabled",
+            "raw_response_enabled",
         )
         lookup_field = "id"
 
@@ -526,16 +578,6 @@ class MCPServerUpdateStatusInputSLZ(serializers.ModelSerializer):
                 raise serializers.ValidationError(_("请先发布资源版本到对应环境，然后再启用 MCPServer。"))
 
         return status
-
-
-class MCPServerUpdateLabelsInputSLZ(serializers.ModelSerializer):
-    labels = serializers.ListField(child=serializers.CharField(), required=True, help_text="MCPServer 标签列表")
-
-    class Meta:
-        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerUpdateLabelsInputSLZ"
-        model = MCPServer
-        fields = ("labels",)
-        lookup_field = "id"
 
 
 class MCPServerToolOutputSLZ(serializers.Serializer):
@@ -666,6 +708,7 @@ class MCPServerAppPermissionCreateInputSLZ(serializers.Serializer):
 
 
 class MCPServerAppPermissionApplyListInputSLZ(serializers.Serializer):
+    mcp_server_id = serializers.IntegerField(required=False, help_text="MCPServer ID，不传则查询所有")
     bk_app_code = serializers.CharField(required=False, help_text="蓝鲸应用 ID")
     applied_by = serializers.CharField(required=False, help_text="申请人")
     state = serializers.ChoiceField(
@@ -678,6 +721,14 @@ class MCPServerAppPermissionApplyListInputSLZ(serializers.Serializer):
         ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerAppPermissionApplyListInputSLZ"
 
 
+class MCPServerAppPermissionApplyApplicantListInputSLZ(serializers.Serializer):
+    state = serializers.ChoiceField(
+        choices=MCPServerAppPermissionApplyProcessedStateEnum.get_choices(),
+        required=False,
+        help_text="审批处理状态，不传默认返回待处理的单据",
+    )
+
+
 class MCPServerAppPermissionApplyListOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     bk_app_code = serializers.CharField(read_only=True, help_text="蓝鲸应用 ID")
@@ -686,6 +737,8 @@ class MCPServerAppPermissionApplyListOutputSLZ(serializers.Serializer):
     status = serializers.ChoiceField(
         read_only=True, choices=MCPServerAppPermissionApplyStatusEnum.get_choices(), help_text="审批状态"
     )
+    itsm_ticket_id = serializers.CharField(read_only=True, help_text="关联的 ITSM 工单 ID")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
     mcp_server = MCPServerBaseSLZ()
 
     class Meta:
@@ -698,6 +751,23 @@ class MCPServerAppPermissionApplyListOutputSLZ(serializers.Serializer):
             self.context.get("gateway_tenant_mode"),
             self.context.get("gateway_tenant_id"),
         )
+
+    def get_itsm_ticket_url(self, obj):
+        return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
+
+
+class MCPServerAppPermissionApplyCreateOutputSLZ(serializers.Serializer):
+    record_id = serializers.IntegerField(source="id", read_only=True, help_text="申请记录 ID")
+    bk_app_code = serializers.CharField(read_only=True, help_text="蓝鲸应用 ID")
+    mcp_server_id = serializers.IntegerField(read_only=True, help_text="MCPServer ID")
+    itsm_ticket_id = serializers.CharField(read_only=True, help_text="关联的 ITSM 工单 ID")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerAppPermissionApplyCreateOutputSLZ"
+
+    def get_itsm_ticket_url(self, obj):
+        return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
 
 
 class MCPServerAppPermissionApplyUpdateInputSLZ(serializers.ModelSerializer):
@@ -792,7 +862,7 @@ class MCPServerFilterOptionsOutputSLZ(serializers.Serializer):
 class MCPServerConfigItemOutputSLZ(serializers.Serializer):
     """MCPServer 单个配置项输出序列化器"""
 
-    name = serializers.CharField(read_only=True, help_text="配置名称（如 cursor, codebuddy, claude, aidev）")
+    name = serializers.CharField(read_only=True, help_text="配置名称（如 cursor, codebuddy, claude, vscode 等）")
     display_name = serializers.CharField(read_only=True, help_text="配置显示名称")
     content = serializers.CharField(read_only=True, help_text="配置内容（markdown 格式）")
     install_url = serializers.CharField(
@@ -814,3 +884,157 @@ class MCPServerConfigListOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerConfigListOutputSLZ"
+
+
+class MCPServerAppPermissionAppCodeListInputSLZ(serializers.Serializer):
+    """MCPServer 已授权应用 bk_app_code 列表输入序列化器"""
+
+    mcp_server_id = serializers.IntegerField(
+        required=False,
+        help_text="MCPServer ID，传入则只查询该 MCPServer 的授权应用",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerAppPermissionAppCodeListInputSLZ"
+
+
+class MCPServerAppPermissionAppCodeListOutputSLZ(serializers.Serializer):
+    """MCPServer 已授权应用 bk_app_code 列表输出序列化器"""
+
+    bk_app_codes = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="有权限的应用 bk_app_code 列表",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerAppPermissionAppCodeListOutputSLZ"
+
+
+class MCPServerBatchConfigInputSLZ(serializers.Serializer):
+    """批量获取 MCPServer 配置输入序列化器"""
+
+    mcp_server_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True,
+        min_length=1,
+        max_length=100,
+        help_text="MCPServer ID 列表",
+    )
+    client_type = serializers.ChoiceField(
+        required=True,
+        choices=MCP_AGENT_CLIENT_CHOICES_WITHOUT_AIDEV,
+        help_text="客户端类型",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerBatchConfigInputSLZ"
+
+
+class MCPServerBatchConfigOutputSLZ(serializers.Serializer):
+    """批量获取 MCPServer 配置输出序列化器"""
+
+    client_type = serializers.CharField(read_only=True, help_text="客户端类型")
+    display_name = serializers.CharField(read_only=True, help_text="客户端显示名称")
+    config = serializers.DictField(read_only=True, help_text="客户端配置（JSON 格式）")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerBatchConfigOutputSLZ"
+
+
+class GatewayMCPServerAppPermissionListInputSLZ(serializers.Serializer):
+    """网关下 MCPServer 应用权限列表输入序列化器"""
+
+    mcp_server_id = serializers.IntegerField(required=False, help_text="MCPServer ID")
+    bk_app_code = serializers.CharField(required=False, allow_blank=True, default="", help_text="蓝鲸应用 ID")
+    grant_type = serializers.ChoiceField(
+        choices=MCPServerAppPermissionGrantTypeEnum.get_choices(),
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="授权类型",
+    )
+    order_by = serializers.ChoiceField(
+        choices=[
+            ("effective_time", "按生效时间排序"),
+            ("-effective_time", "按生效时间倒序"),
+        ],
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="排序方式",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.GatewayMCPServerAppPermissionListInputSLZ"
+
+
+class GatewayMCPServerAppPermissionListOutputSLZ(serializers.Serializer):
+    """网关下 MCPServer 应用权限列表输出序列化器"""
+
+    id = serializers.IntegerField(read_only=True)
+    mcp_server = MCPServerBaseSLZ()
+    bk_app_code = serializers.CharField(read_only=True, help_text="蓝鲸应用 ID")
+    applied_by = serializers.SerializerMethodField(help_text="申请人")
+    effective_time = serializers.SerializerMethodField(help_text="生效时间")
+    handled_by = serializers.SerializerMethodField(help_text="审批人/授权人")
+    grant_type = serializers.ChoiceField(
+        read_only=True, choices=MCPServerAppPermissionGrantTypeEnum.get_choices(), help_text="授权类型"
+    )
+    grant_type_display = serializers.SerializerMethodField(help_text="授权类型展示")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.GatewayMCPServerAppPermissionListOutputSLZ"
+
+    def _get_apply_record(self, obj):
+        if obj.grant_type != MCPServerAppPermissionGrantTypeEnum.APPLY.value:
+            return None
+        return self.context.get("apply_record_map", {}).get((obj.mcp_server_id, obj.bk_app_code))
+
+    def get_applied_by(self, obj):
+        apply_record = self._get_apply_record(obj)
+        if apply_record:
+            return ResourcePermissionHandler.convert_applied_by_to_display_name(
+                obj.bk_app_code,
+                apply_record.applied_by,
+                self.context.get("gateway_tenant_mode"),
+                self.context.get("gateway_tenant_id"),
+            )
+        return obj.updated_by or obj.created_by or ""
+
+    def get_effective_time(self, obj):
+        apply_record = self._get_apply_record(obj)
+        effective_time = apply_record.handled_time if apply_record and apply_record.handled_time else obj.created_time
+        return serializers.DateTimeField().to_representation(effective_time)
+
+    def get_handled_by(self, obj):
+        apply_record = self._get_apply_record(obj)
+        if apply_record:
+            return apply_record.handled_by
+        return obj.created_by or obj.updated_by or ""
+
+    def get_grant_type_display(self, obj):
+        return _(MCPServerAppPermissionGrantTypeEnum.get_choice_label(obj.grant_type))
+
+
+class GatewayMCPServerAppPermissionExportInputSLZ(GatewayMCPServerAppPermissionListInputSLZ):
+    """网关下 MCPServer 应用权限导出输入序列化器"""
+
+    export_type = serializers.ChoiceField(
+        choices=ExportTypeEnum.get_choices(),
+        required=True,
+        help_text="导出类型：all(全部), filtered(按筛选条件), selected(选中)",
+    )
+    selected_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        default=list,
+        help_text="选中的权限 ID 列表，当 export_type 为 selected 时必填",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.GatewayMCPServerAppPermissionExportInputSLZ"
+
+    def validate(self, data):
+        if data["export_type"] == ExportTypeEnum.SELECTED.value and not data.get("selected_ids"):
+            raise serializers.ValidationError(_("导出已选中权限时，已选中权限不能为空。"))
+        return data

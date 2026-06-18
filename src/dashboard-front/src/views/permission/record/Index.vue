@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -16,7 +16,7 @@
  * to the current version of the project delivered to anyone in the future.
  */
 <template>
-  <div class="permission-record-container">
+  <div class="permission-record-container page-wrapper-padding">
     <div class="header">
       <BkForm
         class="flex"
@@ -226,11 +226,20 @@ import { APPROVAL_HISTORY_STATUS_MAP } from '@/enums';
 import AgIcon from '@/components/ag-icon/Index.vue';
 import AgTable from '@/components/ag-table/Index.vue';
 
+// 扩展 IApprovalListItem，补充运行时动态添加的字段
+interface IApprovalListItemExt extends IApprovalListItem {
+  id: number
+  grant_dimension: string
+  isExpand?: boolean
+  selection?: any[]
+  isSelectAll?: boolean
+}
+
 const { t } = useI18n();
 const featureFlagStore = useFeatureFlag();
 const gatewayStore = useGateway();
 
-const historyExpandColumn = shallowRef([
+const historyExpandColumn = shallowRef<any[]>([
   {
     title: '#',
     colKey: 'serial-number',
@@ -245,7 +254,7 @@ const historyExpandColumn = shallowRef([
     title: t('请求路径'),
     colKey: 'path',
     ellipsis: true,
-    cell: (h, { row }) => {
+    cell: (h: any, { row }: { row: any }) => {
       return <span>{row.path || '--'}</span>;
     },
   },
@@ -253,7 +262,7 @@ const historyExpandColumn = shallowRef([
     title: t('请求方法'),
     colKey: 'method',
     ellipsis: true,
-    cell: (h, { row }) => {
+    cell: (h: any, { row }: { row: any }) => {
       return <span>{row.method || '--'}</span>;
     },
   },
@@ -261,7 +270,7 @@ const historyExpandColumn = shallowRef([
     title: t('审批状态'),
     colKey: 'status',
     ellipsis: true,
-    cell: (h, { row }) => {
+    cell: (h: any, { row }: { row: any }) => {
       if (['rejected'].includes(row['apply_status'])) {
         return (
           <div class="perm-record-dot">
@@ -281,7 +290,7 @@ const historyExpandColumn = shallowRef([
     },
   },
 ]);
-const resourceInfoColumn = shallowRef([
+const resourceInfoColumn = shallowRef<any[]>([
   {
     title: t('资源名称'),
     colKey: 'name',
@@ -291,7 +300,7 @@ const resourceInfoColumn = shallowRef([
     title: t('审批状态'),
     colKey: 'status',
     ellipsis: true,
-    cell: (h, { row }) => {
+    cell: (h: any, { row }: { row: any }) => {
       if (['rejected'].includes(row['apply_status'])) {
         return (
           <div>
@@ -312,19 +321,19 @@ const resourceInfoColumn = shallowRef([
   },
 ]);
 const tableRef = useTemplateRef<InstanceType<typeof AgTable> & ITableMethod>('permissionTableRef');
-const tableData = ref([]);
-const filterData = ref({
+const tableData = ref<any[]>([]);
+const filterData = ref<Record<string, any>>({
   bk_app_code: '',
   grant_dimension: '',
   time_start: '',
   time_end: '',
 });
-const filterValue = ref({});
-const resourceList = ref([]);
+const filterValue = ref<Record<string, any>>({});
+const resourceList = ref<any[]>([]);
 const expandableConfig = ref({
   expandColumn: false,
-  expandedRowKeys: [],
-  canExpand: (row) => {
+  expandedRowKeys: [] as any[],
+  canExpand: (row: any) => {
     return ['resource'].includes(row.grant_dimension);
   },
 });
@@ -343,6 +352,8 @@ const curRecord = ref<IApprovalListItem>({
   expire_days_display: 0,
   reason: '',
   handled_resources: [],
+  itsm_ticket_id: '',
+  itsm_ticket_url: '',
 });
 const detailSliderConf = reactive({
   title: '',
@@ -361,8 +372,8 @@ const {
 } = useDatePicker(filterData);
 
 const apigwId = computed(() => gatewayStore.apigwId);
-
-const getTableColumns = computed(() => {
+const isEnabledITSMApply = computed(() => featureFlagStore?.flags?.ENABLE_ITSM4_PERMISSION_APPLY);
+const getTableColumns = computed((): any[] => {
   return [
     {
       title: t('蓝鲸应用ID'),
@@ -382,8 +393,8 @@ const getTableColumns = computed(() => {
           value: id,
         })),
       },
-      cell: (h, { row }: { row?: Partial<IApprovalListItem> }) => {
-        if (['resource'].includes(row.grant_dimension)) {
+      cell: (h: any, { row }: { row: Partial<IApprovalListItemExt> }) => {
+        if (['resource'].includes(row.grant_dimension!)) {
           return (
             <div class="flex items-center">
               <AgIcon
@@ -402,7 +413,7 @@ const getTableColumns = computed(() => {
       title: t('权限期限'),
       colKey: 'expire_days_display',
       ellipsis: true,
-      cell: (h, { row }: { row?: Partial<IApprovalListItem> }) => {
+      cell: (h: any, { row }: { row: Partial<IApprovalListItemExt> }) => {
         return row.expire_days_display || '--';
       },
     },
@@ -410,9 +421,9 @@ const getTableColumns = computed(() => {
       title: t('申请人'),
       colKey: 'applied_by',
       ellipsis: true,
-      cell: (h, { row }: { row: Partial<IApprovalListItem> }) =>
+      cell: (h: any, { row }: { row: Partial<IApprovalListItemExt> }) =>
         !featureFlagStore.isEnableDisplayName
-          ? <span>{row.applied_by}</span>
+          ? <span>{row.applied_by || '--'}</span>
           : <span><bk-user-display-name user-id={row.applied_by} /></span>,
     },
     {
@@ -425,7 +436,7 @@ const getTableColumns = computed(() => {
       title: t('审批人'),
       colKey: 'handled_by',
       ellipsis: true,
-      cell: (h, { row }: { row: Partial<IApprovalListItem> }) =>
+      cell: (h: any, { row }: { row: Partial<IApprovalListItemExt> }) =>
         !featureFlagStore.isEnableDisplayName
           ? <span>{row.handled_by}</span>
           : <span><bk-user-display-name user-id={row.handled_by} /></span>,
@@ -434,12 +445,12 @@ const getTableColumns = computed(() => {
       title: t('审批状态'),
       colKey: 'status',
       ellipsis: true,
-      cell: (h, { row }: { row?: Partial<IApprovalListItem> }) => {
-        if (['rejected'].includes(row?.status)) {
+      cell: (h: any, { row }: { row: Partial<IApprovalListItemExt> }) => {
+        if (['rejected'].includes(row.status!)) {
           return (
             <div class="perm-record-dot">
               <div class="ag-dot default m-r-5px" />
-              {APPROVAL_HISTORY_STATUS_MAP[row?.status as keyof typeof APPROVAL_HISTORY_STATUS_MAP]}
+              {APPROVAL_HISTORY_STATUS_MAP[row.status as keyof typeof APPROVAL_HISTORY_STATUS_MAP]}
             </div>
           );
         }
@@ -447,7 +458,7 @@ const getTableColumns = computed(() => {
           return (
             <div class="perm-record-dot">
               <span class="ag-dot success m-r-5px" />
-              {APPROVAL_HISTORY_STATUS_MAP[row?.status as keyof typeof APPROVAL_HISTORY_STATUS_MAP]}
+              {APPROVAL_HISTORY_STATUS_MAP[row.status as keyof typeof APPROVAL_HISTORY_STATUS_MAP]}
             </div>
           );
         }
@@ -458,14 +469,14 @@ const getTableColumns = computed(() => {
       colKey: 'operate',
       fixed: 'right',
       ellipsis: true,
-      cell: (h, { row }: { row?: Partial<IApprovalListItem> }) => {
+      cell: (h: any, { row }: { row: Partial<IApprovalListItemExt> }) => {
         return (
           <div>
             <Button
               theme="primary"
               text
-              onClick={(e: Event) => {
-                handleShowRecord(e, row);
+              onClick={(e: MouseEvent) => {
+                handleShowRecord(e, row as IApprovalListItemExt);
               }}
             >
               { t('详情') }
@@ -491,29 +502,29 @@ const getTableData = async (params: Record<string, any> = {}) => {
   return results ?? [];
 };
 
-const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterItem: FilterValue) => {
+const handleFilterChange = (filterItem: any) => {
   filterData.value = Object.assign(filterData.value, filterItem);
   filterValue.value = { ...filterItem };
 };
 
 const handleRowClick = ({ e, row }: {
   e: Event
-  row: IApprovalListItem
+  row: IApprovalListItemExt
 }) => {
   e.stopPropagation();
   if (row.grant_dimension.includes('resource')) {
     row.isExpand = !row.isExpand;
     expandableConfig.value.expandedRowKeys
-      = expandableConfig.value.expandedRowKeys.filter(item => item === row.id);
-    const curExpandRow = row.isExpand ? row : {};
+      = expandableConfig.value.expandedRowKeys.filter((item: any) => item === row.id);
+    const curExpandRow = row.isExpand ? row : {} as any;
     if (row.isExpand) {
-      expandableConfig.value.expandedRowKeys.push(row.id);
+      expandableConfig.value.expandedRowKeys.push(row.id as any);
     }
     else {
       expandableConfig.value.expandedRowKeys
-        = expandableConfig.value.expandedRowKeys.filter(item => item !== row.id);
+        = expandableConfig.value.expandedRowKeys.filter((item: any) => item !== row.id);
     }
-    tableData.value.forEach((item) => {
+    tableData.value.forEach((item: any) => {
       const isExpand = item.id === curExpandRow.id;
       item.isExpand = isExpand;
       if (!isExpand) {
@@ -535,7 +546,7 @@ const handlePickClear = () => {
   handleClear();
 };
 
-const handleSetRowClass = ({ row }) => {
+const handleSetRowClass = ({ row }: { row: any }) => {
   if (row.grant_dimension.includes('resource')) {
     return 'cursor-pointer';
   }
@@ -543,18 +554,23 @@ const handleSetRowClass = ({ row }) => {
 };
 
 // 展示详情
-const handleShowRecord = (e: MouseEvent, data: IApprovalListItem) => {
+const handleShowRecord = (e: MouseEvent, data: IApprovalListItemExt) => {
   e.stopPropagation();
-  const results: IApprovalListItem[] = [];
+  // 如果是itsm单据，跳转去itsm查看详情
+  if (isEnabledITSMApply.value && Boolean(data?.itsm_ticket_url) && Boolean(data?.itsm_ticket_id)) {
+    window.open(data.itsm_ticket_url);
+    return;
+  }
+  const results: any[] = [];
   detailSliderConf.title = `${t('申请应用：')}${data.bk_app_code}`;
   curRecord.value = Object.assign({}, {
     ...data,
     resourceList: [],
   });
-  curRecord.value.resource_ids.forEach((resourceId) => {
+  curRecord.value.resource_ids.forEach((resourceId: any) => {
     resourceList.value.forEach((item: { id: number }) => {
       if (item.id === resourceId) {
-        results.push(item);
+        results.push(item as any);
       }
     });
   });
@@ -579,9 +595,7 @@ const handleClearFilter = () => {
 
 <style lang="scss" scoped>
 .permission-record-container {
-  margin: 16px;
-  background-color: #fff;
-  padding: 16px 16px 34px;
+
   .record-content {
     border: 1px solid #DCDEE5;
   }
@@ -633,6 +647,7 @@ const handleClearFilter = () => {
 }
 
 :deep(.t-table__header) {
+
   .t-table__ellipsis {
     font-weight: 700 !important;
     color: #63656e !important;
@@ -640,6 +655,7 @@ const handleClearFilter = () => {
 }
 
 :deep(.t-table__expanded-row) {
+
   .t-table__row-full-element {
     padding: 0;
   }

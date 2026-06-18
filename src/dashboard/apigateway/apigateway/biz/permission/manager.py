@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,14 +16,17 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
+import logging
 from abc import ABCMeta, abstractmethod
 from typing import List, Optional, Tuple
 
+from django.conf import settings
 from django.utils.translation import gettext as _
 
 from apigateway.apps.permission.constants import (
     RENEWABLE_EXPIRE_DAYS,
     ApplyStatusEnum,
+    FormattedGrantDimensionEnum,
     GrantDimensionEnum,
     GrantTypeEnum,
 )
@@ -35,11 +38,38 @@ from apigateway.apps.permission.models import (
     AppResourcePermission,
 )
 from apigateway.common.error_codes import error_codes
+from apigateway.components.bkpaas import get_app_maintainers
 from apigateway.core.models import Gateway, Resource
+from apigateway.service.bk_itsm import ItsmPermissionApplyHelper
 from apigateway.utils.time import now_datetime
+
+logger = logging.getLogger(__name__)
 
 
 class PermissionDimensionManager(metaclass=ABCMeta):
+    @staticmethod
+    def _build_itsm_ticket_apply_resources(
+        grant_dimension: str,
+        gateway: Gateway,
+        resource_ids: List[int],
+    ) -> Tuple[str, List[str]]:
+        """构建 ITSM 提单所需的授权维度与资源名称列表"""
+        if grant_dimension not in [GrantDimensionEnum.API.value, GrantDimensionEnum.RESOURCE.value]:
+            raise error_codes.INVALID_ARGUMENT.format(f"unsupported grant_dimension: {grant_dimension}")
+
+        itsm_grant_dimension = grant_dimension
+        resource_names: List[str] = []
+
+        if grant_dimension == GrantDimensionEnum.API.value:
+            itsm_grant_dimension = FormattedGrantDimensionEnum.GATEWAY.value
+            resource_names = [gateway.name]
+        elif resource_ids:
+            resource_names = list(
+                Resource.objects.filter(gateway=gateway, id__in=resource_ids).values_list("name", flat=True)
+            )
+
+        return itsm_grant_dimension, resource_names
+
     @classmethod
     def get_manager(cls, grant_dimension: str) -> "PermissionDimensionManager":
         if grant_dimension == GrantDimensionEnum.API.value:
@@ -95,7 +125,9 @@ class PermissionDimensionManager(metaclass=ABCMeta):
         """资源审批时，获取审批拒绝的资源名称列表"""
 
     @abstractmethod
-    def allow_apply_permission(self, gateway_id: int, bk_app_code: str) -> Tuple[bool, str]:
+    def allow_apply_permission(
+        self, gateway_id: int, bk_app_code: str, resource_ids: Optional[List[int]] = None
+    ) -> Tuple[bool, str]:
         """判断是否允许申请权限"""
 
     def create_apply_record(
@@ -141,7 +173,91 @@ class PermissionDimensionManager(metaclass=ABCMeta):
             resources=Resource.objects.filter(gateway=gateway, id__in=resource_ids),
         )
 
+        # 如果启用了 ITSM 权限申请工单，创建 ITSM 工单
+        if getattr(
+            settings,
+            "ENABLE_ITSM4_PERMISSION_APPLY",
+            getattr(settings, "BK_ITSM4_PERMISSION_APPLY_ENABLED", False),
+        ):
+            self._create_itsm_ticket(
+                record=record,
+                gateway=gateway,
+                bk_app_code=bk_app_code,
+                grant_dimension=grant_dimension,
+                resource_ids=resource_ids,
+                username=username,
+            )
+
         return record
+
+    @staticmethod
+    def _get_itsm_ticket_applicant(username: str, bk_app_code: str) -> str:
+        if username:
+            return username
+
+        app_maintainers = get_app_maintainers(bk_app_code)
+        if app_maintainers:
+            # TODO: 这里取的是第一个用户选择，用户可能已经转岗或者离职，后续需要优化，选择最近操作人
+            return app_maintainers[0]
+
+        return ""
+
+    def _create_itsm_ticket(
+        self,
+        record: AppPermissionRecord,
+        gateway: Gateway,
+        bk_app_code: str,
+        grant_dimension: str,
+        resource_ids: List[int],
+        username: str,
+    ):
+        """创建 ITSM 权限申请工单"""
+        try:
+            helper = ItsmPermissionApplyHelper()
+            if not helper.is_ready():
+                logger.info(
+                    "Skip creating ITSM ticket for permission apply because ITSM helper is not ready, record_id=%s, gateway_id=%s, bk_app_code=%s",
+                    record.id,
+                    gateway.id,
+                    bk_app_code,
+                )
+                return
+
+            itsm_grant_dimension, resource_names = self._build_itsm_ticket_apply_resources(
+                grant_dimension=grant_dimension,
+                gateway=gateway,
+                resource_ids=resource_ids,
+            )
+            callback_token = helper.generate_callback_token()
+            AppPermissionApply.objects.filter(apply_record_id=record.id).update(itsm_callback_token=callback_token)
+
+            ticket_applicant = self._get_itsm_ticket_applicant(username=username, bk_app_code=bk_app_code)
+            resp = helper.create_permission_apply_ticket(
+                bk_app_code=bk_app_code,
+                gateway_name=gateway.name,
+                grant_dimension=itsm_grant_dimension,
+                apply_resource_names=resource_names,
+                applied_by=ticket_applicant,
+                apply_record_id=record.id,
+                approvers=gateway.maintainers,
+                callback_token=callback_token,
+            )
+
+            # 保存 ITSM 工单 ID 到申请记录
+            ticket_id = str(resp["id"])
+            record.itsm_ticket_id = ticket_id
+            record.save(update_fields=["itsm_ticket_id"])
+
+            AppPermissionApply.objects.filter(apply_record_id=record.id).update(itsm_ticket_id=ticket_id)
+
+            logger.info(
+                "ITSM ticket created: record_id=%s, ticket_id=%s",
+                record.id,
+                ticket_id,
+            )
+        except Exception:
+            # ITSM 工单创建失败不应阻塞主流程
+            logger.exception("Failed to create ITSM ticket for permission apply, record_id=%s", record.id)
 
 
 class GatewayPermissionDimensionManager(PermissionDimensionManager):
@@ -160,6 +276,7 @@ class GatewayPermissionDimensionManager(PermissionDimensionManager):
                 bk_app_code=apply.bk_app_code,
                 grant_type=GrantTypeEnum.APPLY.value,
                 expire_days=apply.expire_days,
+                handled_by=handled_by,
             )
 
         self._handle_apply_status(apply, status)
@@ -219,7 +336,9 @@ class GatewayPermissionDimensionManager(PermissionDimensionManager):
         # 因此，按网关申请时，同意、拒绝，均删除申请状态记录
         AppPermissionApplyStatus.objects.filter(apply=apply).delete()
 
-    def allow_apply_permission(self, gateway_id: int, bk_app_code: str) -> Tuple[bool, str]:
+    def allow_apply_permission(
+        self, gateway_id: int, bk_app_code: str, resource_ids: Optional[List[int]] = None
+    ) -> Tuple[bool, str]:
         is_pending = AppPermissionApplyStatus.objects.is_permission_pending_by_gateway(gateway_id, bk_app_code)
         if is_pending:
             return False, _("权限申请中，请联系网关负责人审批。")
@@ -260,6 +379,7 @@ class ResourcePermissionDimensionManager(PermissionDimensionManager):
                 bk_app_code=apply.bk_app_code,
                 grant_type=GrantTypeEnum.APPLY.value,
                 expire_days=apply.expire_days,
+                handled_by=handled_by,
             )
 
         # 更新应用访问资源权限申请状态
@@ -348,7 +468,44 @@ class ResourcePermissionDimensionManager(PermissionDimensionManager):
 
         raise ValueError("unsupported apply status: {status}")
 
-    def allow_apply_permission(self, gateway_id: int, bk_app_code: str) -> Tuple[bool, str]:
-        return False, _("授权维度 grant_dimension 暂不支持 {grant_dimension}。").format(
+    def allow_apply_permission(
+        self, gateway_id: int, bk_app_code: str, resource_ids: Optional[List[int]] = None
+    ) -> Tuple[bool, str]:
+        # 按资源申请时，resource_ids 必须传入
+        if not resource_ids:
+            return True, ""
+
+        # 检查待审批
+        qs = AppPermissionApplyStatus.objects.filter(
+            bk_app_code=bk_app_code,
+            gateway_id=gateway_id,
             grant_dimension=GrantDimensionEnum.RESOURCE.value,
+            status=ApplyStatusEnum.PENDING.value,
+            resource_id__in=resource_ids,
         )
+
+        pending_resource_names = list(qs.values_list("resource__name", flat=True))
+        if pending_resource_names:
+            return False, _("[{names}] 资源权限申请中，请联系网关负责人审批。").format(
+                names=", ".join(pending_resource_names)
+            )
+
+        # 检查已拥有且未过期的权限
+        existing_perms = AppResourcePermission.objects.filter(
+            gateway_id=gateway_id,
+            bk_app_code=bk_app_code,
+            resource_id__in=resource_ids,
+        )
+        unexpired_resource_ids = [perm.resource_id for perm in existing_perms if not perm.allow_apply_permission]
+        if unexpired_resource_ids:
+            unexpired_resource_names = list(
+                Resource.objects.filter(gateway_id=gateway_id, id__in=unexpired_resource_ids).values_list(
+                    "name", flat=True
+                )
+            )
+            if unexpired_resource_names:
+                return False, _("[{names}] 资源权限已存在且未过期，无需重复申请。").format(
+                    names=", ".join(unexpired_resource_names)
+                )
+
+        return True, ""

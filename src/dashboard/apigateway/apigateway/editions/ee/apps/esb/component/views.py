@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -37,7 +37,7 @@ from apigateway.apps.esb.constants import DataTypeEnum
 from apigateway.apps.esb.permissions import UserAccessESBPermission
 
 # FIXME: 将 views 挪到 apis.web 模块
-from apigateway.biz.resource.importer import ResourceDataConvertor, ResourceImportValidator
+from apigateway.biz.openapi import ResourceDataConvertor, ResourceImportValidator
 from apigateway.common.error_codes import error_codes
 from apigateway.core.constants import ReleaseStatusEnum
 from apigateway.core.models import Gateway, ResourceVersion

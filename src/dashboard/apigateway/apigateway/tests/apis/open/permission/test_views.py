@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -290,6 +290,43 @@ class TestAppPermissionRecordViewSet:
         result = get_response_json(response)
         assert result["code"] == 0
         assert result["data"]["id"] == record.id
+
+
+class TestPaaSAppPermissionApplyAPIView:
+    def test_create_rejects_resource_ids_not_in_released_resources(self, mocker, request_factory, fake_gateway):
+        mocker.patch(
+            "apigateway.apis.open.permission.serializers.BKAppCodeValidator.__call__",
+            return_value=None,
+        )
+        get_released_public_resources = mocker.patch(
+            "apigateway.apis.open.permission.views.ResourceVersionHandler.get_released_public_resources",
+            return_value=[
+                {
+                    "id": 1,
+                    "allow_apply_permission": True,
+                }
+            ],
+        )
+        get_manager = mocker.patch("apigateway.apis.open.permission.views.PermissionDimensionManager.get_manager")
+
+        request = request_factory.post(
+            "",
+            data={
+                "target_app_code": "test-app",
+                "resource_ids": [2],
+                "grant_dimension": "resource",
+            },
+        )
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = views.PaaSAppPermissionApplyAPIView.as_view()(request, gateway_id=fake_gateway.id)
+        result = get_response_json(response)
+
+        assert response.status_code == 400
+        assert "resource_ids" in result["error"]["message"]
+        get_released_public_resources.assert_called_once_with(fake_gateway.id)
+        get_manager.assert_not_called()
 
 
 class TestAppPermissionGrantViewSet:

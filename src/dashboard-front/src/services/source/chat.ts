@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,13 +19,23 @@ import http from '../http';
 import { useEnv } from '@/stores';
 
 // 拉群
-export const createChat = (data: any) => {
+export const createChat = (data: {
+  bk_app_code: string
+  name: string
+  owner: string
+  userlist: string[]
+}) => {
   const envStore = useEnv();
   return http.post(envStore.env.CREATE_CHAT_API, data);
 };
 
 // 发消息
-export const sendChat = (data: any) => {
+export const sendChat = (data: {
+  bk_app_code: string
+  chatid: string
+  msgtype: string
+  text: { content: string }
+}) => {
   const envStore = useEnv();
   return http.post(envStore.env.SEND_CHAT_API, data);
 };

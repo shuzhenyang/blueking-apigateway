@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -58,15 +58,13 @@
             <BkSelect
               v-else
               :ref="(el: HTMLElement | null) => setInputRefs(el, `name-input-`, index, column?.index)"
-              :key="componentKey"
               v-model="row.name"
+              :placeholder="t('请输入')"
               class="edit-select"
               allow-create
               filterable
               @change="() => handleNameChange(index, row.name)"
-              @input="() => handleHeaderKeySelectBlur(row, `name-input-`, index, column?.index)"
-              @blur="() => handleHeaderKeySelectBlur(row, `name-input-`, index, column?.index)"
-              @select="(value: string) => handleHeaderKeySelect(row, value)"
+              @blur="() => handleSelectBlur(index, row)"
             >
               <BkOption
                 v-for="item in headersNameList"
@@ -266,8 +264,6 @@ const typeList = ref<{
   },
 ]);
 
-const componentKey = ref(0);
-
 const formRefs = ref(new Map());
 const setRefs = (el: HTMLElement | null, prefix: string, index: number) => {
   if (el && index !== undefined) {
@@ -307,6 +303,29 @@ const handleNameChange = (index: number, name: string) => {
   }
 
   tableData.value[index].value = '';
+
+  nextTick(() => {
+    const selectRef = formInputRef.value?.get(`name-input-${index}-1`);
+    if (selectRef) {
+      (selectRef as any).handleInputChange?.(name);
+    }
+  });
+};
+
+// BkSelect allow-create 失焦时自动提交自定义输入值
+const handleSelectBlur = (index: number, row: Record<string, any>) => {
+  // 直接从 DOM input 读取用户输入，避免组件内部状态在 blur 时被清空
+  const selectRef = formInputRef.value?.get(`name-input-${index}-1`);
+  const inputEl = (selectRef as any)?.$el?.querySelector?.('input');
+  const typedValue = inputEl?.value || '';
+  if (!typedValue || row.name === typedValue) return;
+
+  // 当前 row.name 不为合法选项时，说明是自定义输入，自动提交
+  const isExistingOption = headersNameList.value.some((item: { value: string }) => item.value === row.name);
+  if (!isExistingOption) {
+    row.name = typedValue;
+    handleNameChange(index, typedValue);
+  }
 };
 
 const addRow = (index: number) => {
@@ -327,7 +346,7 @@ const delRow = (index: number) => {
     return;
   }
   const row = tableData.value[index];
-  checkedList.value = checkedList.value.filter(item => item.id !== row.id);
+  checkedList.value = checkedList.value.filter((item: IRowType) => item.id !== row.id);
   tableData.value?.splice(index, 1);
 };
 
@@ -335,7 +354,7 @@ const validate = async () => {
   const list = tableData.value;
   let flag = true;
 
-  list?.forEach(async (item: IRowType) => {
+  list?.forEach((item: IRowType) => {
     if (item?.required) {
       if (!item.name) {
         flag = false;
@@ -367,7 +386,7 @@ const handleSelect = ({ row, checked }: ISelectPayload) => {
   }
   else {
     const { id } = row;
-    checkedList.value = checkedList.value?.filter(item => item.id !== id);
+    checkedList.value = checkedList.value?.filter((item: IRowType) => item.id !== id);
   }
 };
 
@@ -382,7 +401,7 @@ const handleSelectAll = ({ checked, data }: ISelectPayload) => {
 
 watch(
   () => list,
-  (v) => {
+  (v: IRowType[]) => {
     const list: IRowType[] = [];
     v?.forEach((item: any) => {
       list.push({
@@ -438,32 +457,6 @@ watch(
   },
 );
 
-// Headers 选择器失焦后，去获取用户手动输入的值
-const handleHeaderKeySelectBlur = (row: IRowType, inputRefNamePrefix: string, index: number, columnIndex: number) => {
-  try {
-    if (inputRefNamePrefix && index !== undefined && columnIndex !== undefined) {
-      const selectRef = formInputRef.value.get(`${inputRefNamePrefix}${index}-${columnIndex}`);
-      if (!selectRef?.curSearchValue) {
-        row.name = '';
-        selectRef?.handleClear();
-      }
-      else {
-        row.name = selectRef?.curSearchValue || '';
-      }
-    }
-  }
-  catch (error) {
-    console.log(error);
-  }
-};
-
-const handleHeaderKeySelect = (row: IRowType, value: string) => {
-  setTimeout(() => {
-    row.name = value;
-    componentKey.value += 1;
-  });
-};
-
 defineExpose({
   validate,
   getTableData,
@@ -475,21 +468,25 @@ defineExpose({
   font-size: 14px;
   color: #C4C6CC;
   cursor: pointer;
+
   &:hover {
     color: #979BA5;
   }
+
   &.add-btn {
     margin-right: 16px;
   }
 }
 
 .edit-input.bk-input {
-  border: none;
   height: 100%;
+  border: none;
+
   &.is-focused:not(.is-readonly) {
     border: 1px solid #3A84FF;
     box-shadow: none;
   }
+
   &:hover {
     border: 1px solid #A3C5FD;
   }
@@ -497,26 +494,34 @@ defineExpose({
 
 .edit-select {
   height: 100%;
+
   :deep(.bk-select-trigger) {
     height: 100%;
   }
+
   :deep(.bk-input) {
-    border: none;
     height: 100%;
-    border-radius: 0px;
+    border: none;
+    border-radius: 0;
+
     .angle-up {
       display: none !important;
     }
+
     &:hover {
       border: 1px solid #A3C5FD;
+
       .angle-up {
         display: inline-flex !important;
       }
     }
   }
+
   &.is-focus {
+
     :deep(.bk-input) {
     border: 1px solid #3A84FF;
+
     .angle-up {
       display: inline-flex !important;
     }
@@ -525,8 +530,9 @@ defineExpose({
 }
 
 .variable-table {
+
   .td-text {
-    //padding: 0 16px;
+    // padding: 0 16px;
   }
 
   :deep(.bk-form-error-tips) {
@@ -535,44 +541,59 @@ defineExpose({
 
   :deep(.bk-form.table-cell-form) {
     line-height: 42px;
+
     .bk-form-item.table-form-item {
       margin-bottom: 0;
+
       .bk-form-content {
         line-height: 42px !important;
+
         .bk-input {
           height: 42px;
           line-height: 42px;
           border: 0;
+
           .bk-input--text {
-            //padding: 0 16px;
+            // padding: 0 16px;
           }
         }
+
         .edit-input.bk-input {
-          border-radius: 0px;
+          border-radius: 0;
+
           &:hover {
             border: 1px solid #A3C5FD;
           }
+
           &.is-focused {
             border: 1px solid #3A84FF;
           }
         }
+
         .bk-select {
+
           &:hover {
+
             .bk-input {
               border: 1px solid #A3C5FD;
             }
           }
+
           &.is-focus {
+
             .bk-input {
               border: 1px solid #3A84FF;
             }
           }
         }
       }
+
       &.is-error {
+
         .bk-form-content {
+
           .bk-input--text {
-            background: #FFEEEE;
+            background: #FEE;
           }
         }
       }
@@ -580,9 +601,12 @@ defineExpose({
   }
 
   :deep(.bk-table-body-content) {
+
     .custom-table-cell {
+
       .cell {
         padding: 0;
+
         &:hover {
           cursor: pointer;
         }
@@ -592,7 +616,7 @@ defineExpose({
 
   :deep(.bk-scrollbar .bk__rail-x) {
     display: none;
-    opacity: 0
+    opacity: 0%
   }
 }
 </style>

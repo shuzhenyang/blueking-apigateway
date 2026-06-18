@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -15,6 +15,7 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+from html import escape as html_escape
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List
 
@@ -27,11 +28,9 @@ from rest_framework import generics, status
 from apigateway.apis.web.constants import ExportTypeEnum
 from apigateway.apps.support.constants import DocLanguageEnum
 from apigateway.biz.resource import ResourceHandler
-from apigateway.biz.resource_doc.archive_factory import ArchiveFileFactory
-from apigateway.biz.resource_doc.exceptions import NoResourceDocError, ResourceDocJinja2TemplateError
-from apigateway.biz.resource_doc.exporter.generators import DocArchiveGenerator
-from apigateway.biz.resource_doc.importer import DocImporter
-from apigateway.biz.resource_doc.importer.parsers import ArchiveParser, OpenAPIParser
+from apigateway.biz.resource_doc import ArchiveFileFactory, NoResourceDocError, ResourceDocJinja2TemplateError
+from apigateway.biz.resource_doc.exporter import DocArchiveGenerator
+from apigateway.biz.resource_doc.importer import ArchiveParser, DocImporter, OpenAPIParser
 from apigateway.common.error_codes import error_codes
 from apigateway.common.exceptions import SchemaValidationError
 from apigateway.core.models import Resource
@@ -90,7 +89,9 @@ class DocImportByArchiveApi(generics.CreateAPIView):
                 _("不存在符合条件的资源文档，请参考使用指南，检查归档文件中资源文档是否正确。"), replace=True
             )
         except ResourceDocJinja2TemplateError as err:
-            raise error_codes.INTERNAL.format(_("导入资源文档失败，{err}。").format(err=err), replace=True)
+            raise error_codes.INTERNAL.format(
+                _("导入资源文档失败，{err}。").format(err=html_escape(str(err))), replace=True
+            )
 
         importer = DocImporter(
             gateway_id=request.gateway.id,

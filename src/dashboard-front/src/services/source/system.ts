@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -16,17 +16,15 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import http from '../http';
+import type {
+  ISystemDetailResponse,
+  ISystemListResponse,
+} from '@/services/types/responses/esb.ts';
+import type { IEsbSystemsListQuery } from '@/services/types/query/esb.ts';
+import type { IEsbSystemsUpdate } from '@/services/types/body/patch/esb.ts';
+import type { IEsbSystemsCreate } from '@/services/types/body/post/esb.ts';
 
-const system = '/esb/systems/';
-
-export interface ISystemConfig {
-  name: string
-  description: string
-  comment: string
-  doc_category_id: string
-  timeout: number
-  maintainers: string[]
-}
+const path = '/esb/systems';
 
 export interface ISystemItem {
   comment: string
@@ -45,34 +43,34 @@ export interface ISystemItem {
 /**
  *  获取系统管理列表
  */
-export function getSystems() {
-  return http.get(`${system}`);
+export function getSystems(query: IEsbSystemsListQuery = {}) {
+  return http.get<ISystemListResponse[]>(`${path}/`, query);
 }
 
 /**
  *  获取系统管理详情
  */
 export function getSystemDetail(systemId: number) {
-  return http.get(`${system}${systemId}/`);
+  return http.get<ISystemDetailResponse>(`${path}/${systemId}/`);
 }
 
 /**
  *  新增系统管理
  */
-export function addSystem(params: ISystemConfig) {
-  return http.post(`${system}`, params);
+export function addSystem(params: IEsbSystemsCreate) {
+  return http.post(`${path}/`, params);
 }
 
 /**
  *  更新系统管理
  */
-export function updateSystem(systemId: number, params: ISystemConfig) {
-  return http.put(`${system}${systemId}/`, params);
+export function updateSystem(systemId: number, params: IEsbSystemsUpdate) {
+  return http.put(`${path}/${systemId}/`, params);
 }
 
 /**
  *  删除系统管理
  */
 export function deleteSystem(systemId: number) {
-  return http.delete(`${system}${systemId}/`);
+  return http.delete(`${path}/${systemId}/`);
 }

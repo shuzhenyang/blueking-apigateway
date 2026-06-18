@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,8 +22,9 @@ import operator
 
 from django_dynamic_fixture import G
 
-from apigateway.apps.support.models import GatewaySDK, ResourceDoc, ResourceDocVersion
-from apigateway.core.models import Proxy, Release, Resource, ResourceVersion, Stage
+from apigateway.apps.openapi.models import OpenAPIFileResourceSchemaVersion, OpenAPIResourceSchemaVersion
+from apigateway.apps.support.models import GatewaySDK, ReleasedResourceDoc, ResourceDoc, ResourceDocVersion
+from apigateway.core.models import Proxy, Release, ReleasedResource, Resource, ResourceVersion, Stage
 from apigateway.tests.utils.testing import create_gateway, dummy_time
 
 
@@ -77,6 +78,7 @@ class TestResourceVersionListCreateApi:
                 "sdk_count": 1,
                 "created_time": dummy_time.str,
                 "created_by": resource_version.created_by,
+                "deletable": False,
             },
         ]
         expected_release_stages = [
@@ -93,14 +95,38 @@ class TestResourceVersionListCreateApi:
         expected_release_stages.sort(key=operator.itemgetter("name"))
         assert released_stages == expected_release_stages
 
+    def test_list_deletable_true(self, request_view, fake_gateway):
+        """When no release and no SDK, deletable should be True."""
+        resource_version = G(
+            ResourceVersion,
+            gateway=fake_gateway,
+            version="2.0.0",
+            created_time=dummy_time.time,
+        )
 
-class TestResourceVersionRetrieveApi:
+        resp = request_view(
+            method="GET",
+            view_name="gateway.resource_version.list_create",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+        )
+
+        result = resp.json()
+        assert resp.status_code == 200
+
+        results = result["data"]["results"]
+        assert results[0]["deletable"] is True
+        assert results[0]["sdk_count"] == 0
+        assert results[0]["released_stages"] == []
+
+
+class TestResourceVersionRetrieveDestroyApi:
     def test_retrieve(
         self, request_view, fake_backend, fake_stage, fake_gateway, fake_resource_version_v2, echo_plugin_stage_binding
     ):
         resp = request_view(
             method="GET",
-            view_name="gateway.resource_version.retrieve",
+            view_name="gateway.resource_version.retrieve_destroy",
             gateway=fake_gateway,
             path_params={"gateway_id": fake_gateway.id, "id": fake_resource_version_v2.id},
         )
@@ -143,6 +169,77 @@ class TestResourceVersionRetrieveApi:
             "created_time": fake_resource_version_v2.created_time,
             "created_by": fake_resource_version_v2.created_by,
         }
+
+    def test_destroy(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        rv_id = rv.id
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.retrieve_destroy",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv_id},
+        )
+        assert resp.status_code == 204
+        assert not ResourceVersion.objects.filter(id=rv_id).exists()
+
+    def test_destroy_referenced_by_release(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        stage = G(Stage, gateway=fake_gateway, status=1)
+        G(Release, gateway=fake_gateway, stage=stage, resource_version=rv)
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.retrieve_destroy",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+        )
+        assert resp.status_code == 400
+        assert ResourceVersion.objects.filter(id=rv.id).exists()
+
+    def test_destroy_referenced_by_sdk(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        G(GatewaySDK, gateway=fake_gateway, resource_version=rv)
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.retrieve_destroy",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+        )
+        assert resp.status_code == 400
+        assert ResourceVersion.objects.filter(id=rv.id).exists()
+
+    def test_destroy_cleans_related_records(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        rv_id = rv.id
+        G(ReleasedResourceDoc, gateway=fake_gateway, resource_version_id=rv_id, resource_id=1, language="zh")
+        G(
+            ReleasedResource,
+            gateway=fake_gateway,
+            resource_version_id=rv_id,
+            resource_id=1,
+            resource_name="r",
+            resource_method="GET",
+            resource_path="/r",
+        )
+        G(ResourceDocVersion, gateway=fake_gateway, resource_version=rv)
+        G(OpenAPIResourceSchemaVersion, resource_version=rv, schema=[])
+        G(OpenAPIFileResourceSchemaVersion, gateway=fake_gateway, resource_version=rv, schema="")
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.retrieve_destroy",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv_id},
+        )
+        assert resp.status_code == 204
+        assert not ResourceVersion.objects.filter(id=rv_id).exists()
+        assert not ReleasedResourceDoc.objects.filter(resource_version_id=rv_id).exists()
+        assert not ReleasedResource.objects.filter(resource_version_id=rv_id).exists()
+        assert not ResourceDocVersion.objects.filter(resource_version_id=rv_id).exists()
+        assert not OpenAPIResourceSchemaVersion.objects.filter(resource_version_id=rv_id).exists()
+        assert not OpenAPIFileResourceSchemaVersion.objects.filter(resource_version_id=rv_id).exists()
 
 
 class TestResourceVersionNeedNewVersionRetrieveApi:
@@ -365,3 +462,217 @@ class TestResourceVersionGetApi:
         assert resp.status_code == 200
         result = resp.json()
         assert result == {"data": {"version": "1.0.0"}}
+
+
+class TestResourceVersionBatchDeleteApi:
+    def test_batch_delete(self, request_view, fake_gateway):
+        rv1 = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        rv2 = G(ResourceVersion, gateway=fake_gateway, version="2.0.0")
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": [rv1.id, rv2.id]},
+        )
+        assert resp.status_code == 204
+        assert not ResourceVersion.objects.filter(id=rv1.id).exists()
+        assert not ResourceVersion.objects.filter(id=rv2.id).exists()
+
+    def test_batch_delete_empty_ids(self, request_view, fake_gateway):
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": []},
+        )
+        assert resp.status_code == 400
+
+    def test_batch_delete_duplicate_ids(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": [rv.id, rv.id]},
+        )
+        assert resp.status_code == 204
+        assert not ResourceVersion.objects.filter(id=rv.id).exists()
+
+    def test_batch_delete_not_exist(self, request_view, fake_gateway):
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": [99999]},
+        )
+        assert resp.status_code == 400
+
+    def test_batch_delete_some_referenced(self, request_view, fake_gateway):
+        rv1 = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        rv2 = G(ResourceVersion, gateway=fake_gateway, version="2.0.0")
+        stage = G(Stage, gateway=fake_gateway, status=1)
+        G(Release, gateway=fake_gateway, stage=stage, resource_version=rv2)
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": [rv1.id, rv2.id]},
+        )
+        assert resp.status_code == 400
+        # neither should be deleted since the operation is atomic
+        assert ResourceVersion.objects.filter(id=rv1.id).exists()
+        assert ResourceVersion.objects.filter(id=rv2.id).exists()
+
+    def test_batch_delete_all_referenced(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        G(GatewaySDK, gateway=fake_gateway, resource_version=rv)
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": [rv.id]},
+        )
+        assert resp.status_code == 400
+        assert ResourceVersion.objects.filter(id=rv.id).exists()
+
+    def test_batch_delete_cleans_related_records(self, request_view, fake_gateway):
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0")
+        rv_id = rv.id
+        G(ReleasedResourceDoc, gateway=fake_gateway, resource_version_id=rv_id, resource_id=1, language="zh")
+        G(
+            ReleasedResource,
+            gateway=fake_gateway,
+            resource_version_id=rv_id,
+            resource_id=1,
+            resource_name="r",
+            resource_method="GET",
+            resource_path="/r",
+        )
+
+        resp = request_view(
+            method="DELETE",
+            view_name="gateway.resource_version.batch_delete",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id},
+            data={"ids": [rv_id]},
+        )
+        assert resp.status_code == 204
+        assert not ResourceVersion.objects.filter(id=rv_id).exists()
+        assert not ReleasedResourceDoc.objects.filter(resource_version_id=rv_id).exists()
+        assert not ReleasedResource.objects.filter(resource_version_id=rv_id).exists()
+
+
+class TestResourceVersionExportApi:
+    def test_export_resource_yaml(self, request_view, fake_gateway, mocker):
+        """导出资源配置（yaml 格式）"""
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0", _data=json.dumps([]))
+
+        mock_export = mocker.patch(
+            "apigateway.apis.web.resource_version.views.OpenAPIExportManager.export_resource_version_openapi",
+            return_value="openapi: '2.0'",
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="gateway.resource_version.export",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+            data={"file_type": "yaml"},
+        )
+        assert resp.status_code == 200
+        assert "bk_apigw_resources_" in resp["Content-Disposition"]
+        assert ".yaml" in resp["Content-Disposition"]
+        mock_export.assert_called_once()
+
+    def test_export_resource_json(self, request_view, fake_gateway, mocker):
+        """导出资源配置（json 格式）"""
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0", _data=json.dumps([]))
+
+        mocker.patch(
+            "apigateway.apis.web.resource_version.views.OpenAPIExportManager.export_resource_version_openapi",
+            return_value='{"openapi": "2.0"}',
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="gateway.resource_version.export",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+            data={"file_type": "json"},
+        )
+        assert resp.status_code == 200
+        assert ".json" in resp["Content-Disposition"]
+
+    def test_export_resource_default(self, request_view, fake_gateway, mocker):
+        """不传 file_type 时，默认导出资源配置（yaml）"""
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0", _data=json.dumps([]))
+
+        mocker.patch(
+            "apigateway.apis.web.resource_version.views.OpenAPIExportManager.export_resource_version_openapi",
+            return_value="openapi: '2.0'",
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="gateway.resource_version.export",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+            data={},
+        )
+        assert resp.status_code == 200
+        assert ".yaml" in resp["Content-Disposition"]
+
+
+class TestResourceVersionDocExportApi:
+    def test_export_docs_zip(self, request_view, fake_gateway):
+        """导出文档（zip 格式）"""
+        rv = G(
+            ResourceVersion,
+            gateway=fake_gateway,
+            version="1.0.0",
+            _data=json.dumps([{"id": 1, "name": "get_user"}]),
+        )
+        G(
+            ResourceDocVersion,
+            gateway=fake_gateway,
+            resource_version=rv,
+            _data=json.dumps(
+                [
+                    {"resource_id": 1, "language": "zh", "content": "# 获取用户"},
+                ]
+            ),
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="gateway.resource_version.export_docs",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+            data={"file_type": "zip"},
+        )
+        assert resp.status_code == 200
+        assert "bk_apigw_docs_" in resp["Content-Disposition"]
+        assert ".zip" in resp["Content-Disposition"]
+
+    def test_export_docs_no_doc_version(self, request_view, fake_gateway):
+        """没有文档版本数据时返回错误"""
+        rv = G(ResourceVersion, gateway=fake_gateway, version="1.0.0", _data=json.dumps([]))
+
+        resp = request_view(
+            method="POST",
+            view_name="gateway.resource_version.export_docs",
+            gateway=fake_gateway,
+            path_params={"gateway_id": fake_gateway.id, "id": rv.id},
+            data={"file_type": "zip"},
+        )
+        assert resp.status_code == 400

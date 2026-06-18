@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,7 +22,7 @@ from ddf import G
 from apigateway.apps.monitor.constants import AlarmTypeEnum
 from apigateway.apps.monitor.models import AlarmRecord
 from apigateway.core.models import Gateway
-from apigateway.service.alert_flow.handlers import base as base_handlers
+from apigateway.service.alert_flow import base as base_handlers
 
 pytestmark = [pytest.mark.django_db]
 
@@ -45,7 +45,7 @@ class TestAPIExistFilter:
 
         event = mocker.MagicMock(alarm_record_id=1, event_dimensions={"api_id": gateway.id})
         mock_update_alarm = mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.AlarmRecord.objects.update_alarm",
+            "apigateway.service.alert_flow.base.AlarmRecord.objects.update_alarm",
             return_value=None,
         )
 
@@ -57,7 +57,7 @@ class TestAPIExistFilter:
     def test_do_with_api_not_exist(self, faker, mocker):
         event = mocker.MagicMock(alarm_record_id=1, event_dimensions={"api_id": 0})
         mock_update_alarm = mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.AlarmRecord.objects.update_alarm",
+            "apigateway.service.alert_flow.base.AlarmRecord.objects.update_alarm",
             return_value=None,
         )
 
@@ -72,15 +72,13 @@ class TestRelatedLogRecordsFetcher:
         self.fetcher = base_handlers.RelatedLogRecordsFetcher("", [])
 
     def test_get_request_log_records(self, faker, mocker, mock_event):
-        mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.LogSearchClient.search", return_value=[{"api_id": 1}]
-        )
+        mocker.patch("apigateway.service.alert_flow.base.LogSearchClient.search", return_value=[{"api_id": 1}])
         result = self.fetcher._get_request_log_records(mock_event)
         assert result == [{"api_id": 1}]
 
     def test_filter_request_log_records(self, mocker):
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.RelatedLogRecordsFetcher._is_record_need_alert",
+            "apigateway.service.alert_flow.base.RelatedLogRecordsFetcher._is_record_need_alert",
             side_effect=[True, False, True],
         )
         records = [{"_source": {}}, {"_source": {}}, {"_source": {}}]
@@ -90,12 +88,12 @@ class TestRelatedLogRecordsFetcher:
 
     def test_is_record_need_alert(self, mocker):
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.AlarmFilterConfig.objects.get_filter_config",
+            "apigateway.service.alert_flow.base.AlarmFilterConfig.objects.get_filter_config",
             return_value={},
         )
 
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.Matcher.is_match",
+            "apigateway.service.alert_flow.base.Matcher.is_match",
             side_effect=[True, False],
         )
         result = self.fetcher._is_record_need_alert(AlarmTypeEnum.APP_REQUEST, {})
@@ -106,25 +104,25 @@ class TestRelatedLogRecordsFetcher:
 
     def test_do(self, mocker, faker, mock_event):
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.RelatedLogRecordsFetcher._get_request_log_records",
+            "apigateway.service.alert_flow.base.RelatedLogRecordsFetcher._get_request_log_records",
             return_value=(False, "", []),
         )
         result = self.fetcher._do(mock_event)
         assert result is None
 
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.RelatedLogRecordsFetcher._get_request_log_records",
+            "apigateway.service.alert_flow.base.RelatedLogRecordsFetcher._get_request_log_records",
             return_value=(True, "", []),
         )
         result = self.fetcher._do(mock_event)
         assert result is None
 
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.RelatedLogRecordsFetcher._get_request_log_records",
+            "apigateway.service.alert_flow.base.RelatedLogRecordsFetcher._get_request_log_records",
             return_value=(True, "", []),
         )
         mocker.patch(
-            "apigateway.service.alert_flow.handlers.base.RelatedLogRecordsFetcher._filter_request_log_records",
+            "apigateway.service.alert_flow.base.RelatedLogRecordsFetcher._filter_request_log_records",
             return_value=[{"api_id": 1}],
         )
         result = self.fetcher._do(mock_event)
@@ -137,20 +135,20 @@ class TestAlerter:
         self.alerter = base_handlers.Alerter(notice_ways=[])
 
     def test_do(self, mocker, mock_event):
-        mocker.patch("apigateway.service.alert_flow.handlers.base.Alerter._alert", return_value=(True, "", ""))
-        mocker.patch("apigateway.service.alert_flow.handlers.base.Alerter._update_status", return_value=None)
+        mocker.patch("apigateway.service.alert_flow.base.Alerter._alert", return_value=(True, "", ""))
+        mocker.patch("apigateway.service.alert_flow.base.Alerter._update_status", return_value=None)
 
         assert self.alerter._do(mock_event) is None
 
     def test_alert(self, mocker, mock_event):
-        mocker.patch("apigateway.service.alert_flow.handlers.base.Alerter.get_message", return_value="message")
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_message", return_value="message")
 
-        mocker.patch("apigateway.service.alert_flow.handlers.base.Alerter.get_receivers", return_value=[])
-        mocker.patch("apigateway.service.alert_flow.handlers.base.Alerter.get_tenant_id", return_value="")
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_receivers", return_value=[])
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_tenant_id", return_value="")
         status, _, _ = self.alerter._alert(mock_event)
         assert status == "failure"
 
-        mocker.patch("apigateway.service.alert_flow.handlers.base.Alerter.get_receivers", return_value=["admin"])
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_receivers", return_value=["admin"])
         status, _, _ = self.alerter._alert(mock_event)
         assert status == "success"
 
@@ -165,3 +163,92 @@ class TestAlerter:
         template = "It is {{color}}"
         result = self.alerter.render_template(template, color="green")
         assert result == "It is green"
+
+    @pytest.mark.parametrize(
+        "message, match_method, items, expected",
+        [
+            ("backend timeout error", "contains", ["timeout"], True),
+            ("backend timeout error", "contains", ["not_found"], False),
+            ("backend timeout error", "contains", ["not_found", "timeout"], True),
+            ("backend timeout error", "contains", [], False),
+            ("error code 500", "regex_match", [r"code \d+"], True),
+            ("error code abc", "regex_match", [r"code \d+"], False),
+            ("error code 500", "regex_match", [r"no_match", r"code \d+"], True),
+            ("error code 500", "regex_match", [], False),
+            ("error code 500", "regex_match", [r"[invalid"], False),
+        ],
+    )
+    def test_match_message(self, message, match_method, items, expected):
+        assert self.alerter._match_message(message, match_method, items) is expected
+
+    def test_is_message_filtered_no_strategies(self, mocker, mock_event):
+        mock_event.extend = {}
+        assert self.alerter._is_message_filtered("some message", mock_event) is False
+
+    def test_is_message_filtered_no_filter_config(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {"notice_config": {}}
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("some message", mock_event) is False
+
+    def test_is_message_filtered_white_list_matched(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {
+            "filter_config": {"type": "white_list", "match": "contains", "items": ["important"]},
+        }
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("important alert message", mock_event) is False
+
+    def test_is_message_filtered_white_list_not_matched(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {
+            "filter_config": {"type": "white_list", "match": "contains", "items": ["important"]},
+        }
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("regular alert message", mock_event) is True
+
+    def test_is_message_filtered_black_list_matched(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {
+            "filter_config": {"type": "black_list", "match": "contains", "items": ["ignore"]},
+        }
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("please ignore this", mock_event) is True
+
+    def test_is_message_filtered_black_list_not_matched(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {
+            "filter_config": {"type": "black_list", "match": "contains", "items": ["ignore"]},
+        }
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("important alert message", mock_event) is False
+
+    def test_is_message_filtered_regex_match(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {
+            "filter_config": {"type": "black_list", "match": "regex_match", "items": [r"error_\d{3}"]},
+        }
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("got error_500 from backend", mock_event) is True
+        assert self.alerter._is_message_filtered("got error_abc from backend", mock_event) is False
+
+    def test_is_message_filtered_empty_items(self, mocker, mock_event):
+        strategy = mocker.MagicMock()
+        strategy.config = {
+            "filter_config": {"type": "black_list", "match": "contains", "items": []},
+        }
+        mock_event.extend = {"alarm_strategies": [strategy]}
+        assert self.alerter._is_message_filtered("any message", mock_event) is False
+
+    def test_alert_filtered(self, mocker, mock_event):
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_message", return_value="message")
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_receivers", return_value=["admin"])
+        mocker.patch("apigateway.service.alert_flow.base.Alerter.get_tenant_id", return_value="")
+        mocker.patch(
+            "apigateway.service.alert_flow.base.Alerter._is_message_filtered",
+            return_value=True,
+        )
+
+        status, comment, _ = self.alerter._alert(mock_event)
+        assert status == "skipped"
+        assert comment == "告警消息被过滤规则拦截"

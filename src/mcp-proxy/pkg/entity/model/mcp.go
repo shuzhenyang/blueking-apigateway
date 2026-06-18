@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -40,16 +40,17 @@ const ToolNameSeparator = "@"
 
 // MCPServer ...
 type MCPServer struct {
-	ID            int         `gorm:"primaryKey;autoIncrement;column:id"`
-	Name          string      `gorm:"column:name;size:64;uniqueIndex"`
-	Description   string      `gorm:"column:description;size:512"`
-	IsPublic      bool        `gorm:"column:is_public"`
-	Labels        ArrayString `gorm:"column:labels"`
-	ResourceNames ArrayString `gorm:"column:resource_names"`
-	Status        int         `gorm:"column:status"`
-	GatewayID     int         `gorm:"column:gateway_id"`
-	StageID       int         `gorm:"column:stage_id"`
-	ProtocolType  string      `gorm:"column:protocol_type;size:32;default:sse"`
+	ID                 int         `gorm:"primaryKey;autoIncrement;column:id"`
+	Name               string      `gorm:"column:name;size:64;uniqueIndex"`
+	Description        string      `gorm:"column:description;size:512"`
+	IsPublic           bool        `gorm:"column:is_public"`
+	Labels             ArrayString `gorm:"column:labels"`
+	ResourceNames      ArrayString `gorm:"column:resource_names"`
+	Status             int         `gorm:"column:status"`
+	GatewayID          int         `gorm:"column:gateway_id"`
+	StageID            int         `gorm:"column:stage_id"`
+	ProtocolType       string      `gorm:"column:protocol_type;size:32;default:sse"`
+	RawResponseEnabled bool        `gorm:"column:raw_response_enabled;default:false"`
 }
 
 // GetProtocolType 获取协议类型，默认返回 SSE
@@ -141,7 +142,7 @@ func (m *MCPServer) TableName() string {
 type ArrayString []string
 
 // Scan 实现 Scanner 接口用于从数据库读取
-func (r *ArrayString) Scan(value interface{}) error {
+func (r *ArrayString) Scan(value any) error {
 	str, ok := value.([]byte)
 	if !ok {
 		return errors.New("invalid resource_ids type")

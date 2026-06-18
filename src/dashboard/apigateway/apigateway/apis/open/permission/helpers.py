@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,7 +22,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Union
 
 from django.utils.functional import cached_property
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from apigateway.apps.permission.constants import (
     GrantDimensionEnum,
@@ -36,9 +36,7 @@ from apigateway.core.models import Gateway, ReleasedResource, Resource
 
 
 class ResourcePermission(BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
-        ignored_types = (cached_property,)
+    model_config = ConfigDict(arbitrary_types_allowed=True, ignored_types=(cached_property,))
 
     id: int
     name: str

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,7 +19,9 @@
 package util_test
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
@@ -108,6 +110,42 @@ var _ = Describe("Request", func() {
 
 			id := util.GetInstanceID(c)
 			assert.Equal(GinkgoT(), "test", id)
+		})
+	})
+
+	Describe("XRequestID", func() {
+		It("GetXRequestID returns empty when not set", func() {
+			c := &gin.Context{}
+			id := util.GetXRequestID(c)
+			assert.Equal(GinkgoT(), "", id)
+		})
+
+		It("SetXRequestID and GetXRequestID", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetXRequestID(c, "global-123")
+
+			id := util.GetXRequestID(c)
+			assert.Equal(GinkgoT(), "global-123", id)
+		})
+
+		It("GetXRequestIDFromContext returns value from context", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetXRequestID(c, "global-456")
+
+			id := util.GetXRequestIDFromContext(c.Request.Context())
+			assert.Equal(GinkgoT(), "global-456", id)
+		})
+
+		It("GetXRequestIDFromContext returns empty for empty context", func() {
+			ctx := context.Background()
+			id := util.GetXRequestIDFromContext(ctx)
+			assert.Equal(GinkgoT(), "", id)
 		})
 	})
 })

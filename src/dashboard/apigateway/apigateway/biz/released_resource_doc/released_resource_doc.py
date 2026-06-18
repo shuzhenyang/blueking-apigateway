@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional, Tuple
 from apigateway.apps.support.constants import DocLanguageEnum
 from apigateway.apps.support.models import ReleasedResourceDoc
 from apigateway.biz.released_resource import ReleasedResourceData, ReleasedResourceHandler
-from apigateway.biz.resource import ResourceHandler
+from apigateway.service.resource import get_resource_updated_time
 
 
 @dataclass
@@ -71,7 +71,7 @@ class ReleasedResourceDocHandler:
             language=language,
         ).first()
 
-        resource_updated_time = ResourceHandler.get_updated_time(gateway_id, resource_name)
+        resource_updated_time = get_resource_updated_time(gateway_id, resource_name)
         if not doc:
             doc_data = DummyResourceDocData.create(language)
             doc_data.updated_time = resource_updated_time

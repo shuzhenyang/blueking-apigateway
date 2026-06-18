@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,13 +22,17 @@ from zoneinfo import ZoneInfo
 
 from django_dynamic_fixture import G
 
+import apigateway.apis.v2.open.serializers as open_serializers
+import apigateway.apis.v2.open.views as open_views
+from apigateway.apps.label.models import APILabel, ResourceLabel
 from apigateway.apps.mcp_server.constants import (
     MCPServerAppPermissionApplyStatusEnum,
+    MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
 )
-from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermissionApply
+from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermissionApply, MCPServerCategory
 from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
-from apigateway.core.models import Gateway, Release, Stage
+from apigateway.core.models import Gateway, Release, Resource, Stage
 from apigateway.tests.utils.testing import get_response_json
 
 
@@ -320,3 +324,1299 @@ class TestParseDatetimeStrToTimestampApi:
         assert resp.status_code == 400
         result = resp.json()
         assert "error" in result or "message" in result
+
+
+class TestLogSearchByRequestIdApi:
+    def test_search_logs_returns_log_fields(self, request_view):
+        """测试根据 request_id 查询日志时，返回的日志字段正确（非全 null）"""
+        fake_logs = [
+            {
+                "request_id": "2ea4000d-5676-4ae7-a3b5-a07f3dc59a6e",
+                "stage": "prod",
+                "resource_id": 1,
+                "resource_name": "get_user",
+                "app_code": "test-app",
+                "client_ip": "127.0.0.1",
+                "method": "GET",
+                "http_host": "bkapi.example.com",
+                "http_path": "/api/v1/users/",
+                "params": "",
+                "body": "",
+                "backend_scheme": "http",
+                "backend_method": "GET",
+                "backend_host": "backend.example.com",
+                "backend_path": "/users/",
+                "response_body": '{"result": true}',
+                "status": 200,
+                "request_duration": 100,
+                "backend_duration": 50,
+                "code_name": "",
+                "error": "",
+                "response_desc": "",
+                "timestamp": 1704628245,
+            }
+        ]
+        with mock.patch(
+            "apigateway.apis.v2.open.views.LogHandler.search_logs_by_request_id",
+            return_value=(1, fake_logs),
+        ):
+            resp = request_view(
+                method="GET",
+                view_name="openapi.v2.open.tools.log.query_by_request_id",
+                app=mock.MagicMock(app_code="test"),
+                data={"request_id": "2ea4000d-5676-4ae7-a3b5-a07f3dc59a6e"},
+            )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert "data" in result
+        logs = result["data"]
+        assert len(logs) == 1
+        assert logs[0]["request_id"] == "2ea4000d-5676-4ae7-a3b5-a07f3dc59a6e"
+        assert logs[0]["status"] == 200
+        assert logs[0]["method"] == "GET"
+        assert logs[0]["client_ip"] == "127.0.0.1"
+
+    def test_search_logs_empty_result(self, request_view):
+        """测试没有日志时返回空列表"""
+        with mock.patch(
+            "apigateway.apis.v2.open.views.LogHandler.search_logs_by_request_id",
+            return_value=(0, []),
+        ):
+            resp = request_view(
+                method="GET",
+                view_name="openapi.v2.open.tools.log.query_by_request_id",
+                app=mock.MagicMock(app_code="test"),
+                data={"request_id": "00000000-0000-0000-0000-000000000000"},
+            )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"] == []
+
+
+class TestMCPServerListApiOAuth2:
+    """测试 MCPServer 列表接口返回 oauth2_public_client_enabled 字段"""
+
+    def test_list_returns_oauth2_public_client_enabled(self, request_view, fake_gateway, settings):
+        """测试 MCPServer 列表接口正确返回 oauth2_public_client_enabled 字段"""
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+            oauth2_public_client_enabled=True,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        mcp_data = next(
+            (item for item in result["data"]["results"] if item["id"] == mcp_server.id),
+            None,
+        )
+        assert mcp_data is not None
+        assert mcp_data["oauth2_public_client_enabled"] is True
+
+    def test_list_returns_oauth2_disabled(self, request_view, fake_gateway, settings):
+        """测试 MCPServer 列表接口返回 oauth2_public_client_enabled=False"""
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+            oauth2_public_client_enabled=False,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        mcp_data = next(
+            (item for item in result["data"]["results"] if item["id"] == mcp_server.id),
+            None,
+        )
+        assert mcp_data is not None
+        assert mcp_data["oauth2_public_client_enabled"] is False
+
+
+class TestOAuthProtectedResourceApi:
+    def test_get_oauth_protected_resource_success(self, request_view, settings):
+        """测试成功获取 OAuth 保护资源元数据"""
+        settings.BK_AUTH_SERVER_URL = "https://bkauth.example.com"
+        resource_url = "https://api.example.com/resource"
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.well_known.oauth_protected_resource",
+            data={"resource": resource_url},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["resource"] == resource_url
+        assert result["authorization_servers"] == ["https://bkauth.example.com"]
+        assert result["bearer_methods_supported"] == ["header"]
+
+    def test_get_oauth_protected_resource_returns_settings_auth_url(self, request_view, settings):
+        """测试返回的 authorization_servers 使用 settings.BK_AUTH_SERVER_URL"""
+        settings.BK_AUTH_SERVER_URL = "https://custom-auth.example.com"
+        resource_url = "https://api.example.com/another-resource"
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.well_known.oauth_protected_resource",
+            data={"resource": resource_url},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["authorization_servers"] == ["https://custom-auth.example.com"]
+
+    def test_get_oauth_protected_resource_missing_resource_param(self, request_view, settings):
+        """测试缺少 resource 参数时返回错误"""
+        settings.BK_AUTH_SERVER_URL = "https://bkauth.example.com"
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.well_known.oauth_protected_resource",
+            data={},
+        )
+
+        assert resp.status_code == 400
+
+    def test_get_oauth_protected_resource_empty_resource_param(self, request_view, settings):
+        """测试 resource 参数为空时返回错误"""
+        settings.BK_AUTH_SERVER_URL = "https://bkauth.example.com"
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.well_known.oauth_protected_resource",
+            data={"resource": ""},
+        )
+
+        assert resp.status_code == 400
+
+
+class TestMCPServerRetrieveApi:
+    """测试 MCPServerRetrieveApi"""
+
+    def test_retrieve_public_mcp_server(self, request_view, fake_gateway, mocker):
+        """测试获取公开的 MCPServer 详情"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="test-mcp-server",
+            title="Test MCP Server",
+            description="Test Description",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+            _resource_names="tool1",
+        )
+
+        # Mock MCPServerHandler 方法
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([], ["label1"]),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["id"] == mcp_server.id
+        assert result["data"]["name"] == "test-mcp-server"
+        assert result["data"]["title"] == "Test MCP Server"
+        assert result["data"]["is_public"] is True
+        assert "guideline" in result["data"]
+        assert "tools" in result["data"]
+        assert "maintainers" in result["data"]
+        assert "oauth2_public_client_enabled" in result["data"]
+
+    def test_retrieve_returns_tool_name_with_rename(self, request_view, fake_gateway, mocker):
+        """测试 MCPServer 详情接口返回 tool_name（重命名后的名称）"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        # 创建带重命名的 MCPServer: resource_name=original_tool, tool_name=renamed_tool
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="mcp-server-with-rename",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+            _resource_names="original_tool@renamed_tool",  # 使用 @ 作为分隔符
+        )
+
+        # 创建一个模拟的 Resource 对象
+        mock_resource = mock.MagicMock()
+        mock_resource.id = 1
+        mock_resource.name = "original_tool"
+        mock_resource.description = "Test tool description"
+        mock_resource.method = "GET"
+        mock_resource.path = "/api/test"
+        mock_resource.verified_user_required = False
+        mock_resource.verified_app_required = True
+        mock_resource.resource_perm_required = False
+        mock_resource.allow_apply_permission = True
+
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([mock_resource], {1: ["label1"]}),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+
+        # 验证 tools 列表包含 tool_name 字段
+        assert "tools" in result["data"]
+        assert len(result["data"]["tools"]) == 1
+
+        tool_data = result["data"]["tools"][0]
+        assert tool_data["name"] == "original_tool"  # 原始资源名
+        assert tool_data["tool_name"] == "renamed_tool"  # 重命名后的名称
+
+    def test_retrieve_returns_oauth2_public_client_enabled_true(self, request_view, fake_gateway, mocker):
+        """测试 MCPServer 详情接口返回 oauth2_public_client_enabled=True"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="oauth2-mcp-server",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+            oauth2_public_client_enabled=True,
+        )
+
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([], []),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["oauth2_public_client_enabled"] is True
+
+    def test_retrieve_returns_oauth2_public_client_enabled_false(self, request_view, fake_gateway, mocker):
+        """测试 MCPServer 详情接口返回 oauth2_public_client_enabled=False"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="no-oauth2-mcp-server",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+            oauth2_public_client_enabled=False,
+        )
+
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([], []),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["oauth2_public_client_enabled"] is False
+
+    def test_retrieve_private_mcp_server_by_maintainer(self, request_view, fake_gateway, mocker):
+        """测试网关维护者获取私有的 MCPServer 详情"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["test_user"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="private-mcp-server",
+            is_public=False,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        # Mock MCPServerHandler 方法
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([], []),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),  # 用户是维护者
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["data"]["id"] == mcp_server.id
+        assert result["data"]["is_public"] is False
+
+    def test_retrieve_private_mcp_server_by_non_maintainer(self, request_view, fake_gateway, mocker):
+        """测试非维护者无法获取私有的 MCPServer 详情"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="private-mcp-server",
+            is_public=False,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="other_user"),  # 用户不是维护者
+        )
+
+        assert resp.status_code == 404
+
+    def test_retrieve_inactive_mcp_server(self, request_view, fake_gateway, mocker):
+        """测试获取未启用的 MCPServer 返回 404"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            is_public=True,
+            status=MCPServerStatusEnum.INACTIVE.value,  # 未启用
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 404
+
+    def test_retrieve_mcp_server_with_inactive_gateway(self, request_view, fake_gateway, mocker):
+        """测试获取所属网关未启用的 MCPServer 返回 404"""
+        fake_gateway.status = GatewayStatusEnum.INACTIVE.value  # 网关未启用
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 404
+
+    def test_retrieve_mcp_server_with_inactive_stage(self, request_view, fake_gateway, mocker):
+        """测试获取所属环境未启用的 MCPServer 返回 404"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.INACTIVE.value)  # 环境未启用
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 404
+
+    def test_retrieve_returns_categories(self, request_view, fake_gateway, mocker):
+        """测试 MCPServer 详情接口返回分类信息"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="category-retrieve-server",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        cat1, _ = MCPServerCategory.objects.get_or_create(
+            name="Official", defaults={"display_name": "官方资源", "is_active": True}
+        )
+        cat2, _ = MCPServerCategory.objects.get_or_create(
+            name="Monitoring", defaults={"display_name": "监控告警", "is_active": True}
+        )
+        mcp_server.categories.set([cat1, cat2])
+
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([], []),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert "categories" in result["data"]
+        category_names = {c["name"] for c in result["data"]["categories"]}
+        assert "Official" in category_names
+        assert "Monitoring" in category_names
+        for cat in result["data"]["categories"]:
+            assert "name" in cat
+            assert "display_name" in cat
+
+    def test_retrieve_returns_tool_schema(self, request_view, fake_gateway, mocker):
+        """测试 MCPServer 详情接口返回工具的 schema 信息"""
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.maintainers = ["admin"]
+        fake_gateway.save()
+
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="schema-retrieve-server",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+            _resource_names="tool1",
+        )
+
+        tool_resource = mock.MagicMock()
+        tool_resource.id = 101
+        tool_resource.name = "tool1"
+        tool_resource.description = "Tool 1 Description"
+        tool_resource.method = "POST"
+        tool_resource.path = "/api/v1/tool1/"
+        tool_resource.verified_user_required = False
+        tool_resource.verified_app_required = True
+        tool_resource.resource_perm_required = True
+        tool_resource.allow_apply_permission = True
+
+        fake_schema = {
+            "requestBody": {
+                "content": {
+                    "application/json": {"schema": {"type": "object", "properties": {"name": {"type": "string"}}}}
+                }
+            }
+        }
+
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_tools_resources_and_labels",
+            return_value=([tool_resource], {101: ["label1"]}),
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_prompts_count_map",
+            return_value={mcp_server.id: 0},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_prompts",
+            return_value=[],
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.MCPServerHandler.get_user_custom_doc",
+            return_value="",
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.get_resource_id_to_schema_by_resource_version",
+            return_value={101: fake_schema},
+        )
+        mocker.patch(
+            "apigateway.biz.mcp_server.mcp_server.Release.objects.filter",
+            return_value=mock.MagicMock(first=mock.MagicMock(return_value=mock.MagicMock(resource_version_id=1))),
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.retrieve",
+            path_params={"mcp_server_id": mcp_server.id},
+            app=mock.MagicMock(app_code="test"),
+            user=mock.MagicMock(username="test_user"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert len(result["data"]["tools"]) == 1
+        tool = result["data"]["tools"][0]
+        assert tool["name"] == "tool1"
+        assert "schema" in tool
+        assert tool["schema"]["requestBody"]["content"]["application/json"]["schema"]["type"] == "object"
+
+
+class TestGatewayListApiKeyword:
+    def test_list_with_keyword_matches_description(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.is_public = True
+        fake_gateway.description = "蓝鲸网关"
+        fake_gateway.save()
+        G(Release, gateway=fake_gateway)
+
+        g2 = G(Gateway, status=GatewayStatusEnum.ACTIVE.value, is_public=True, description="其他网关")
+        G(Release, gateway=g2)
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.gateway.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"keyword": "蓝鲸"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) == 1
+        assert result["data"][0]["name"] == fake_gateway.name
+
+    def test_list_with_keyword_matches_name(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.is_public = True
+        fake_gateway.save()
+        G(Release, gateway=fake_gateway)
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.gateway.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"keyword": fake_gateway.name[:4]},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) >= 1
+
+
+class TestGatewayBatchQueryApi:
+    def test_batch_query(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.is_public = True
+        fake_gateway.description = "test desc"
+        fake_gateway.save()
+
+        g2 = G(Gateway, status=GatewayStatusEnum.ACTIVE.value, is_public=True, description="other desc")
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.gateway.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": [fake_gateway.name, g2.name]},
+            content_type="application/json",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) == 2
+
+        names = {item["name"] for item in result["data"]}
+        assert fake_gateway.name in names
+        assert g2.name in names
+
+    def test_batch_query_filters_inactive(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.INACTIVE.value
+        fake_gateway.is_public = True
+        fake_gateway.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.gateway.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": [fake_gateway.name]},
+            content_type="application/json",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) == 0
+
+    def test_batch_query_filters_non_public(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.is_public = False
+        fake_gateway.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.gateway.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": [fake_gateway.name]},
+            content_type="application/json",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) == 0
+
+    def test_batch_query_by_ids(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.is_public = True
+        fake_gateway.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.gateway.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"ids": [fake_gateway.id]},
+            content_type="application/json",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) == 1
+        assert set(result["data"][0].keys()) == {"id", "name"}
+        assert result["data"][0]["name"] == fake_gateway.name
+
+    def test_batch_query_with_fields(self, request_view, fake_gateway):
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.is_public = True
+        fake_gateway.save()
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.gateway.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": [fake_gateway.name], "fields": "name"},
+            content_type="application/json",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        assert len(result["data"]) == 1
+        assert set(result["data"][0].keys()) == {"name"}
+
+    def test_batch_query_no_ids_or_names(self, request_view):
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.gateway.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+
+class TestGatewayResourceRetrieveByNameApi:
+    def test_retrieve_existing_resource(self, request_to_view, request_factory, fake_gateway):
+        resource = G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+
+        request = request_factory.get("")
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.info",
+            path_params={"gateway_name": fake_gateway.name, "resource_name": "get_user_info"},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert result["data"]["name"] == "get_user_info"
+        assert result["data"]["id"] == resource.id
+
+    def test_retrieve_nonexistent_resource(self, request_to_view, request_factory, fake_gateway):
+        request = request_factory.get("")
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.info",
+            path_params={"gateway_name": fake_gateway.name, "resource_name": "nonexistent"},
+        )
+
+        assert response.status_code == 404
+
+
+class TestGatewayResourceListApiKeyword:
+    def test_list_with_keyword_matches_name(self, request_to_view, request_factory, fake_gateway):
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="create_order",
+            description="创建订单",
+            method="POST",
+            path="/api/v1/orders/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"keyword": "user"})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+        assert result["data"][0]["name"] == "get_user_info"
+
+    def test_list_with_keyword_matches_description(self, request_to_view, request_factory, fake_gateway):
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"keyword": "用户"})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+
+    def test_list_with_keyword_matches_label(self, request_to_view, request_factory, fake_gateway):
+        resource_with_label = G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_order_info",
+            description="获取订单信息",
+            method="GET",
+            path="/api/v1/orders/",
+            is_public=True,
+        )
+        label = G(APILabel, gateway=fake_gateway, name="用户管理")
+        G(ResourceLabel, resource=resource_with_label, api_label=label)
+
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="create_item",
+            description="创建商品",
+            method="POST",
+            path="/api/v1/items/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"keyword": "用户管理"})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+        assert result["data"][0]["name"] == "get_order_info"
+
+
+class TestGatewayResourceListApiFields:
+    def test_list_with_fields_returns_only_specified(self, request_to_view, request_factory, fake_gateway):
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"fields": "id,name"})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+        assert set(result["data"][0].keys()) == {"id", "name"}
+
+    def test_list_with_fields_multiple(self, request_to_view, request_factory, fake_gateway):
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"fields": "id,name,method"})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+        assert set(result["data"][0].keys()) == {"id", "name", "method"}
+
+    def test_list_without_fields_returns_default_id_name(self, request_to_view, request_factory, fake_gateway):
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+
+        request = request_factory.get("")
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+        assert set(result["data"][0].keys()) == {"id", "name"}
+
+
+class TestMCPServerListApiCategory:
+    def test_list_with_category_filter(self, request_view, fake_gateway):
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        category = G(MCPServerCategory, name="ai-tools", display_name="AI 工具", is_active=True)
+
+        mcp1 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="mcp-with-category",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        mcp1.categories.add(category)
+
+        G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="mcp-without-category",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"category": "ai-tools"},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        names = [item["name"] for item in result["data"]["results"]]
+        assert "mcp-with-category" in names
+        assert "mcp-without-category" not in names
+
+
+class TestMCPServerBatchQueryApi:
+    def test_batch_query(self, request_view, fake_gateway):
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        category = G(MCPServerCategory, name="official", display_name="官方", is_active=True)
+
+        mcp1 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="test-mcp-1",
+            title="测试 MCP 1",
+            description="描述1",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        mcp1.categories.add(category)
+
+        G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="test-mcp-2",
+            title="测试 MCP 2",
+            description="描述2",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.mcp_server.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": ["test-mcp-1", "test-mcp-2"]},
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert len(result["data"]) == 2
+        assert set(result["data"][0].keys()) == {"id", "name"}
+
+    def test_batch_query_with_fields(self, request_view, fake_gateway):
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        category = G(MCPServerCategory, name="official", display_name="官方", is_active=True)
+
+        mcp1 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="test-mcp-1",
+            title="测试 MCP 1",
+            description="描述1",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        mcp1.categories.add(category)
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.mcp_server.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": ["test-mcp-1"], "fields": "name,title,description,categories"},
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert len(result["data"]) == 1
+
+        mcp1_data = result["data"][0]
+        assert mcp1_data["title"] == "测试 MCP 1"
+        assert mcp1_data["description"] == "描述1"
+        assert len(mcp1_data["categories"]) == 1
+        assert mcp1_data["categories"][0]["name"] == "official"
+
+    def test_batch_query_filters_inactive(self, request_view, fake_gateway):
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="inactive-mcp",
+            status=MCPServerStatusEnum.INACTIVE.value,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.mcp_server.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={"names": ["inactive-mcp"]},
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert len(result["data"]) == 0
+
+    def test_batch_query_no_ids_or_names(self, request_view):
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.open.mcp_server.batch_query",
+            app=mock.MagicMock(app_code="test"),
+            data={},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+
+class TestMCPServerListCategories:
+    """测试 MCP Server 列表接口的 categories 字段"""
+
+    def test_list_with_categories(self, request_view, fake_gateway):
+        """有分类的 MCP Server 返回 categories 字段"""
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        cat1, _ = MCPServerCategory.objects.get_or_create(name="official", defaults={"display_name": "Official"})
+        cat2, _ = MCPServerCategory.objects.get_or_create(name="ai", defaults={"display_name": "AI"})
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+        mcp_server.categories.add(cat1, cat2)
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        assert len(result["data"]["results"]) >= 1
+
+        mcp_data = next(r for r in result["data"]["results"] if r["id"] == mcp_server.id)
+        assert len(mcp_data["categories"]) == 2
+        cat_names = {c["name"] for c in mcp_data["categories"]}
+        assert cat_names == {"official", "ai"}
+
+    def test_list_without_categories(self, request_view, fake_gateway):
+        """无分类的 MCP Server 返回空 categories"""
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        mcp_data = next(r for r in result["data"]["results"] if r["id"] == mcp_server.id)
+        assert mcp_data["categories"] == []
+
+    def test_list_filters_inactive_categories(self, request_view, fake_gateway):
+        """不活跃的分类不出现在 categories 中"""
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        cat_active, _ = MCPServerCategory.objects.get_or_create(name="official", defaults={"display_name": "Official"})
+        cat_inactive = G(MCPServerCategory, name="inactive_cat", display_name="Inactive", is_active=False)
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+            protocol_type=MCPServerProtocolTypeEnum.SSE.value,
+        )
+        mcp_server.categories.add(cat_active, cat_inactive)
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        mcp_data = next(r for r in result["data"]["results"] if r["id"] == mcp_server.id)
+        assert len(mcp_data["categories"]) == 1
+        assert mcp_data["categories"][0]["name"] == "official"
+
+
+def test_v2_open_does_not_import_shared_api_mcp_module():
+    shared_api_mcp_module = ".".join(["apigateway", "apis", "v2", "mcp_server"])
+
+    assert not any(getattr(obj, "__module__", "") == shared_api_mcp_module for obj in open_views.__dict__.values())
+    assert not any(
+        getattr(obj, "__module__", "") == shared_api_mcp_module for obj in open_serializers.__dict__.values()
+    )

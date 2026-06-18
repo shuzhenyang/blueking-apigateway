@@ -1,0 +1,33 @@
+meta {
+  name: create-resource-version
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{scheme}}://{{host}}/api/bk-apigateway/prod/api/v2/sync/gateways/{{gateway_name}}/resource_versions/
+  body: json
+  auth: none
+}
+
+headers {
+  X-Bkapi-Authorization: {"bk_app_code": "{{bk_app_code}}", "bk_app_secret": "{{bk_app_secret}}"}
+  Content-Type: application/json
+}
+
+script:pre-request {
+  // 生成唯一 resource_version，避免重复执行导致同版本多条记录。
+  const resourceVersion = `1.0.${Date.now()}`;
+  bru.setVar("resource_version", resourceVersion);
+}
+
+body:json {
+  {
+    "version": "{{resource_version}}",
+    "comment": "e2e test version"
+  }
+}
+
+assert {
+  res.status: lte 201
+}

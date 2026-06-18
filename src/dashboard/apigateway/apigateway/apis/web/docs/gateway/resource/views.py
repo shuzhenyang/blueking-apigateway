@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,9 +20,9 @@ from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
+from apigateway.apis.web.docs.gateway.mixins import GatewayDocsPermissionMixin
 from apigateway.biz.released_resource import ReleasedResourceHandler
-from apigateway.biz.resource import ResourceLabelHandler
-from apigateway.common.permissions import GatewayDisplayablePermission
+from apigateway.service.resource import get_resource_id_to_labels_by_label_ids
 from apigateway.utils.responses import OKJsonResponse
 
 from .serializers import ResourceListInputSLZ, ResourceOutputSLZ
@@ -37,9 +37,7 @@ from .serializers import ResourceListInputSLZ, ResourceOutputSLZ
         tags=["WebAPI.Docs.Resource"],
     ),
 )
-class ResourceListApi(generics.ListAPIView):
-    permission_classes = [GatewayDisplayablePermission]
-
+class ResourceListApi(GatewayDocsPermissionMixin, generics.ListAPIView):
     def list(self, request, gateway_name: str, *args, **kwargs):
         """获取网关环境下已发布的资源列表"""
         slz = ResourceListInputSLZ(data=request.query_params)
@@ -53,7 +51,7 @@ class ResourceListApi(generics.ListAPIView):
             resources,
             many=True,
             context={
-                "labels": ResourceLabelHandler.get_labels_by_ids(label_ids),
+                "labels": get_resource_id_to_labels_by_label_ids(label_ids),
             },
         )
         return OKJsonResponse(data=output_slz.data)

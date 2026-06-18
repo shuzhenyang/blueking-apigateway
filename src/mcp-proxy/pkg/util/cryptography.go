@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -31,7 +31,7 @@ import (
 )
 
 // AESGCMDecrypt decrypts AES-GCM ciphertext using the given key.
-func AESGCMDecrypt(key string, nonce string, encryptedText string) (string, error) {
+func AESGCMDecrypt(key, nonce, encryptedText string) (string, error) {
 	keyBytes, err := base64.StdEncoding.DecodeString(key)
 	if err != nil {
 		return "", err
@@ -64,7 +64,7 @@ func ParsePrivateKey(privateKeyText []byte) (any, error) {
 		return nil, errors.New("failed to decode PEM block: no PEM data found")
 	}
 	// Declare a variable to hold the private key
-	var privateKey interface{}
+	var privateKey any
 	// Declare a variable to hold any error that occurs
 	var err error
 	// Switch on the type of the PEM block
@@ -79,7 +79,11 @@ func ParsePrivateKey(privateKeyText []byte) (any, error) {
 		privateKey, err = x509.ParsePKCS8PrivateKey(block.Bytes)
 		// If no error occurred, ensure it's an RSA key
 		if err == nil {
-			privateKey, _ = privateKey.(*rsa.PrivateKey) // Ensure it's an RSA key
+			rsaKey, ok := privateKey.(*rsa.PrivateKey)
+			if !ok {
+				return nil, fmt.Errorf("expected RSA private key, got %T", privateKey)
+			}
+			privateKey = rsaKey
 		}
 	default:
 		return nil, fmt.Errorf("unsupported PEM block type: %s", block.Type)

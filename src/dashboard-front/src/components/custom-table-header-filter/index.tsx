@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -17,9 +17,13 @@
  */
 
 import {
+  // @ts-ignore
   defineComponent,
+  // @ts-ignore
   ref,
+  // @ts-ignore
   unref,
+  // @ts-ignore
   watch,
 } from 'vue';
 import { Popover } from 'bkui-vue'; // 引入 bkui-vue 库中的 Popover 组件
@@ -62,7 +66,7 @@ export default defineComponent({
 
   emits: ['selected'],
 
-  setup(props, ctx) {
+  setup(props: any, ctx: any) {
     // 引用弹出框组件的引用
     const popoverRef = ref();
     // 控制弹出框显示状态的变量

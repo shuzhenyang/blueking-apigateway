@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -37,15 +37,15 @@ export function useGatewaysList(filter: Ref) {
     isLoading.value = true;
     try {
       const params = {
-        limit: pagination.value.limit,
-        offset: pagination.value.limit * pagination.value.offset,
+        limit: pagination.value.limit!,
+        offset: pagination.value.limit! * pagination.value.offset!,
         ...filter.value,
       };
       if (['all'].includes(params.kind)) {
         params.kind = '';
       }
       const res = await getGatewayList(params);
-      dataList.value = res.results;
+      dataList.value = res.results as any;
       return dataList.value;
     }
     catch (error) {

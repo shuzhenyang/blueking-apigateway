@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,46 +16,57 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import base64
-import datetime
 import json
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.template.loader import render_to_string
 from django.utils.translation import gettext as _
 
 from apigateway.apps.mcp_server.constants import (
-    MCPServerAppPermissionApplyExpireDaysEnum,
+    FEATURED_MCP_CATEGORY_NAME,
+    OFFICIAL_MCP_CATEGORY_NAME,
+    MCPAgentClientTypeEnum,
     MCPServerAppPermissionApplyStatusEnum,
+    MCPServerAppPermissionGrantTypeEnum,
     MCPServerExtendTypeEnum,
+    MCPServerLeastPrivilegeEnum,
+    MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
+    MCPTransportTypeEnum,
+    get_mcp_config_agent_clients,
 )
 from apigateway.apps.mcp_server.models import (
     MCPServer,
     MCPServerAppPermission,
     MCPServerAppPermissionApply,
+    MCPServerCategory,
     MCPServerExtend,
 )
 from apigateway.apps.permission.constants import GrantTypeEnum
 from apigateway.apps.permission.models import AppResourcePermission
 from apigateway.biz.released_resource import ReleasedResourceData, ReleasedResourceHandler
-from apigateway.biz.released_resource_doc import ReleasedResourceDocHandler
-from apigateway.biz.released_resource_doc.generators import DocGenerator
-from apigateway.biz.resource import ResourceLabelHandler
+from apigateway.biz.released_resource_doc import DocGenerator, ReleasedResourceDocHandler
 from apigateway.biz.resource_doc import ResourceDocHandler
-from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
 from apigateway.common.tenant.user_credentials import UserCredentials
 from apigateway.components import bkaidev
-from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
-from apigateway.core.models import Gateway, Release, Resource
-from apigateway.service.mcp.mcp_server import build_mcp_server_url
-from apigateway.utils.time import NeverExpiresTime, now_datetime
+from apigateway.core.constants import GatewayStatusEnum, GatewayTypeEnum, StageStatusEnum
+from apigateway.core.models import Gateway, Release, Resource, Stage
+from apigateway.service.contexts import GatewayAuthContext
+from apigateway.service.mcp import build_mcp_server_application_url, build_mcp_server_url
+from apigateway.service.resource import get_resource_id_to_labels_by_label_ids
+from apigateway.service.resource_version import (
+    get_resource_id_to_schema_by_resource_version,
+    get_resource_names_set,
+    get_resource_schema,
+)
+from apigateway.utils.time import NeverExpiresTime
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +102,7 @@ class MCPServerHandler:
         ]
 
         label_ids = list({label_id for resource in tool_resources for label_id in resource.gateway_labels})
-        labels = ResourceLabelHandler.get_labels_by_ids(label_ids)
+        labels = get_resource_id_to_labels_by_label_ids(label_ids)
 
         return tool_resources, labels
 
@@ -106,7 +117,7 @@ class MCPServerHandler:
             raise error_codes.FAILED_PRECONDITION.format(
                 _("环境已下架或者未发布，请先发布资源到该环境，再更新 MCPServer。"), replace=True
             )
-        return ResourceVersionHandler.get_resource_names_set(release.resource_version.id)
+        return get_resource_names_set(release.resource_version.id)
 
     @staticmethod
     def get_tool_doc(gateway_id: int, stage_name: str, tool_name: str) -> Dict:
@@ -140,7 +151,7 @@ class MCPServerHandler:
             .first()
         )
         # 查询哪些资源有配置对应的 schema
-        schema = ResourceVersionHandler.get_resource_schema(
+        schema = get_resource_schema(
             resource_version_id,
             resource_data.id,
         )
@@ -157,11 +168,94 @@ class MCPServerHandler:
         return f"{gateway_name}-{stage_name}-{name}"
 
     @staticmethod
+    def save_mcp_servers(
+        gateway_id: int,
+        gateway_name: str,
+        stage_id: int,
+        stage_name: str,
+        mcp_servers_data: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """批量创建或更新 MCP Server
+
+        Args:
+            gateway_id: 网关 ID
+            gateway_name: 网关名称
+            stage_id: 环境 ID
+            stage_name: 环境名称
+            mcp_servers_data: MCP Server 配置列表，每项包含 name, description, resource_names 等字段
+
+        Returns:
+            操作结果列表，每项包含 name, action, id
+        """
+        results = []
+        for mcp_data in mcp_servers_data:
+            mcp_data["gateway_id"] = gateway_id
+            mcp_data["stage_id"] = stage_id
+
+            name = mcp_data["name"]
+            full_name = MCPServerHandler.get_mcp_server_name(
+                gateway_name=gateway_name, stage_name=stage_name, name=name
+            )
+            mcp_data["name"] = full_name
+
+            resource_names = mcp_data.pop("resource_names", [])
+            tool_names = mcp_data.pop("tool_names", None) or resource_names
+            target_app_codes = mcp_data.pop("target_app_codes", [])
+            category_names = mcp_data.pop("category_names", None)
+
+            instance = MCPServer.objects.filter(name=full_name, stage__name=stage_name, gateway_id=gateway_id).first()
+
+            if instance:
+                action = "updated"
+                for field, value in mcp_data.items():
+                    if hasattr(instance, field):
+                        setattr(instance, field, value)
+                instance.update_resource_names(resource_names, tool_names)
+                instance.save()
+            else:
+                action = "created"
+                instance = MCPServer(**mcp_data)
+                instance.update_resource_names(resource_names, tool_names)
+                instance.save()
+
+            MCPServerHandler._sync_mcp_server_permissions(instance.id, target_app_codes)
+            MCPServerHandler._sync_mcp_server_categories(instance, category_names)
+
+            results.append({"name": instance.name, "action": action, "id": instance.id})
+
+        return results
+
+    @staticmethod
+    def _sync_mcp_server_permissions(mcp_server_id: int, app_codes: List[str]):
+        """同步 MCP Server 权限"""
+        for app_code in app_codes:
+            MCPServerAppPermission.objects.save_permission(
+                mcp_server_id=mcp_server_id,
+                bk_app_code=app_code,
+                grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+                expire_days=None,
+            )
+        MCPServerHandler.sync_permissions(mcp_server_id)
+
+    @staticmethod
+    def _sync_mcp_server_categories(instance: MCPServer, category_names: Optional[List[str]]):
+        """同步 MCP Server 分类，None 表示不操作，空列表表示清空"""
+        if category_names is None:
+            return
+
+        if not category_names:
+            instance.categories.clear()
+            return
+
+        existing_categories = MCPServerCategory.objects.filter(name__in=category_names)
+        instance.categories.set(existing_categories)
+
+    @staticmethod
     def _virtual_app_code(mcp_server_id: int, app_code: str) -> str:
         return f"v_mcp_{mcp_server_id}_{app_code}"
 
     @staticmethod
-    def _cleanup_all_resource_permissions(gateway_id: int, mcp_server_id: int):
+    def cleanup_all_resource_permissions(gateway_id: int, mcp_server_id: int):
         """清理 mcp_server 的所有权限
         特征：bk_app_code 以 v_mcp_{mcp_server_id}_ 开头
         只有虚拟 app_code 能带下划线
@@ -176,18 +270,45 @@ class MCPServerHandler:
     @staticmethod
     @transaction.atomic
     def sync_permissions(mcp_server_id: int) -> None:
-        """同步 MCPServer 的权限
+        """同步 MCPServer 的权限，包括 OAuth2 权限（bk_app_code=public）
         Args:
             mcp_server_id (int): mcp_server 的 id
         """
         mcp_server = MCPServer.objects.get(id=mcp_server_id)
+
+        # 同步 OAuth2 权限：根据 oauth2_public_client_enabled 开启/关闭 public app 权限
+        public_app_code = settings.MCP_SERVER_OAUTH2_PUBLIC_CLIENT_APP_CODE
+        if mcp_server.oauth2_public_client_enabled:
+            MCPServerAppPermission.objects.save_permission(
+                mcp_server_id=mcp_server_id,
+                bk_app_code=public_app_code,
+                grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+                expire_days=None,
+            )
+            logger.info(
+                "sync oauth2 permissions for mcp_server %d, granted bk_app_code=%s",
+                mcp_server_id,
+                public_app_code,
+            )
+        else:
+            deleted_count, _ = MCPServerAppPermission.objects.filter(
+                mcp_server_id=mcp_server_id,
+                bk_app_code=public_app_code,
+            ).delete()
+            if deleted_count:
+                logger.info(
+                    "sync oauth2 permissions for mcp_server %d, revoked bk_app_code=%s, deleted %d",
+                    mcp_server_id,
+                    public_app_code,
+                    deleted_count,
+                )
 
         # 1. fetch the app codes in mcp_server_app_permission
         app_codes = MCPServerAppPermission.objects.filter(mcp_server=mcp_server).values_list("bk_app_code", flat=True)
         if not app_codes:
             logger.debug("no app_codes, cleanup the permissions of the mcp_server %d", mcp_server_id)
             # if no app_codes, cleanup the permissions of the mcp_server
-            MCPServerHandler._cleanup_all_resource_permissions(
+            MCPServerHandler.cleanup_all_resource_permissions(
                 gateway_id=mcp_server.gateway_id,
                 mcp_server_id=mcp_server_id,
             )
@@ -257,6 +378,482 @@ class MCPServerHandler:
             AppResourcePermission.objects.bulk_create(to_add)
         if to_delete:
             AppResourcePermission.objects.filter(id__in=to_delete).delete()
+
+    @staticmethod
+    def _get_releases_for_mcp_servers(mcp_servers) -> Dict[Tuple[int, int], Release]:
+        """批量获取 MCP Server 列表对应的 Release 记录
+
+        Args:
+            mcp_servers: MCPServer 实例列表
+
+        Returns:
+            {(gateway_id, stage_id): Release} 映射
+        """
+        gateway_stage_pairs = {(mcp_server.gateway_id, mcp_server.stage_id) for mcp_server in mcp_servers}
+        if not gateway_stage_pairs:
+            return {}
+
+        release_filters = Q()
+        for gateway_id, stage_id in gateway_stage_pairs:
+            release_filters |= Q(gateway_id=gateway_id, stage_id=stage_id)
+
+        releases = Release.objects.filter(release_filters).select_related("resource_version")
+        return {(r.gateway_id, r.stage_id): r for r in releases}
+
+    @staticmethod
+    def get_app_permission_risks(
+        mcp_servers: Sequence,
+        releases: Optional[Dict[Tuple[int, int], Release]] = None,
+    ) -> Dict[int, List[str]]:
+        """检测开启了 oauth2_public_client_enabled 的 MCPServer 是否存在应用态权限安全风险。
+
+        当 oauth2_public_client_enabled=True 时，public 应用被自动授权；
+        如果工具对应的 API 要求应用认证(verified_app_required)，则存在权限失效的安全风险。
+
+        Args:
+            mcp_servers: MCPServer 实例列表（需已 select_related gateway/stage）
+            releases: 可选，预查询的 Release 映射，避免重复查询
+
+        Returns:
+            {mcp_server_id: [risk_tool_name, ...]} 映射，仅包含存在风险的 MCPServer
+        """
+        risk_mcp_servers = [m for m in mcp_servers if m.oauth2_public_client_enabled]
+        if not risk_mcp_servers:
+            return {}
+
+        if releases is None:
+            releases = MCPServerHandler._get_releases_for_mcp_servers(risk_mcp_servers)
+
+        release_resource_auth: Dict[Tuple[int, int], Dict[str, bool]] = {}
+        for key, release in releases.items():
+            resource_auth: Dict[str, bool] = {}
+            for resource in release.resource_version.data:
+                auth_config = json.loads(resource.get("contexts", {}).get("resource_auth", {}).get("config", "{}"))
+                resource_auth[resource["name"]] = bool(auth_config.get("app_verified_required", True))
+            release_resource_auth[key] = resource_auth
+
+        risks: Dict[int, List[str]] = {}
+        for mcp_server in risk_mcp_servers:
+            gateway_stage_key = (mcp_server.gateway_id, mcp_server.stage_id)
+            resource_auth = release_resource_auth.get(gateway_stage_key, {})
+            tool_name_map = mcp_server.gen_tool_name_map()
+            risk_tools = [
+                tool_name_map.get(resource_name, resource_name)
+                for resource_name in mcp_server.resource_names
+                if resource_auth.get(resource_name, False)
+            ]
+            if risk_tools:
+                risks[mcp_server.id] = risk_tools
+
+        return risks
+
+    @staticmethod
+    def get_app_permission_apply_record_map(permissions: Sequence[MCPServerAppPermission]) -> Dict[tuple, Any]:
+        """根据已授权记录列表，批量查询对应的审批记录并构建映射。
+
+        Args:
+            permissions: MCPServerAppPermission 实例列表
+
+        Returns:
+            {(mcp_server_id, bk_app_code): MCPServerAppPermissionApply} 映射
+        """
+        if not permissions:
+            return {}
+
+        mcp_server_ids = [p.mcp_server_id for p in permissions]
+        bk_app_codes = [p.bk_app_code for p in permissions]
+        apply_records = MCPServerAppPermissionApply.objects.filter(
+            mcp_server_id__in=mcp_server_ids,
+            bk_app_code__in=bk_app_codes,
+            status=MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
+            is_deleted=False,
+        ).order_by("-handled_time", "-id")
+
+        apply_record_map = {}
+        for apply_record in apply_records:
+            key = (apply_record.mcp_server_id, apply_record.bk_app_code)
+            if key not in apply_record_map:
+                apply_record_map[key] = apply_record
+        return apply_record_map
+
+    @staticmethod
+    def get_least_privileges(
+        mcp_servers,
+        releases: Optional[Dict[Tuple[int, int], Release]] = None,
+    ) -> Dict[Tuple[int, int], str]:
+        """批量计算 MCP Server 的最低权限级别
+
+        遍历每个 MCP Server 的 (gateway_id, stage_id) 对，检查 Release 中对应工具资源
+        是否需要用户认证。如果所有工具都不需要用户认证，则为 APPLICATION；
+        否则为 APPLICATION_AND_USER。
+
+        Args:
+            mcp_servers: MCPServer 实例列表（需已 select_related gateway/stage）
+            releases: 可选，预查询的 Release 映射，避免重复查询
+
+        Returns:
+            {(gateway_id, stage_id): least_privilege} 映射
+        """
+        gateway_stage_tools: Dict[Tuple[int, int], List[str]] = {}
+        for mcp_server in mcp_servers:
+            gateway_stage_tools[(mcp_server.gateway_id, mcp_server.stage_id)] = mcp_server.resource_names
+
+        if not gateway_stage_tools:
+            return {}
+
+        if releases is None:
+            releases = MCPServerHandler._get_releases_for_mcp_servers(mcp_servers)
+
+        least_privileges: Dict[Tuple[int, int], str] = {}
+        for gateway_stage_key, release in releases.items():
+            tool_names = gateway_stage_tools.get(gateway_stage_key, [])
+            least_privilege = MCPServerLeastPrivilegeEnum.APPLICATION.value
+            for resource in release.resource_version.data:
+                if resource["name"] not in tool_names:
+                    continue
+                auth_config = json.loads(resource.get("contexts", {}).get("resource_auth", {}).get("config", "{}"))
+                verified_user_required = not auth_config.get("skip_auth_verification", False) and bool(
+                    auth_config.get("auth_verified_required", False)
+                )
+                if verified_user_required:
+                    least_privilege = MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value
+                    break
+            least_privileges[gateway_stage_key] = least_privilege
+
+        return least_privileges
+
+    @staticmethod
+    def get_mcp_server_url(instance: MCPServer, least_privilege: str = "") -> str:
+        """根据 MCP Server 的应用态条件返回合适的访问 URL
+
+        当未开启公共客户端模式且所有工具都是应用态时，返回应用态 URL。
+
+        Args:
+            instance: MCPServer 实例
+            least_privilege: 最低权限级别
+
+        Returns:
+            MCP Server 访问 URL
+        """
+        if (
+            not instance.oauth2_public_client_enabled
+            and least_privilege == MCPServerLeastPrivilegeEnum.APPLICATION.value
+        ):
+            return build_mcp_server_application_url(instance.name, instance.protocol_type)
+        return build_mcp_server_url(instance.name, instance.protocol_type)
+
+    # ========== 通用访问校验/查询构建方法 ==========
+
+    @staticmethod
+    def validate_access(
+        instance: MCPServer,
+        check_public: bool = False,
+        username: Optional[str] = None,
+    ) -> None:
+        """校验 MCPServer 的访问权限
+
+        检查 MCPServer 的状态、网关状态、环境状态，以及可选的公开性检查。
+
+        Args:
+            instance: MCPServer 实例
+            check_public: 是否检查公开性
+            username: 当前用户名，用于公开性检查时判断是否为维护者
+
+        Raises:
+            error_codes.NOT_FOUND: 当校验不通过时
+        """
+        if instance.status != MCPServerStatusEnum.ACTIVE.value:
+            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未启用，无法访问。"))
+        if instance.gateway.status != GatewayStatusEnum.ACTIVE.value:
+            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关未启用，无法访问。"))
+        if instance.stage.status != StageStatusEnum.ACTIVE.value:
+            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 所属网关对应的环境未启用，无法访问。"))
+
+        if check_public and not instance.is_public and (not username or username not in instance.gateway.maintainers):
+            raise error_codes.NOT_FOUND.format(_("当前 MCPServer 未公开，无法访问。"))
+
+    @staticmethod
+    def build_guideline(
+        instance: MCPServer,
+        user_tenant_id: str = "",
+        least_privilege: str = "",
+    ) -> str:
+        """构建 MCPServer 使用指南（Guideline）
+
+        根据 MCPServer 实例和当前语言环境渲染 guideline 模板。
+
+        Args:
+            instance: MCPServer 实例
+            user_tenant_id: 用户租户 ID
+            least_privilege: 最低权限级别，用于确定 URL
+
+        Returns:
+            渲染后的 guideline 内容（Markdown 格式）
+        """
+        mcp_url = MCPServerHandler.get_mcp_server_url(instance, least_privilege)
+        template_name = f"mcp_server/{get_current_language_code()}/guideline.md"
+        return render_to_string(
+            template_name,
+            context={
+                "name": instance.name,
+                "url": mcp_url,
+                "description": instance.description,
+                "bk_login_ticket_key": settings.BK_LOGIN_TICKET_KEY,
+                "bk_access_token_doc_url": settings.BK_ACCESS_TOKEN_DOC_URL,
+                "enable_multi_tenant_mode": settings.ENABLE_MULTI_TENANT_MODE,
+                "user_tenant_id": user_tenant_id,
+                "protocol_type": instance.protocol_type,
+            },
+        )
+
+    @staticmethod
+    def apply_category_filter(queryset: QuerySet, categories: List[str]) -> QuerySet:
+        """对 MCPServer queryset 应用分类筛选
+
+        当选择的分类中包含 Official 或 Featured 时，使用 AND 逻辑（结果必须同时满足所有分类）；
+        否则使用 OR 逻辑（属于任意一个分类即可）。
+
+        Args:
+            queryset: MCPServer 查询集
+            categories: 分类名称列表
+
+        Returns:
+            应用分类筛选后的查询集
+        """
+        if not categories:
+            return queryset
+
+        special_categories = {OFFICIAL_MCP_CATEGORY_NAME, FEATURED_MCP_CATEGORY_NAME}
+        if special_categories & set(categories):
+            for category in categories:
+                queryset = queryset.filter(categories__name=category, categories__is_active=True)
+            queryset = queryset.distinct()
+        else:
+            queryset = queryset.filter(categories__name__in=categories, categories__is_active=True).distinct()
+
+        return queryset
+
+    @staticmethod
+    def build_list_queryset(
+        keyword: Optional[str] = None,
+        category: Optional[str] = None,
+        categories: Optional[List[str]] = None,
+        is_public: Optional[bool] = None,
+        order_by: str = "-updated_time",
+        ids: Optional[List[int]] = None,
+    ) -> QuerySet:
+        """构建 MCPServer 列表的通用 queryset
+
+        只返回 status=ACTIVE 且 gateway/stage 也是 ACTIVE 的记录。
+
+        Args:
+            keyword: 搜索关键词（名称/标题/描述模糊匹配）
+            category: 单个分类名称筛选（兼容旧接口）
+            categories: 多个分类名称列表筛选（支持 AND/OR 逻辑）
+            is_public: 是否公开
+            order_by: 排序字段
+            ids: MCPServer ID 列表，用于批量筛选
+
+        Returns:
+            构建好的 queryset
+        """
+        queryset = MCPServer.objects.filter(status=MCPServerStatusEnum.ACTIVE.value)
+        queryset = queryset.filter(gateway__status=GatewayStatusEnum.ACTIVE.value)
+        queryset = queryset.filter(stage__status=StageStatusEnum.ACTIVE.value)
+
+        if ids:
+            queryset = queryset.filter(id__in=ids)
+
+        if is_public is not None:
+            queryset = queryset.filter(is_public=is_public)
+
+        if keyword:
+            queryset = queryset.filter(
+                Q(name__icontains=keyword) | Q(title__icontains=keyword) | Q(description__icontains=keyword)
+            )
+
+        # 兼容单分类筛选
+        if category:
+            queryset = queryset.filter(categories__name=category, categories__is_active=True)
+
+        # 多分类筛选（AND/OR 逻辑）
+        if categories:
+            queryset = MCPServerHandler.apply_category_filter(queryset, categories)
+
+        return queryset.select_related("gateway", "stage").order_by(order_by)
+
+    @staticmethod
+    def build_categories_map(mcp_server_ids: List[int]) -> Dict[int, List[Dict[str, str]]]:
+        """批量查询 MCPServer 的分类信息，返回 {mcp_server_id: [{"name": ..., "display_name": ...}]} 映射
+
+        使用单次查询替代 N+1 的 categories.filter() 调用。
+
+        Args:
+            mcp_server_ids: MCPServer ID 列表
+
+        Returns:
+            以 mcp_server_id 为 key 的分类字典映射
+        """
+        if not mcp_server_ids:
+            return {}
+
+        categories_qs = MCPServerCategory.objects.filter(
+            mcp_servers__id__in=mcp_server_ids,
+            is_active=True,
+        ).values("mcp_servers__id", "name", "display_name")
+
+        categories_map: Dict[int, List[Dict[str, str]]] = {}
+        for cat in categories_qs:
+            categories_map.setdefault(cat["mcp_servers__id"], []).append(
+                {"name": cat["name"], "display_name": cat["display_name"]}
+            )
+        return categories_map
+
+    @staticmethod
+    def build_list_context(
+        mcp_servers: Sequence,
+        include_prompts_count: bool = False,
+        include_least_privileges: bool = False,
+        include_app_permission_risks: bool = False,
+    ) -> Dict[str, Any]:
+        """构建 MCPServer 列表序列化所需的上下文
+
+        包括 gateways/stages 字典，以及可选的 prompts_count、least_privileges 等。
+
+        Args:
+            mcp_servers: MCPServer 实例列表
+            include_prompts_count: 是否包含 prompts 数量
+            include_least_privileges: 是否包含最低权限级别
+            include_app_permission_risks: 是否包含应用态权限风险
+
+        Returns:
+            序列化所需的 context 字典
+        """
+        gateway_ids = list({ms.gateway.id for ms in mcp_servers})
+        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config(gateway_ids)
+        gateways = {
+            gw.id: {
+                "id": gw.id,
+                "name": gw.name,
+                "maintainers": gw.maintainers,
+                "is_official": gateway_auth_configs[gw.id].gateway_type
+                in (GatewayTypeEnum.SUPER_OFFICIAL_API.value, GatewayTypeEnum.OFFICIAL_API.value),
+            }
+            for gw in Gateway.objects.filter(id__in=gateway_ids)
+        }
+
+        stage_ids = [ms.stage.id for ms in mcp_servers]
+        stages = {
+            s.id: {
+                "id": s.id,
+                "name": s.name,
+            }
+            for s in Stage.objects.filter(id__in=stage_ids)
+        }
+
+        context: Dict[str, Any] = {"gateways": gateways, "stages": stages}
+
+        mcp_server_ids = [ms.id for ms in mcp_servers]
+
+        if include_prompts_count:
+            context["prompts_count_map"] = MCPServerHandler.get_prompts_count_map(mcp_server_ids)
+
+        releases = None
+        if include_least_privileges or include_app_permission_risks:
+            releases = MCPServerHandler._get_releases_for_mcp_servers(mcp_servers)
+
+        if include_least_privileges:
+            context["least_privileges"] = MCPServerHandler.get_least_privileges(mcp_servers, releases=releases)
+
+        if include_app_permission_risks:
+            context["app_permission_risks"] = MCPServerHandler.get_app_permission_risks(mcp_servers, releases=releases)
+
+        return context
+
+    @staticmethod
+    def build_retrieve_context(
+        instance: MCPServer,
+        check_public: bool = False,
+        username: Optional[str] = None,
+        user_tenant_id: str = "",
+    ) -> Dict[str, Any]:
+        """校验 MCPServer 状态并构建 retrieve 所需的上下文数据
+
+        整合访问校验、guideline 生成、工具资源获取、prompts 获取等逻辑。
+
+        Args:
+            instance: MCPServer 实例
+            check_public: 是否检查公开性（open/marketplace 接口需要，inner 接口不需要）
+            username: 当前用户名，用于公开性检查
+            user_tenant_id: 用户租户 ID，用于 guideline 渲染
+
+        Returns:
+            序列化所需的 context 字典
+        """
+        MCPServerHandler.validate_access(instance, check_public=check_public, username=username)
+
+        least_privileges = MCPServerHandler.get_least_privileges([instance])
+        least_privilege = least_privileges.get((instance.gateway.id, instance.stage.id), "")
+
+        guideline = MCPServerHandler.build_guideline(
+            instance, user_tenant_id=user_tenant_id, least_privilege=least_privilege
+        )
+        instance.guideline = guideline
+
+        tool_resources, labels = MCPServerHandler.get_tools_resources_and_labels(
+            gateway_id=instance.gateway.id,
+            stage_name=instance.stage.name,
+            resource_names=instance.resource_names,
+        )
+        instance.tools = tool_resources
+        instance.maintainers = instance.gateway.maintainers
+
+        prompts_count_map = MCPServerHandler.get_prompts_count_map([instance.id])
+        prompts = MCPServerHandler.get_prompts(instance.id)
+        user_custom_doc = MCPServerHandler.get_user_custom_doc(instance.id)
+
+        resource_schema_map: Dict[int, dict] = {}
+        release = Release.objects.filter(
+            gateway_id=instance.gateway.id,
+            stage=instance.stage,
+        ).first()
+        if release:
+            resource_schema_map = get_resource_id_to_schema_by_resource_version(release.resource_version_id)
+
+        categories = [
+            {"name": cat.name, "display_name": cat.display_name} for cat in instance.categories.filter(is_active=True)
+        ]
+
+        # 构建 gateway/stage 上下文
+        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config([instance.gateway.id])
+        gateways = {
+            instance.gateway.id: {
+                "id": instance.gateway.id,
+                "name": instance.gateway.name,
+                "maintainers": instance.gateway.maintainers,
+                "is_official": gateway_auth_configs[instance.gateway.id].gateway_type
+                in (GatewayTypeEnum.SUPER_OFFICIAL_API.value, GatewayTypeEnum.OFFICIAL_API.value),
+            }
+        }
+        stages = {
+            instance.stage.id: {
+                "id": instance.stage.id,
+                "name": instance.stage.name,
+            }
+        }
+
+        return {
+            "gateways": gateways,
+            "stages": stages,
+            "labels": labels,
+            "tool_name_map": instance.gen_tool_name_map(),
+            "resource_schema_map": resource_schema_map,
+            "categories": categories,
+            "prompts_count_map": prompts_count_map,
+            "prompts": prompts,
+            "user_custom_doc": user_custom_doc,
+            "least_privileges": least_privileges,
+        }
 
     @staticmethod
     def disable_servers(gateway_id: int, stage_id: int = 0) -> None:
@@ -409,45 +1006,67 @@ class MCPServerHandler:
         return extend.content
 
     @staticmethod
-    def _build_cursor_install_url(name: str, mcp_url: str) -> str:
+    def _build_cursor_install_url(
+        name: str, mcp_url: str, oauth2_public_client_enabled: bool = False, user_tenant_id: str = ""
+    ) -> str:
         """
         生成 Cursor 一键配置 URL
 
         格式: cursor://anysphere.cursor-deeplink/mcp/install?name=<NAME>&config=<BASE64_CONFIG>
         """
-        config = {
+        config: Dict[str, Any] = {
             "url": mcp_url,
-            "headers": {
-                "X-Bkapi-Authorization": json.dumps(
-                    {
-                        "bk_app_code": "your_app_code",
-                        "bk_app_secret": "your_app_secret",
-                        settings.BK_LOGIN_TICKET_KEY: "your_ticket",
-                    }
-                )
-            },
         }
+        headers: Dict[str, str] = {}
+        if not oauth2_public_client_enabled:
+            headers["X-Bkapi-Authorization"] = json.dumps(
+                {
+                    "bk_app_code": "your_app_code",
+                    "bk_app_secret": "your_app_secret",
+                    settings.BK_LOGIN_TICKET_KEY: "your_ticket",
+                }
+            )
+        if settings.ENABLE_MULTI_TENANT_MODE and user_tenant_id:
+            headers["X-Bk-Tenant-Id"] = user_tenant_id
+            headers["X-Bkapi-Allowed-Headers"] = "X-Bk-Tenant-Id"
+        if headers:
+            config["headers"] = headers
         config_json = json.dumps(config)
         config_base64 = base64.b64encode(config_json.encode()).decode()
         return f"cursor://anysphere.cursor-deeplink/mcp/install?name={quote(name)}&config={quote(config_base64)}"
 
     @staticmethod
-    def build_agent_client_configs(instance: MCPServer) -> List[Dict[str, Any]]:
+    def build_agent_client_configs(
+        instance: MCPServer, least_privilege: str = "", user_tenant_id: str = ""
+    ) -> List[Dict[str, Any]]:
         """
         构建 MCPServer 的 Agent 客户端配置列表
 
         Args:
             instance: MCPServer 实例
+            least_privilege: 最低权限级别，用于判断是否使用应用态 URL
+            user_tenant_id: 用户租户 ID（多租户模式下使用）
 
         Returns:
             配置列表，每个配置包含 name, display_name, content, install_url
         """
         language_code = get_current_language_code()
-        mcp_url = build_mcp_server_url(instance.name, instance.protocol_type)
+        mcp_url = MCPServerHandler.get_mcp_server_url(instance, least_privilege)
+        enable_multi_tenant_mode = settings.ENABLE_MULTI_TENANT_MODE
         configs = []
 
-        for client in settings.MCP_CONFIG_AGENT_CLIENTS:
+        for client in get_mcp_config_agent_clients():
             template_name = f"mcp_server/{language_code}/config/{client['name']}.md"
+
+            # 根据 protocol_type 和客户端类型确定 transport_type
+            if instance.protocol_type == MCPServerProtocolTypeEnum.STREAMABLE_HTTP.value:
+                transport_type = (
+                    MCPTransportTypeEnum.STREAMABLE_HTTP.value
+                    if client["name"] == MCPAgentClientTypeEnum.CODEBUDDY.value
+                    else MCPTransportTypeEnum.HTTP.value
+                )
+            else:
+                transport_type = MCPTransportTypeEnum.SSE.value
 
             # 构建模板上下文
             context = {
@@ -455,19 +1074,24 @@ class MCPServerHandler:
                 "url": mcp_url,
                 "description": instance.description,
                 "bk_login_ticket_key": settings.BK_LOGIN_TICKET_KEY,
-                "protocol_type": instance.protocol_type,
+                "transport_type": transport_type,
+                "oauth2_public_client_enabled": instance.oauth2_public_client_enabled,
+                "enable_multi_tenant_mode": enable_multi_tenant_mode,
+                "user_tenant_id": user_tenant_id,
             }
 
             # AIDev 需要额外的创建链接
-            if client["name"] == "aidev":
+            if client["name"] == MCPAgentClientTypeEnum.AIDEV.value:
                 context["aidev_agent_create_url"] = settings.AIDEV_AGENT_CREATE_URL
 
             content = render_to_string(template_name, context=context)
 
             # 生成一键配置 URL（目前只有 Cursor 支持）
             install_url = ""
-            if client["name"] == "cursor":
-                install_url = MCPServerHandler._build_cursor_install_url(instance.name, mcp_url)
+            if client["name"] == MCPAgentClientTypeEnum.CURSOR.value:
+                install_url = MCPServerHandler._build_cursor_install_url(
+                    instance.name, mcp_url, instance.oauth2_public_client_enabled, user_tenant_id
+                )
 
             configs.append(
                 {
@@ -480,70 +1104,143 @@ class MCPServerHandler:
 
         return configs
 
-
-class MCPServerPermissionHandler:
     @staticmethod
-    def create_apply(bk_app_code: str, mcp_server_ids: List[int], reason: str, applied_by: str):
-        queryset = MCPServer.objects.filter(
-            id__in=mcp_server_ids,
-            is_public=True,
-            status=MCPServerStatusEnum.ACTIVE.value,
-            gateway__status=GatewayStatusEnum.ACTIVE.value,
-            stage__status=StageStatusEnum.ACTIVE.value,
-        )
-
-        selected_mcp_server_ids = list(queryset.values_list("id", flat=True))
-        existing_permissions = MCPServerAppPermissionApply.objects.filter(
-            bk_app_code=bk_app_code,
-            mcp_server_id__in=selected_mcp_server_ids,
-            status__in=[
-                MCPServerAppPermissionApplyStatusEnum.PENDING.value,
-                MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
-            ],
-        ).order_by("-applied_time")
-
-        if existing_permissions:
-            existing_names = ", ".join([obj.mcp_server.name for obj in existing_permissions])
-            raise error_codes.INVALID_ARGUMENT.format(
-                _(f"mcp server name：{existing_names} 已经存在待审批或已审批的记录")
-            )
-
-        add_app_permissions_apply_list = [
-            MCPServerAppPermissionApply(
-                bk_app_code=bk_app_code,
-                mcp_server=obj,
-                reason=reason,
-                applied_by=applied_by,
-                applied_time=now_datetime(),
-                expire_days=MCPServerAppPermissionApplyExpireDaysEnum.FOREVER.value,
-                status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
-            )
-            for obj in queryset
-        ]
-
-        MCPServerAppPermissionApply.objects.bulk_create(add_app_permissions_apply_list)
+    def get_client_display_name(client_type: str) -> str:
+        """获取客户端类型的显示名称"""
+        for client in get_mcp_config_agent_clients():
+            if client["name"] == client_type:
+                return client["display_name"]
+        return client_type
 
     @staticmethod
-    def filter_records(
-        bk_app_code: str,
-        applied_by: str,
-        apply_status: str,
-        query: str,
-        applied_time_start: Optional[datetime.datetime] = None,
-        applied_time_end: Optional[datetime.datetime] = None,
-    ):
-        queryset = MCPServerAppPermissionApply.objects.filter(bk_app_code=bk_app_code).order_by("-applied_time")
+    def get_least_privileges_by_server(
+        mcp_servers,
+        releases: Optional[Dict[Tuple[int, int], Release]] = None,
+    ) -> Dict[int, str]:
+        """按 MCPServer ID 计算最低权限级别
 
-        if applied_by:
-            queryset = queryset.filter(applied_by=applied_by)
+        与 get_least_privileges 不同，此方法以 mcp_server.id 为 key，
+        避免同 gateway+stage 下多个 server 的 least_privilege 互相覆盖。
 
-        if applied_time_start and applied_time_end:
-            queryset = queryset.filter(applied_time__range=(applied_time_start, applied_time_end))
+        Args:
+            mcp_servers: MCPServer 实例列表（需已 select_related gateway/stage）
+            releases: 可选，预查询的 Release 映射，避免重复查询
 
-        if apply_status:
-            queryset = queryset.filter(status=apply_status)
+        Returns:
+            {mcp_server_id: least_privilege} 映射
+        """
+        if not mcp_servers:
+            return {}
 
-        if query:
-            queryset = queryset.filter(Q(mcp_server__name__icontains=query) | Q(mcp_server__title__icontains=query))
+        if releases is None:
+            releases = MCPServerHandler._get_releases_for_mcp_servers(mcp_servers)
 
-        return queryset
+        # 先按 (gateway_id, stage_id) 计算每个 server 的 tool_names
+        server_tool_names: Dict[int, List[str]] = {}
+        for mcp_server in mcp_servers:
+            server_tool_names[mcp_server.id] = mcp_server.resource_names
+
+        least_privileges: Dict[int, str] = {}
+        # 按 (gateway_id, stage_id) 分组计算，然后映射到每个 server
+        for mcp_server in mcp_servers:
+            gateway_stage_key = (mcp_server.gateway_id, mcp_server.stage_id)
+            release = releases.get(gateway_stage_key)
+            if not release:
+                least_privileges[mcp_server.id] = ""
+                continue
+
+            tool_names = server_tool_names.get(mcp_server.id, [])
+            least_privilege = MCPServerLeastPrivilegeEnum.APPLICATION.value
+            for resource in release.resource_version.data:
+                if resource["name"] not in tool_names:
+                    continue
+                auth_config = json.loads(resource.get("contexts", {}).get("resource_auth", {}).get("config", "{}"))
+                verified_user_required = not auth_config.get("skip_auth_verification", False) and bool(
+                    auth_config.get("auth_verified_required", False)
+                )
+                if verified_user_required:
+                    least_privilege = MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value
+                    break
+            least_privileges[mcp_server.id] = least_privilege
+
+        return least_privileges
+
+    @staticmethod
+    def build_batch_agent_client_config(
+        instances: List[MCPServer],
+        client_type: str,
+        least_privileges: Dict[int, str],
+        user_tenant_id: str = "",
+    ) -> Dict[str, Any]:
+        """
+        批量构建指定客户端类型的 MCP Server 配置
+
+        不同客户端类型有不同的 JSON schema：
+        - cursor: {"mcpServers": {name: {url, headers}}}
+        - codebuddy: {"mcpServers": {name: {url, transportType, headers}}}
+        - claude: {"mcpServers": {name: {type, url, headers}}}
+        - vscode: {"servers": {name: {type, url, headers}}}
+
+        Args:
+            instances: MCPServer 实例列表
+            client_type: 客户端类型（cursor, codebuddy, claude, vscode 等）
+            least_privileges: 最低权限字典，key 为 mcp_server_id
+            user_tenant_id: 用户租户 ID（多租户模式下使用）
+
+        Returns:
+            对应客户端类型的 JSON 配置
+        """
+        if not instances:
+            return {"mcpServers": {}}
+
+        enable_multi_tenant_mode = settings.ENABLE_MULTI_TENANT_MODE
+        servers_config = {}
+
+        for instance in instances:
+            mcp_url = MCPServerHandler.get_mcp_server_url(instance, least_privileges.get(instance.id, ""))
+
+            # 根据 protocol_type 和客户端类型确定 transport_type
+            if instance.protocol_type == MCPServerProtocolTypeEnum.STREAMABLE_HTTP.value:
+                transport_type = (
+                    MCPTransportTypeEnum.STREAMABLE_HTTP.value
+                    if client_type == MCPAgentClientTypeEnum.CODEBUDDY.value
+                    else MCPTransportTypeEnum.HTTP.value
+                )
+            else:
+                transport_type = MCPTransportTypeEnum.SSE.value
+
+            # 构建单个 server 配置
+            server_config: Dict[str, Any] = {}
+
+            # claude 和 vscode 需要 type 字段
+            if client_type in (MCPAgentClientTypeEnum.CLAUDE.value, MCPAgentClientTypeEnum.VSCODE.value):
+                server_config["type"] = transport_type
+
+            server_config["url"] = mcp_url
+
+            # CodeBuddy 需要 transportType
+            if client_type == MCPAgentClientTypeEnum.CODEBUDDY.value:
+                server_config["transportType"] = transport_type
+
+            # 处理 headers
+            headers = {}
+            if not instance.oauth2_public_client_enabled:
+                headers["X-Bkapi-Authorization"] = json.dumps(
+                    {
+                        "bk_app_code": "<your_app_code>",
+                        "bk_app_secret": "<your_app_secret>",
+                        settings.BK_LOGIN_TICKET_KEY: "<your_ticket>",
+                    }
+                )
+            if enable_multi_tenant_mode and user_tenant_id:
+                headers["X-Bk-Tenant-Id"] = user_tenant_id
+                headers["X-Bkapi-Allowed-Headers"] = "X-Bk-Tenant-Id"
+
+            if headers:
+                server_config["headers"] = headers
+
+            servers_config[instance.name] = server_config
+
+        # vscode 顶层 key 是 servers，其他客户端用 mcpServers
+        top_level_key = "servers" if client_type == MCPAgentClientTypeEnum.VSCODE.value else "mcpServers"
+        return {top_level_key: servers_config}

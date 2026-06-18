@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,12 +16,31 @@
 # to the current version of the project delivered to anyone in the future.
 #
 from apigateway.apps.support.constants import ProgrammingLanguageEnum
-from apigateway.biz.sdk.managers import golang, java, python
 from apigateway.utils.factory import TypeFactory
+
+from . import golang, java, python
+from .base import BaseSDKManager
+from .mixins import SDKManagerMixin
+
+try:
+    from .python_legacy import PythonLegacySDKManager
+except ImportError:
+    PythonLegacySDKManager = None
 
 SDKManagerFactory = TypeFactory()
 
 SDKManagerFactory.register(ProgrammingLanguageEnum.PYTHON.value, python.SDKManager)
 SDKManagerFactory.register(ProgrammingLanguageEnum.GOLANG.value, golang.SDKManager)
 SDKManagerFactory.register(ProgrammingLanguageEnum.JAVA.value, java.SDKManager)
-__all__ = ["SDKManagerFactory"]
+
+__all__ = [
+    # constant
+    # Enum
+    # class
+    "BaseSDKManager",
+    "PythonLegacySDKManager",
+    "SDKManagerFactory",
+    "SDKManagerMixin",
+    # functions
+    # others
+]

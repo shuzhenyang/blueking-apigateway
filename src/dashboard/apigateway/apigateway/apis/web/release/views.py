@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -28,12 +28,10 @@ from drf_yasg.utils import swagger_auto_schema
 from openapi_schema_to_json_schema import to_json_schema
 from rest_framework import generics, status
 
+import apigateway.biz.release as release_biz
 from apigateway.apps.programmable_gateway.models import ProgrammableGatewayDeployHistory
-from apigateway.biz.gateway import ReleaseError, release
 from apigateway.biz.programmable import ProgrammableGatewayReleaser
-from apigateway.biz.release import ReleaseHandler
 from apigateway.biz.released_resource import ReleasedResourceHandler
-from apigateway.biz.resource import ResourceLabelHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.error_codes import error_codes
 from apigateway.common.tenant.user_credentials import get_user_credentials_from_request
@@ -46,6 +44,8 @@ from apigateway.components.bkpaas import (
 )
 from apigateway.core.constants import PublishSourceEnum
 from apigateway.core.models import Backend, PublishEvent, Release, ReleaseHistory, ResourceVersion
+from apigateway.service.resource import get_resource_id_to_labels_by_label_ids
+from apigateway.service.resource_version import get_resource_schema
 from apigateway.utils import openapi as openapi_utils
 from apigateway.utils.exception import LockTimeout
 from apigateway.utils.redis_utils import Lock
@@ -98,7 +98,7 @@ class ReleaseAvailableResourceListApi(generics.ListAPIView):
             resources,
             many=True,
             context={
-                "labels": ResourceLabelHandler.get_labels_by_ids(label_ids),
+                "labels": get_resource_id_to_labels_by_label_ids(label_ids),
             },
         )
         return OKJsonResponse(data=output_slz.data)
@@ -132,7 +132,7 @@ class ReleaseAvailableResourceSchemaRetrieveApi(generics.RetrieveAPIView):
         schema_result = {"resource_id": resource_id}
 
         # 获取对应资源的 schema
-        schema = ResourceVersionHandler.get_resource_schema(instance.resource_version.id, resource_id)
+        schema = get_resource_schema(instance.resource_version.id, resource_id)
         schema_result["parameter_schema"] = schema.get("parameters", [])
         schema_result["response_schema"] = schema.get("responses", {})
         request_body = schema.get("requestBody")
@@ -210,7 +210,7 @@ class ReleaseCreateApi(generics.CreateAPIView):
                 timeout=settings.REDIS_PUBLISH_LOCK_TIMEOUT,
                 try_get_times=settings.REDIS_PUBLISH_LOCK_RETRY_GET_TIMES,
             ):
-                history = release(
+                history = release_biz.release_gateway(
                     gateway=request.gateway,
                     stage_id=slz.validated_data["stage_id"],
                     resource_version_id=resource_version_id,
@@ -220,7 +220,7 @@ class ReleaseCreateApi(generics.CreateAPIView):
         except LockTimeout as err:
             logger.exception("retrieve lock timeout")
             return FailJsonResponse(status=status.HTTP_500_INTERNAL_SERVER_ERROR, code="UNKNOWN", message=str(err))
-        except ReleaseError as err:
+        except release_biz.ReleaseError as err:
             logger.exception("release failed.")
             return FailJsonResponse(status=status.HTTP_500_INTERNAL_SERVER_ERROR, code="UNKNOWN", message=str(err))
 
@@ -256,7 +256,7 @@ class ReleaseHistoryListApi(generics.ListAPIView):
 
         data = slz.validated_data
 
-        queryset = ReleaseHistory.objects.filter_release_history(
+        queryset = release_biz.ReleaseHandler.filter_release_history(
             gateway=request.gateway,
             query=data.get("keyword"),
             stage_id=data.get("stage_id"),
@@ -300,7 +300,7 @@ class DeployHistoryListApi(generics.ListAPIView):
         slz.is_valid(raise_exception=True)
 
         data = slz.validated_data
-        queryset = ProgrammableGatewayDeployHistory.objects.filter_deploy_history(
+        queryset = ProgrammableGatewayReleaser.filter_deploy_history(
             gateway=request.gateway,
             query=data.get("keyword"),
             stage_id=data.get("stage_id"),
@@ -326,39 +326,6 @@ class DeployHistoryListApi(generics.ListAPIView):
 @method_decorator(
     name="get",
     decorator=swagger_auto_schema(
-        responses={status.HTTP_200_OK: ReleaseHistoryOutputSLZ()},
-        tags=["WebAPI.Release"],
-        operation_description="发布详情接口",
-    ),
-)
-class ReleaseHistoryRetrieveApi(generics.RetrieveAPIView):
-    serializer_class = ReleaseHistoryOutputSLZ
-
-    def get_queryset(self):
-        return ReleaseHistory.objects.filter(gateway=self.request.gateway)
-
-    def retrieve(self, request, *args, **kwargs):
-        try:
-            # created_time 在极端情况下可能重复，因此，添加字段 id
-            instance = ReleaseHistory.objects.filter(gateway=request.gateway).latest("created_time", "id")
-        except ReleaseHistory.DoesNotExist:
-            return OKJsonResponse(data={})
-
-        slz_class = self.get_serializer_class()
-        slz = slz_class(
-            instance,
-            context={
-                "release_history_events_map": PublishEvent.objects.get_release_history_id_to_latest_publish_event_map(
-                    [instance.id]
-                ),
-            },
-        )
-        return OKJsonResponse(data=slz.data)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
         responses={status.HTTP_200_OK: ReleaseHistoryEventRetrieveOutputSLZ()},
         tags=["WebAPI.Release"],
         operation_description="查询发布事件 (日志)",
@@ -369,14 +336,16 @@ class RelishHistoryEventsRetrieveAPI(generics.RetrieveAPIView):
     lookup_url_kwarg = "history_id"
 
     def get_queryset(self):
-        return ReleaseHistory.objects.filter(gateway=self.request.gateway)
+        return ReleaseHistory.objects.filter(gateway=self.request.gateway).select_related("data_plane")
 
     def retrieve(self, request, *args, **kwargs):
         release_history = self.get_object()
         slz = self.get_serializer(
             release_history,
             context={
-                "release_history_events": ReleaseHandler.list_publish_events_by_release_history_id(release_history.id),
+                "release_history_events": release_biz.ReleaseHandler.list_publish_events_by_release_history_id(
+                    release_history.id
+                ),
                 "release_history_events_map": PublishEvent.objects.get_release_history_id_to_latest_publish_event_map(
                     [release_history.id]
                 ),
@@ -508,7 +477,9 @@ class BaseProgrammableDeployEventsRetrieveApi(generics.RetrieveAPIView):
         release_history_events = []
         release_history_events_map = {}
         if release_history:
-            release_history_events = ReleaseHandler.list_publish_events_by_release_history_id(release_history.id)
+            release_history_events = release_biz.ReleaseHandler.list_publish_events_by_release_history_id(
+                release_history.id
+            )
             release_history_events_map = PublishEvent.objects.get_release_history_id_to_latest_publish_event_map(
                 [release_history.id]
             )

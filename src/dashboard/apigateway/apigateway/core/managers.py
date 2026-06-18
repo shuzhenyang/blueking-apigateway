@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -24,7 +24,6 @@ from typing import Any, Dict, List, Optional
 
 from cachetools import TTLCache, cached
 from django.db import models
-from django.db.models import Q
 
 from apigateway.common.constants import CACHE_MAXSIZE, CACHE_TIME_24_HOURS
 from apigateway.core.constants import (
@@ -148,7 +147,7 @@ class ReleaseManager(models.Manager):
         queryset = self.filter(stage__status=StageStatusEnum.ACTIVE.value)
 
         if gateway is not None:
-            queryset = self.filter(gateway_id=gateway.id)
+            queryset = queryset.filter(gateway_id=gateway.id)
 
         if resource_version_ids is not None:
             queryset = queryset.filter(resource_version_id__in=resource_version_ids)
@@ -180,6 +179,22 @@ class ReleaseManager(models.Manager):
             resource_version_id: [stage["name"] for stage in stages]
             for resource_version_id, stages in released_stages.items()
         }
+
+    def get_released_stage_names_by_resource_versions(
+        self, gateway_id: int, resource_version_ids: List[int]
+    ) -> List[str]:
+        if not resource_version_ids:
+            return []
+
+        return sorted(
+            set(
+                self.filter(
+                    gateway_id=gateway_id,
+                    stage__status=StageStatusEnum.ACTIVE.value,
+                    resource_version_id__in=resource_version_ids,
+                ).values_list("stage__name", flat=True)
+            )
+        )
 
     def get_or_create_release(self, gateway, stage, resource_version, comment, username):
         """
@@ -229,6 +244,16 @@ class ReleaseManager(models.Manager):
 
 
 class ReleasedResourceManager(models.Manager):
+    def get_released_resource_version_ids_by_resource(self, gateway_id: int, resource_id: int) -> List[int]:
+        return list(
+            self.filter(
+                gateway_id=gateway_id,
+                resource_id=resource_id,
+            )
+            .values_list("resource_version_id", flat=True)
+            .distinct()
+        )
+
     def save_released_resource(self, resource_version, force: bool = False) -> None:
         """保存资源版本中的资源配置"""
         queryset = self.filter(resource_version_id=resource_version.id)
@@ -316,44 +341,6 @@ class ReleasedResourceManager(models.Manager):
             "resource_perm_required": resource_auth_config["resource_perm_required"],
             "user_verified_required": resource_auth_config["auth_verified_required"],
         }
-
-
-class ReleaseHistoryManager(models.Manager):
-    # FIXME: not common, move to views.py
-    def filter_release_history(
-        self,
-        gateway,
-        query="",
-        stage_id=None,
-        created_by="",
-        time_start=None,
-        time_end=None,
-        order_by=None,
-        fuzzy=False,
-    ):
-        queryset = self.filter(gateway=gateway)
-
-        # query 不是模型字段，仅支持模糊匹配，如需精确匹配，可使用具体字段
-        if query and fuzzy:
-            queryset = queryset.filter(Q(stage__name__contains=query) | Q(resource_version__version__contains=query))
-
-        if stage_id:
-            queryset = queryset.filter(stage_id=stage_id)
-
-        if created_by:
-            if fuzzy:
-                queryset = queryset.filter(created_by__contains=created_by)
-            else:
-                queryset = queryset.filter(created_by=created_by)
-
-        if time_start and time_end:
-            # time_start、time_end 须同时存在，否则无效
-            queryset = queryset.filter(created_time__range=(time_start, time_end))
-
-        if order_by:
-            queryset = queryset.order_by(order_by)
-
-        return queryset.distinct()
 
 
 class PublishEventManager(models.Manager):

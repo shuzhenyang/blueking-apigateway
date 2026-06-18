@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -54,6 +54,13 @@ class AppGatewayPermission(TimestampedModelMixin):
     expires = models.DateTimeField(
         default=generate_expire_time, blank=True, null=True, help_text=_("默认过期时间为180天")
     )
+    grant_type = models.CharField(
+        max_length=16,
+        choices=GrantTypeEnum.get_choices(),
+        default=GrantTypeEnum.INITIALIZE.value,
+        db_index=True,
+    )
+    handled_by = models.CharField(max_length=32, blank=True, default="")
 
     objects: ClassVar[managers.AppGatewayPermissionManager] = managers.AppGatewayPermissionManager()
 
@@ -102,6 +109,7 @@ class AppResourcePermission(TimestampedModelMixin):
         default=generate_expire_time, blank=True, null=True, help_text=_("默认过期时间为180天")
     )
     grant_type = models.CharField(max_length=16, choices=GrantTypeEnum.get_choices(), db_index=True)
+    handled_by = models.CharField(max_length=32, blank=True, default="")
 
     objects: ClassVar[managers.AppResourcePermissionManager] = managers.AppResourcePermissionManager()
 
@@ -137,6 +145,13 @@ class AppResourcePermission(TimestampedModelMixin):
 
         return expires_in <= seconds
 
+    @property
+    def allow_apply_permission(self) -> bool:
+        if self.expires_in is not None and self.expires_in < to_seconds(days=RENEWABLE_EXPIRE_DAYS):
+            return True
+
+        return False
+
     @cached_property
     def resource(self) -> Optional[Resource]:
         return Resource.objects.filter(gateway_id=self.gateway_id, id=self.resource_id).first()
@@ -161,6 +176,13 @@ class AppPermissionApply(TimestampedModelMixin):
     )
     status = models.CharField(max_length=16, choices=ApplyStatusEnum.get_choices(), db_index=True)
     apply_record_id = models.IntegerField(null=True, blank=True)
+    itsm_ticket_id = models.CharField(max_length=64, blank=True, default="", help_text=_("关联的 ITSM 工单 ID"))
+    itsm_callback_token = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text=_("ITSM 回调校验 token"),
+    )
 
     def __str__(self):
         return f"<AppPermissionApply: {self.id}>"
@@ -204,6 +226,7 @@ class AppPermissionRecord(models.Model):
     )
     status = models.CharField(max_length=16, choices=ApplyStatusEnum.get_choices(), db_index=True)
     comment = models.CharField(max_length=512, blank=True, default="")
+    itsm_ticket_id = models.CharField(max_length=64, blank=True, default="", help_text=_("关联的 ITSM 工单 ID"))
 
     objects: ClassVar[managers.AppPermissionRecordManager] = managers.AppPermissionRecordManager()
 

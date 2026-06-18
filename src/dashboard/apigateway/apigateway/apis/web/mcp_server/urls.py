@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,11 +19,15 @@
 from django.urls import include, path
 
 from .views import (
+    GatewayMCPServerAppPermissionExportApi,
+    GatewayMCPServerAppPermissionListApi,
+    MCPServerAppPermissionAppCodeListApi,
     MCPServerAppPermissionApplyApplicantListApi,
     MCPServerAppPermissionApplyListApi,
     MCPServerAppPermissionApplyUpdateStatusApi,
     MCPServerAppPermissionDestroyApi,
     MCPServerAppPermissionListCreateApi,
+    MCPServerBatchConfigApi,
     MCPServerCategoriesListApi,
     MCPServerConfigListApi,
     MCPServerFilterOptionsApi,
@@ -35,7 +39,6 @@ from .views import (
     MCPServerStageReleaseCheckApi,
     MCPServerToolDocRetrieveApi,
     MCPServerToolsListApi,
-    MCPServerUpdateLabelsApi,
     MCPServerUpdateStatusApi,
     MCPServerUserCustomDocApi,
 )
@@ -45,13 +48,60 @@ urlpatterns = [
     path("", MCPServerListCreateApi.as_view(), name="mcp_server.list_create"),
     path("-/categories/", MCPServerCategoriesListApi.as_view(), name="mcp_server.categories_list"),
     path("-/filter-options/", MCPServerFilterOptionsApi.as_view(), name="mcp_server.filter_options"),
+    # permissions（网关级别）
+    path(
+        "-/permissions/",
+        include(
+            [
+                # 网关下 MCPServer 应用权限列表
+                path(
+                    "app-permissions/",
+                    GatewayMCPServerAppPermissionListApi.as_view(),
+                    name="mcp_server.gateway_app_permission.list",
+                ),
+                # 网关下 MCPServer 应用权限导出
+                path(
+                    "app-permissions/-/export/",
+                    GatewayMCPServerAppPermissionExportApi.as_view(),
+                    name="mcp_server.gateway_app_permission.export",
+                ),
+                # 有权限的 bk_app_code 列表（网关级别）
+                path(
+                    "app-permission-app-codes/",
+                    MCPServerAppPermissionAppCodeListApi.as_view(),
+                    name="mcp_server.app-permission.app_code_list",
+                ),
+                # 授权审批（网关级别）
+                path(
+                    "app-permission-apply/",
+                    include(
+                        [
+                            # 审批列表（支持按 mcp_server_id 筛选）
+                            path(
+                                "",
+                                MCPServerAppPermissionApplyListApi.as_view(),
+                                name="mcp_server.app-permission-apply.list",
+                            ),
+                            # 审批申请人列表
+                            path(
+                                "applicant/",
+                                MCPServerAppPermissionApplyApplicantListApi.as_view(),
+                                name="mcp_server.app-permission-apply.gateway_applicant_list",
+                            ),
+                        ]
+                    ),
+                ),
+            ]
+        ),
+    ),
     path(
         "<int:mcp_server_id>/",
         include(
             [
                 path("", MCPServerRetrieveUpdateDestroyApi.as_view(), name="mcp_server.retrieve_update_destroy"),
                 path("status/", MCPServerUpdateStatusApi.as_view(), name="mcp_server.update_status"),
-                path("labels/", MCPServerUpdateLabelsApi.as_view(), name="mcp_server.update_labels"),
+                # FIXME: not used? commented out in 2026-03-23, remove in the future
+                # path("labels/", MCPServerUpdateLabelsApi.as_view(), name="mcp_server.update_labels"),
                 path(
                     "tools/",
                     include(
@@ -91,11 +141,6 @@ urlpatterns = [
                                 include(
                                     [
                                         path(
-                                            "",
-                                            MCPServerAppPermissionApplyListApi.as_view(),
-                                            name="mcp_server.app-permission-apply.list",
-                                        ),
-                                        path(
                                             "applicant/",
                                             MCPServerAppPermissionApplyApplicantListApi.as_view(),
                                             name="mcp_server.app-permission-apply.applicant_list",
@@ -117,4 +162,5 @@ urlpatterns = [
     path("-/stage-release-check/", MCPServerStageReleaseCheckApi.as_view(), name="mcp_server.stage_release_check"),
     path("-/remote-prompts/", MCPServerRemotePromptsListApi.as_view(), name="mcp_server.remote_prompts_list"),
     path("-/remote-prompts/batch/", MCPServerRemotePromptsBatchApi.as_view(), name="mcp_server.remote_prompts_batch"),
+    path("-/batch-configs/", MCPServerBatchConfigApi.as_view(), name="mcp_server.batch_configs"),
 ]

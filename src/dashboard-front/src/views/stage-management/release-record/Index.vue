@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -152,12 +152,13 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         title: t('已发布的环境'),
         colKey: 'stage.name',
+        ellipsis: true,
       },
       {
         colKey: 'type',
         title: t('类型'),
         width: 100,
-        cell: (h, { row }: any) => <div>{getTextFromEnum(publishSourceEnum, row.source)}</div>,
+        cell: (h: any, { row }: any) => <div>{getTextFromEnum(publishSourceEnum, row.source)}</div>,
       },
       {
         title: t('分支'),
@@ -166,7 +167,7 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         title: 'commit_id',
         colKey: 'commit_id',
-        cell: (h, { row }) => (
+        cell: (h: any, { row }: any) => (
           <div v-bk-tooltips={row?.commit_id}>
             { row?.commit_id ? (row.commit_id.length > 8 ? `${row.commit_id.slice(0, 8)}...` : row.commit_id) : '--' }
             <CopyButton class="ml-4px" source={row?.commit_id} />
@@ -176,12 +177,13 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         title: t('版本号'),
         colKey: 'version',
+        width: 200,
       },
       {
         colKey: 'deployStatus',
         title: t('部署状态'),
         width: 120,
-        cell: (h, { row }: any) => (
+        cell: (h: any, { row }: any) => (
           <div>
             {
               row?.status === 'doing'
@@ -200,7 +202,8 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         colKey: 'operator',
         title: t('操作人'),
-        cell: (h, { row }: any) => (
+        width: 100,
+        cell: (h: any, { row }: any) => (
           <div>
             {
               !featureFlagStore.isEnableDisplayName
@@ -227,7 +230,7 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         colKey: 'actions',
         title: t('操作'),
-        cell: (h, { row }: any) => (
+        cell: (h: any, { row }: any) => (
           <bk-button text theme="primary" disabled={!row.deploy_id} onClick={() => showLogs(row.deploy_id, row)}>
             {t('发布日志')}
           </bk-button>
@@ -238,16 +241,19 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         title: t('已发布的环境'),
         colKey: 'stage.name',
+        ellipsis: true,
       },
       {
         colKey: 'type',
         title: t('类型'),
-        cell: (h, { row }: any) => <div>{getTextFromEnum(publishSourceEnum, row.source)}</div>,
+        width: 100,
+        cell: (h: any, { row }: any) => <div>{getTextFromEnum(publishSourceEnum, row.source)}</div>,
       },
       {
         colKey: 'version',
         title: t('版本号'),
-        cell: (h, { row }: any) => (
+        width: 200,
+        cell: (h: any, { row }: any) => (
           <bk-button
             text
             theme="primary"
@@ -261,7 +267,7 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
         colKey: 'actionStatus',
         title: t('操作状态'),
         width: 120,
-        cell: (h, { row }: any) => (
+        cell: (h: any, { row }: any) => (
           <div>
             {
               row?.status === 'doing'
@@ -280,7 +286,8 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         colKey: 'operator',
         title: t('操作人'),
-        cell: (h, { row }: any) => (
+        width: 100,
+        cell: (h: any, { row }: any) => (
           <div>
             {
               !featureFlagStore.isEnableDisplayName
@@ -307,11 +314,12 @@ const columns = computed<PrimaryTableProps['columns']>(() =>
       {
         title: t('耗时'),
         colKey: 'duration',
+        width: 100,
       },
       {
         colKey: 'actions',
         title: t('操作'),
-        cell: (h, { row }: any) => (
+        cell: (h: any, { row }: any) => (
           <bk-button text theme="primary" onClick={() => showLogs(row.id)}>
             {t('发布日志')}
           </bk-button>

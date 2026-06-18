@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -70,13 +70,11 @@
           <div class="response-table-wrapper">
             <div
               v-if="!readonly"
-              class="text-right mb-6px"
+              class="mb-16px"
             >
               <IconButton
-                text
                 theme="primary"
-                icon="upload"
-                @click="handleImportSchema"
+                @click="handleEditJSON"
               >
                 {{ t('通过 JSON 生成') }}
               </IconButton>
@@ -115,8 +113,10 @@
                     <AgIcon
                       v-if="row.type === 'object'"
                       :class="{ expanded: row.properties?.length }"
-                      class="expand-icon"
-                      name="right-shape"
+                      color="#979BA5"
+                      size="10"
+                      name="circle-shape"
+                      class="ml-12px"
                     />
                   </td>
                   <!-- 字段名 -->
@@ -140,22 +140,30 @@
                       v-if="readonly"
                       class="readonly-value-wrapper"
                     >
-                      {{ typeList.find(item => item.value === row.type)?.label || '--' }}
+                      {{ typeList.find((item: any) => item.value === row.type)?.label || '--' }}
                     </div>
-                    <BkSelect
+                    <div
                       v-else
-                      v-model="row.type"
-                      :clearable="false"
-                      :filterable="false"
-                      @change="handleTypeChange"
+                      class="h-full flex items-center"
                     >
-                      <BkOption
-                        v-for="item in typeList"
-                        :id="item.value"
-                        :key="item.value"
-                        :name="item.label"
+                      <BkSelect
+                        v-model="row.type"
+                        :clearable="false"
+                        :filterable="false"
+                        @change="handleTypeChange"
+                      >
+                        <BkOption
+                          v-for="item in typeList"
+                          :id="item.value"
+                          :key="item.value"
+                          :name="item.label"
+                        />
+                      </BkSelect>
+                      <ParamsRowConfig
+                        :row="row"
+                        @change="(config: any) => handleConfigChange(row, config)"
                       />
-                    </BkSelect>
+                    </div>
                   </td>
                   <!-- 字段备注 -->
                   <td
@@ -201,11 +209,12 @@
                 <tr>
                   <td
                     :colspan="readonly ? 4 : 5"
-                    class="pl-16px"
+                    class="p-0!"
                   >
                     <ResponseParamsSubTable
                       ref="sub-table-refs"
                       v-model="row.properties"
+                      :parent="row"
                       :readonly="readonly"
                     />
                   </td>
@@ -217,6 +226,10 @@
       </BkCollapsePanel>
     </BkCollapse>
   </div>
+  <JsonEditorSlider
+    v-model="isEditorSliderVisible"
+    @confirm="handleEditorConfirm"
+  />
 </template>
 
 <script lang="ts" setup>
@@ -228,13 +241,15 @@ import {
 import { Message } from 'bkui-vue';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
 import ResponseParamsSubTable from './ResponseParamsSubTable.vue';
-import { useFileSystemAccess } from '@vueuse/core';
 import toJsonSchema from 'to-json-schema';
+import JsonEditorSlider from '../JsonEditorSlider.vue';
+import ParamsRowConfig, { type IConfig } from '../ParamsRowConfig.vue';
 
 interface ITableRow {
   id: string
   name: string
   type: JSONSchema7TypeName
+  enum?: any[]
   description: string
   properties?: ITableRow[]
 }
@@ -263,20 +278,13 @@ const emit = defineEmits<{
   'change-code': [code: string]
 }>();
 
-const { data: importedJsonText, fileSize, open } = useFileSystemAccess({
-  dataType: 'Text',
-  types: [{
-    description: 'text',
-    accept: { 'text/plain': ['.txt', '.json'] },
-  }],
-});
-
 const { t } = useI18n();
 
 const tableData = ref<ITableRow[]>([]);
 const activeIndex = ref<string[]>(['currentCollapse']);
 const localCode = ref('');
 const isEditingCode = ref(false);
+const isEditorSliderVisible = ref(false);
 
 const tableRef = ref();
 const subTableRefs = useTemplateRef('sub-table-refs');
@@ -329,19 +337,24 @@ const convertSchemaToBodyRow = (schema: JSONSchema7) => {
   const body: ITableRow[] = [];
   if (Object.keys(schema.properties || {}).length) {
     for (const propertyName in schema.properties) {
-      const property = schema.properties[propertyName];
+      const property = schema.properties[propertyName] as JSONSchema7;
       const row: ITableRow = {
         id: uniqueId(),
         name: propertyName,
-        type: convertPropertyType(property.type),
+        type: convertPropertyType(property.type as string),
         description: property.description ?? '',
       };
+
+      if (property.enum?.length) {
+        Object.assign(row, { enum: property.enum });
+      }
+
       if (Object.keys(property.properties || {}).length) {
-        row.properties = convertSchemaToBodyRow(property);
+        row.properties = convertSchemaToBodyRow(property) ?? undefined;
       }
       // 处理 array 类型和 items 属性
       if (property.type === 'array' && Object.keys(property.items || {}).length) {
-        row.properties = convertSchemaToBodyRow(property.items);
+        row.properties = convertSchemaToBodyRow(property.items as JSONSchema7) ?? undefined;
       }
       body.push(row);
     }
@@ -372,6 +385,9 @@ const initTableData = (schema?: Record<string, any>) => {
     }
     else {
       row.type = type || 'object';
+      if ((schema || body.content['application/json'].schema)?.enum?.length) {
+        Object.assign(row, { enum: (schema || body.content['application/json'].schema).enum });
+      }
     }
   }
   tableData.value.push(row);
@@ -406,7 +422,7 @@ const isAddFieldVisible = (row: ITableRow) => {
 };
 
 const addField = (row: ITableRow) => {
-  const targetRow = tableData.value.find(data => data.id === row.id);
+  const targetRow = tableData.value.find((data: any) => data.id === row.id);
   if (targetRow) {
     if (targetRow.properties) {
       targetRow.properties.push(genRow());
@@ -430,6 +446,8 @@ const handleTypeChange = () => {
   else {
     rootRow.properties = [];
   }
+
+  delete rootRow?.enum;
 };
 
 const genBody = () => {
@@ -450,6 +468,10 @@ const genSchema = (row: ITableRow) => {
     schema.description = row.description;
   }
 
+  if (row.enum?.length) {
+    schema.enum = row.enum;
+  }
+
   // 处理 type 为 array 和拥有 items 字段的情况
   // 此时 row.properties[0] 实际上就是 items
   if (row.type === 'array') {
@@ -462,7 +484,7 @@ const genSchema = (row: ITableRow) => {
         type: 'object',
       };
       row.properties.forEach((item) => {
-        Object.assign(schema.items!.properties, { [item.name]: genSchema(item) });
+        Object.assign((schema.items as JSONSchema7).properties!, { [item.name]: genSchema(item) });
       });
     }
   }
@@ -470,7 +492,7 @@ const genSchema = (row: ITableRow) => {
   else if (row.properties?.length) {
     schema.properties = {};
     row.properties.forEach((item) => {
-      Object.assign(schema.properties, { [item.name]: genSchema(item) });
+      Object.assign(schema.properties!, { [item.name]: genSchema(item) });
     });
   }
   return schema;
@@ -484,7 +506,7 @@ const removeField = (row: ITableRow) => {
     });
     return;
   }
-  const index = tableData.value.findIndex(data => data.id === row.id);
+  const index = tableData.value.findIndex((data: any) => data.id === row.id);
   if (index !== -1) {
     tableData.value.splice(index, 1);
   }
@@ -519,45 +541,33 @@ const handleDelete = () => {
   emit('delete');
 };
 
-const handleImportSchema = async () => {
-  await open();
-  // 文件大小限制为 10KB
-  if (fileSize.value > 10 * 1024) {
-    Message({
-      theme: 'warning',
-      message: t('文件大小超过 10KB'),
-    });
-    return;
-  }
+const handleEditJSON = () => {
+  isEditorSliderVisible.value = true;
+};
 
-  if (importedJsonText.value) {
-    let jsonObject: any = {};
-    try {
-      jsonObject = JSON.parse(importedJsonText.value);
-    }
-    catch {
-      Message({
-        theme: 'error',
-        message: t('请选择合法的 JSON'),
-      });
-      return;
-    }
-    try {
-      const schema = toJsonSchema(jsonObject);
-      initTableData(schema);
-    }
-    catch {
-      Message({
-        theme: 'error',
-        message: t('生成 JSON Schema 失败'),
-      });
-    }
+const handleEditorConfirm = (jsonObject: Record<string, any>) => {
+  try {
+    const schema = toJsonSchema(jsonObject);
+    initTableData(schema);
   }
-  else {
+  catch {
     Message({
       theme: 'error',
-      message: t('请选择合法的 JSON'),
+      message: t('生成 JSON Schema 失败'),
     });
+  }
+};
+
+const handleConfigChange = (row: ITableRow, config: IConfig) => {
+  const { enums } = config;
+  const bodyRow = tableData.value!.find((data: any) => data.id === row.id);
+  if (bodyRow) {
+    if (enums?.enabled && enums.values?.length) {
+      bodyRow.enum = enums.values;
+    }
+    else {
+      delete bodyRow.enum;
+    }
   }
 };
 
@@ -568,8 +578,8 @@ onMounted(() => {
 defineExpose({
   getValue: async () => {
     try {
-      if (subTableRefs.value?.length) {
-        for (const subTable of subTableRefs.value) {
+      if ((subTableRefs.value as any)?.length) {
+        for (const subTable of (subTableRefs.value as any)) {
           await subTable?.validate();
         }
       }
@@ -586,6 +596,24 @@ defineExpose({
 </script>
 
 <style lang="scss" scoped>
+
+table {
+
+  thead {
+
+    th {
+      border-right: 1px solid #dcdee5;
+    }
+  }
+
+  td {
+    padding: 0;
+
+    &:not(:last-child) {
+      border-right: 1px solid #dcdee5;
+    }
+  }
+}
 
 .response-params-table-wrapper {
 
@@ -652,6 +680,7 @@ defineExpose({
   width: 100%;
   border: 1px solid #dcdee5;
   border-collapse: collapse;
+  border-bottom: none;
   border-spacing: 0;
 
   .table-head-row-cell,
@@ -661,10 +690,7 @@ defineExpose({
 
     &.arrow-col {
       width: 32px;
-
-      .expand-icon.expanded {
-        transform: rotate(90deg);
-      }
+      border-right: none;
     }
 
     &.type-col {
@@ -705,8 +731,10 @@ defineExpose({
     }
 
     .table-body-row {
+      border-bottom: 1px solid #dcdee5;
 
       .table-body-row-cell {
+        height: 42px;
 
         &.arrow-col {
           text-align: center;

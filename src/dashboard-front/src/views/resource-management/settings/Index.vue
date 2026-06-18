@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -135,6 +135,7 @@
                     />
                     <AgDropdown
                       :dropdown-list="exportDropData"
+                      :is-disabled="!tableData.length"
                       is-text
                       :text="t('导出')"
                       placement="right-start"
@@ -154,6 +155,7 @@
                   />
                   <AgDropdown
                     :dropdown-list="exportDropData"
+                    :is-disabled="!tableData.length"
                     :text="t('导出')"
                     @on-change="handleExport"
                   />
@@ -225,7 +227,7 @@
                   v-model="searchValue"
                   :data="searchData"
                   :placeholder="t('请输入资源名称或选择条件搜索, 按Enter确认')"
-                  :value-split-code="'+'"
+                  value-split-code="+"
                   class="w-full! bg-#fff!"
                   unique-select
                 />
@@ -239,7 +241,7 @@
                 :columns="columns"
                 :show-selection="isShowSelection"
                 :show-first-full-row="selectedRows.length > 0"
-                :table-row-key="'id'"
+                table-row-key="id"
                 show-settings
                 resizable
                 @filter-change="handleFilterChange"
@@ -354,8 +356,8 @@
                 :cur-select-label-ids="[]"
                 :labels-data="labelsData"
                 class="select-labels"
-                @update-success="getLabelsData"
-                @label-add-success="getLabelsData"
+                @updated="getLabelsData"
+                @added="getLabelsData"
               />
             </div>
           </BkFormItem>
@@ -865,7 +867,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
                     ? (
                       <div class="w-260px">
                         <RenderTagOverflow
-                          data={row.labels.map(label => label.name)}
+                          data={row.labels.map((label: any) => label.name)}
                         />
                       </div>
                     )
@@ -885,11 +887,11 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
                   cur-select-label-ids={curLabelIds.value}
                   labels-data={labelsData.value}
                   resource-id={resourceId.value}
-                  width={selectCheckBoxParentRef?.offsetWidth}
+                  width={(selectCheckBoxParentRef as any)?.offsetWidth}
                   force-focus
                   onClose={newLabelData => handleCloseSelect(row, newLabelData)}
-                  onUpdateSuccess={() => handleUpdateLabelSuccess()}
-                  onLabelAddSuccess={() => getLabelsData()}
+                  onUpdated={() => handleUpdateLabelSuccess()}
+                  onAdded={() => getLabelsData()}
                 />
               </section>
             )}
@@ -969,7 +971,7 @@ watch(
   (v: any) => {
     if (v.length && resourceId.value === 0) {
       resourceId.value = v[0].id;
-      curResource.value = tableData.value.find(resource => resource.id === resourceId.value);
+      curResource.value = tableData.value.find((resource: any) => resource.id === resourceId.value);
     }
     // 设置显示的tag值
     tableData.value.forEach((item: any) => {
@@ -1025,7 +1027,14 @@ watch(
 watch(
   searchValue,
   () => {
-    tableQueries.value = { order_by: tableQueries.value.order_by };
+    // 网关切换期间，route.params.id 尚未更新，跳过以避免 useRouteQuery 的 router.replace 中断导航
+    if (Number(route.params.id) !== gatewayId) {
+      return;
+    }
+    tableQueries.value = {
+      order_by: tableQueries.value.order_by,
+      label_ids: tableQueries.value.label_ids,
+    };
 
     if (route.query?.backend_id) {
       const { backend_id } = route.query;
@@ -1074,7 +1083,7 @@ watch(
       });
     }
     else {
-      tableQueries.value = {};
+      tableQueries.value = { label_ids: tableQueries.value.label_ids };
       queryKeyword.value = undefined;
       queryName.value = undefined;
       queryPath.value = undefined;
@@ -1098,13 +1107,34 @@ watch(
 
 watch(tableQueries, () => {
   nextTick(() => {
-    tableRef.value!.fetchData(tableQueries.value);
+    tableRef.value!.fetchData(tableQueries.value, { resetPage: true });
   });
 }, { deep: true });
+
+// 标记是否刚从网关切换过渡期进入正常状态，用于清除旧网关残留的 query 参数
+const wasInTransition = ref(false);
 
 watch(
   () => route.query,
   () => {
+    // 网关切换期间，route.params.id 尚未更新而 gatewayId prop 已更新（:key 触发组件重建），
+    // 此时 route.query 仍来自旧网关，跳过该 watcher 避免 useRouteQuery 的 router.replace 中断导航
+    if (Number(route.params.id) !== gatewayId) {
+      wasInTransition.value = true;
+      return;
+    }
+
+    // 刚从网关切换过渡期进入正常状态，此时 route.query 可能携带旧网关残留的查询参数
+    // 需要主动清除（searchValue 为空表示新组件尚未有用户筛选操作）
+    if (wasInTransition.value) {
+      wasInTransition.value = false;
+      if (!searchValue.value.length && Object.keys(route.query).some(k => route.query[k])) {
+        // 使用 router.replace 清除所有 query 参数，避免旧网关数据污染新网关
+        router.replace({ query: {} });
+        return;
+      }
+    }
+
     if (route.query?.keyword) {
       queryKeyword.value = route.query.keyword as string;
       const searchValueItem = searchValue.value.find((item: any) => item.id === queryKeyword.value);
@@ -1194,13 +1224,15 @@ watch(
         });
       }
     }
-    if (resourceSettingStore.previousPagination) {
+    // 从资源详情页返回时，恢复翻页位置
+    if (!Object.keys(route.query).length && resourceSettingStore.previousPagination) {
       nextTick(() => {
-        const { current, pageSize } = resourceSettingStore.previousPagination;
+        const { current, pageSize } = resourceSettingStore.previousPagination!;
         tableRef.value?.setPagination({
           current,
           pageSize,
         });
+        resourceSettingStore.setPagination(null);
       });
     }
   },
@@ -1380,7 +1412,7 @@ const handleExportDownload = async () => {
   const params = exportParams;
   const fetchMethod = exportDialogConfig.exportFileDocType === 'resource' ? exportResources : exportDocs;
   try {
-    await fetchMethod(gatewayId, params);
+    await fetchMethod(gatewayId, params as any);
     Message({
       message: t('导出成功'),
       theme: 'success',
@@ -1438,9 +1470,8 @@ const handleBatchConfirm = async () => {
     theme: 'success',
     width: 'auto',
   });
+  handleClearSelection();
   tableRef.value!.fetchData(tableQueries.value);
-  selectedRowKeys.value = [];
-  selectedRows.value = [];
 };
 
 const handleBatchCancel = () => {
@@ -1484,7 +1515,7 @@ const handleShowVersion = async () => {
   try {
     const res = await checkNeedNewVersion(gatewayId);
     versionConfigs.needNewVersion = res.need_new_version;
-    versionConfigs.versionMessage = res.msg;
+    versionConfigs.versionMessage = res.msg ?? '';
   }
   catch (error: any) {
     versionConfigs.needNewVersion = false;
@@ -1529,7 +1560,7 @@ const getLabelsData = async () => {
 const handleCloseSelect = (row: any, newLabelData: any = []) => {
   row.isEditLabel = false;
   // 接收新的标签数据，检查标签的 name 是否有变化，有则重新获取列表数据
-  // 用于修复标签更改名称后，SelectCheckBox 组件的 update-success 不能触发，列表中的标签名没有相应更新的 bug
+  // 用于修复标签更改名称后，SelectCheckBox 组件的 updated 不能触发，列表中的标签名没有相应更新的 bug
   if (newLabelData.length > 0) {
     const diff = differenceBy(row.labels, newLabelData, 'name');
     if (diff.length > 0) {
@@ -1572,7 +1603,7 @@ const handleVersionCreated = () => {
 
 onBeforeRouteLeave((to) => {
   if (to.name === 'ResourceEdit') {
-    const { current, pageSize } = tableRef.value!.getPagination();
+    const { current, pageSize } = tableRef.value!.getPagination() as any;
     resourceSettingStore.setPagination({
       current,
       pageSize,
@@ -1602,7 +1633,7 @@ const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterValue) =>
     if (checkValues.length) {
       if (colKey === 'method') {
         Object.assign(tableQueries.value, { method: checkValues.join(',') });
-        const methodSearchItem = searchValue.value.find(searchItem => searchItem.id === 'method');
+        const methodSearchItem = searchValue.value.find((searchItem: any) => searchItem.id === 'method');
         if (methodSearchItem) {
           methodSearchItem.values = checkValues.map((item: string) => ({
             id: item,
@@ -1629,7 +1660,7 @@ const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterValue) =>
     }
     else {
       if (colKey === 'method') {
-        const methodSearchItemIndex = searchValue.value.findIndex(searchItem => searchItem.id === 'method');
+        const methodSearchItemIndex = searchValue.value.findIndex((searchItem: any) => searchItem.id === 'method');
         if (methodSearchItemIndex > -1) {
           searchValue.value.splice(methodSearchItemIndex, 1);
         }
@@ -1639,12 +1670,12 @@ const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterValue) =>
   });
 };
 
-const handleSelectionChange: PrimaryTableProps['onSelectChange'] = ({ selections, selectionsRowKeys }) => {
+const handleSelectionChange = ({ selections, selectionsRowKeys }: any) => {
   selectedRows.value = selections;
   selectedRowKeys.value = selectionsRowKeys;
 };
 
-const handleSortChange: PrimaryTableProps['onSortChange'] = (sort) => {
+const handleSortChange: PrimaryTableProps['onSortChange'] = (sort: any) => {
   if (!sort) {
     delete tableQueries.value.order_by;
     return;

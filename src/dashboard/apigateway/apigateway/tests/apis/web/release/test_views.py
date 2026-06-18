@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -29,7 +29,7 @@ from openapi_schema_to_json_schema import to_json_schema
 from apigateway.apps.openapi.models import OpenAPIResourceSchemaVersion
 from apigateway.core.constants import PublishEventNameTypeEnum, PublishEventStatusTypeEnum
 from apigateway.core.models import PublishEvent, Release, ReleaseHistory, ResourceVersion, Stage
-from apigateway.tests.utils.testing import create_gateway, dummy_time
+from apigateway.tests.utils.testing import dummy_time
 
 pytestmark = pytest.mark.django_db
 
@@ -65,7 +65,7 @@ class TestReleaseCreateApi:
                 created_time=dummy_time.time,
             )
             # TODO: mock the releaser
-            mocker.patch("apigateway.apis.web.release.views.release", return_value=release_history)
+            mocker.patch("apigateway.apis.web.release.views.release_biz.release_gateway", return_value=release_history)
 
             data = {
                 "gateway_id": fake_gateway.id,
@@ -241,60 +241,6 @@ class TestReleaseHistoryListApi:
 
             result = resp.json()
             assert result["data"]["count"] == test["expected"]["count"]
-
-
-class TestReleaseHistoryRetrieveApi:
-    def test_retrieve_latest(self, request_view, fake_gateway):
-        stage = G(Stage, gateway=fake_gateway)
-        resource_version = G(ResourceVersion, gateway=fake_gateway)
-        G(ReleaseHistory, gateway=fake_gateway, created_time=dummy_time.time)
-        history = G(
-            ReleaseHistory,
-            gateway=fake_gateway,
-            stage=stage,
-            resource_version=resource_version,
-            created_time=dummy_time.time,
-        )
-
-        event_1 = G(
-            PublishEvent,
-            publish=history,
-            name=PublishEventNameTypeEnum.VALIDATE_CONFIGURATION.value,
-            status=PublishEventStatusTypeEnum.FAILURE.value,
-            created_time=dummy_time.time + datetime.timedelta(seconds=10),
-        )
-
-        gateway_2 = create_gateway()
-
-        data = [
-            {
-                "gateway": fake_gateway,
-                "expected": {
-                    "id": history.id,
-                    "stage": {"id": stage.id, "name": stage.name},
-                    "created_time": dummy_time.str,
-                    "resource_version_display": resource_version.object_display,
-                    "created_by": history.created_by,
-                    "source": history.source,
-                    "status": f"{event_1.status}",
-                    "duration": (event_1.created_time - history.created_time).total_seconds(),
-                },
-            },
-            {
-                "gateway": gateway_2,
-                "expected": {},
-            },
-        ]
-        for test in data:
-            resp = request_view(
-                method="GET",
-                view_name="gateway.release_histories.retrieve_latest",
-                path_params={"gateway_id": test["gateway"].id},
-                data=test,
-            )
-
-            result = resp.json()
-            assert result["data"] == test["expected"]
 
 
 class TestReleaseHistoryEventsRetrieveAPI:

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -15,13 +15,39 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import importlib
+
+import pytest
+from django.test import override_settings
+from django.urls import NoReverseMatch, clear_url_caches, reverse, set_urlconf
+
+import apigateway.urls
+
+
 class TestUrls:
-    def test_urls(self, request_view):
-        resp = request_view(
-            method="GET",
-            view_name="schema-swagger-ui",
-            data={
-                "format": "openapi",
-            },
-        )
-        assert resp.status_code == 200
+    def test_schema_json_url_uses_non_compat_format(self):
+        try:
+            with override_settings(DEBUG=True):
+                clear_url_caches()
+                importlib.reload(apigateway.urls)
+                set_urlconf(None)
+
+                assert reverse("schema-json", kwargs={"format": "json"}) == "/backend/docs/auto/swagger.json"
+        finally:
+            importlib.reload(apigateway.urls)
+            clear_url_caches()
+            set_urlconf(None)
+
+    def test_urls_disabled_when_debug_is_false(self):
+        try:
+            with override_settings(DEBUG=False):
+                clear_url_caches()
+                importlib.reload(apigateway.urls)
+                set_urlconf(None)
+
+                with pytest.raises(NoReverseMatch):
+                    reverse("schema-swagger-ui")
+        finally:
+            importlib.reload(apigateway.urls)
+            clear_url_caches()
+            set_urlconf(None)

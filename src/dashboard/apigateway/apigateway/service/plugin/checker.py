@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -189,6 +189,37 @@ class RequestValidationChecker(BaseChecker):
 
         if header_schema:
             self._validate_json_schema("header_schema", header_schema)
+
+
+class UriBlockerChecker(BaseChecker):
+    def check(self, payload: str):
+        loaded_data = yaml_loads(payload)
+        if not loaded_data:
+            raise ValueError("YAML cannot be empty")
+
+        block_rules = loaded_data.get("block_rules")
+        if not block_rules:
+            raise ValueError("block_rules cannot be empty")
+
+        if not isinstance(block_rules, list):
+            raise TypeError("block_rules should be list")
+
+        flags = re.IGNORECASE if loaded_data.get("case_insensitive") else 0
+        for index, rule in enumerate(block_rules):
+            if not isinstance(rule, str):
+                raise TypeError(f"block_rules[{index}] should be string")
+
+            if not rule:
+                raise ValueError(f"block_rules[{index}] cannot be empty")
+
+            try:
+                re.compile(rule, flags)
+            except re.error as err:
+                raise ValueError(f"block_rules[{index}] is not a valid regex: {err}")
+
+        duplicate_rules = [rule for rule, count in Counter(block_rules).items() if count >= 2]
+        if duplicate_rules:
+            raise ValueError("block_rules has duplicate elements: {}".format(", ".join(duplicate_rules)))
 
 
 class FaultInjectionChecker(BaseChecker):
@@ -401,12 +432,49 @@ def check_vars(vars, location):
                 raise TypeError(f"The vars of {location} at index [{index}][{i}] should be list")
 
 
+class BkTrafficLabelChecker(BaseChecker):
+    def check(self, payload: str):
+        loaded_data = yaml_loads(payload)
+        if not loaded_data:
+            raise ValueError("YAML cannot be empty")
+
+        rules = loaded_data.get("rules")
+        if not rules:
+            raise ValueError("rules cannot be empty")
+
+        for idx, rule in enumerate(rules):
+            match = rule.get("match")
+            if not match:
+                raise ValueError(f"rule[{idx}]: match cannot be empty")
+
+            actions = rule.get("actions")
+            if not actions:
+                raise ValueError(f"rule[{idx}]: actions cannot be empty")
+
+            for action_idx, action in enumerate(actions):
+                weight = action.get("weight")
+                if weight is not None and (not isinstance(weight, int) or weight < 0):
+                    raise ValueError(f"rule[{idx}].actions[{action_idx}]: weight must be a non-negative integer")
+
+                set_headers = action.get("set_headers")
+                if not set_headers:
+                    raise ValueError(f"rule[{idx}].actions[{action_idx}]: set_headers cannot be empty")
+
+                for key, value in set_headers.items():
+                    if not isinstance(value, str):
+                        raise TypeError(
+                            f"rule[{idx}].actions[{action_idx}].set_headers: "
+                            f"value for '{key}' must be a string, got {type(value).__name__}"
+                        )
+
+
 class PluginConfigYamlChecker:
     type_code_to_checker: ClassVar[Dict[str, BaseChecker]] = {
         PluginTypeCodeEnum.BK_CORS.value: BkCorsChecker(),
         PluginTypeCodeEnum.BK_HEADER_REWRITE.value: HeaderRewriteChecker(),
         PluginTypeCodeEnum.BK_IP_RESTRICTION.value: BkIPRestrictionChecker(),
         PluginTypeCodeEnum.REQUEST_VALIDATION.value: RequestValidationChecker(),
+        PluginTypeCodeEnum.URI_BLOCKER.value: UriBlockerChecker(),
         PluginTypeCodeEnum.FAULT_INJECTION.value: FaultInjectionChecker(),
         PluginTypeCodeEnum.RESPONSE_REWRITE.value: ResponseRewriteChecker(),
         PluginTypeCodeEnum.REDIRECT.value: RedirectChecker(),
@@ -415,6 +483,7 @@ class PluginConfigYamlChecker:
         PluginTypeCodeEnum.BK_USER_RESTRICTION.value: BKUserRestrictionChecker(),
         PluginTypeCodeEnum.PROXY_CACHE.value: ProxyCacheChecker(),
         PluginTypeCodeEnum.AI_RATE_LIMITING.value: AIRateLimitingChecker(),
+        PluginTypeCodeEnum.BK_TRAFFIC_LABEL.value: BkTrafficLabelChecker(),
     }
 
     def __init__(self, type_code: str):

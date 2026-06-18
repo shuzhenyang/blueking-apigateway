@@ -16,11 +16,18 @@
  * to the current version of the project delivered to anyone in the future.
  */
 
-import { isNull, omitBy } from 'lodash-es';
+import { isEmpty, isNull, isObject, isUndefined, omitBy } from 'lodash-es';
 
-// 过滤空值
-export const filterSimpleEmpty = (obj: Record<string, string>) => {
+// 过滤：null / undefined / isNaN / 空字符串 / 空数组 / 空对象
+export const filterSimpleEmpty = (obj: Record<string, any>) => {
   return omitBy(obj, (value) => {
-    return isNull(value) || value === '' || (Array.isArray(value) && value.length === 0);
+    return (
+      isNull(value)
+      || isUndefined(value)
+      || Number.isNaN(value)
+      || value === ''
+      || (isObject(value) && !Array.isArray(value) && isEmpty(value))
+      || (Array.isArray(value) && isEmpty(value))
+    );
   });
 };

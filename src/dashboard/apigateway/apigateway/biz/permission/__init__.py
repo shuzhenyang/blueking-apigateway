@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,11 +16,33 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
+from .display import (
+    AppPermissionBuilder,
+    ResourcePermission,
+    ResourcePermissionBuilder,
+    build_resource_permission_display,
+)
 from .manager import (
-    GatewayPermissionDimensionManager,  # noqa
-    PermissionDimensionManager,  # noqa
-    ResourcePermissionDimensionManager,  # noqa
+    GatewayPermissionDimensionManager,
+    PermissionDimensionManager,
+    ResourcePermissionDimensionManager,
 )
 from .permission import (
-    ResourcePermissionHandler,  # noqa
+    ResourcePermissionHandler,
 )
+
+__all__ = [
+    # constant
+    # Enum
+    # class
+    "GatewayPermissionDimensionManager",
+    "PermissionDimensionManager",
+    "ResourcePermissionDimensionManager",
+    "ResourcePermissionHandler",
+    "AppPermissionBuilder",
+    "ResourcePermission",
+    "ResourcePermissionBuilder",
+    # functions
+    "build_resource_permission_display",
+    # others
+]

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,7 +27,9 @@ from apigateway.apps.permission.models import (
     AppResourcePermission,
 )
 from apigateway.biz.permission import (
+    AppPermissionBuilder,
     ResourcePermissionHandler,
+    build_resource_permission_display,
 )
 from apigateway.common.tenant.constants import (
     TENANT_ID_OPERATION,
@@ -75,13 +77,43 @@ class TestResourcePermissionHandler:
             bk_app_code=bk_app_code,
             expires=now_datetime() - datetime.timedelta(seconds=10),
         )
-        ResourcePermissionHandler.sync_from_gateway_permission(gateway, bk_app_code, [1])
-        assert AppResourcePermission.objects.filter(gateway=gateway, bk_app_code=bk_app_code).count() == 0
+        ResourcePermissionHandler.sync_from_gateway_permission(gateway, bk_app_code, [resource.id])
+        assert AppResourcePermission.objects.filter(gateway=gateway, bk_app_code=bk_app_code).count() == 1
 
+        # api-perm unexpired
         api_perm.expires = now_datetime() + datetime.timedelta(seconds=10)
         api_perm.save()
         ResourcePermissionHandler.sync_from_gateway_permission(gateway, bk_app_code, [resource.id])
         assert AppResourcePermission.objects.filter(gateway=gateway, bk_app_code=bk_app_code).count() == 1
+
+
+def test_build_permission_display_preserves_gateway_name(fake_gateway):
+    item = build_resource_permission_display(
+        resource_id=1,
+        resource_name="get_user",
+        gateway_id=fake_gateway.id,
+        gateway_name=fake_gateway.name,
+        description="desc",
+        description_en="desc en",
+        resource_perm_required=True,
+        doc_link="",
+        gateway_permission=None,
+        resource_permission=None,
+        gateway_permission_apply_status="",
+        resource_permission_apply_status="",
+    )
+
+    assert item["gateway_name"] == fake_gateway.name
+    assert item["name"] == "get_user"
+
+
+def test_app_permission_builder_uses_released_resource_version_data(fake_gateway, fake_resource_version, fake_release):
+    G(AppGatewayPermission, gateway=fake_gateway, bk_app_code="test", expires=None)
+
+    result = AppPermissionBuilder("test").build()
+
+    expected_resource_ids = {item["id"] for item in fake_resource_version.data if item["is_public"]}
+    assert {item["id"] for item in result} == expected_resource_ids
 
 
 class TestConvertAppliedByToDisplayName:

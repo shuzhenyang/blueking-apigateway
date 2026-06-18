@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,17 +18,24 @@
 import logging
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import ClassVar, List
 
 from apigateway.biz.sdk.models import Packager
+from apigateway.utils.maven import RepositoryConfig
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SourcePackager(Packager):
+    repository: ClassVar[str] = "default"
+    repository_config: RepositoryConfig = field(init=False)
+
+    def __post_init__(self):
+        self.repository_config = RepositoryConfig.by_name(self.repository)
+
     def pack(self, output_dir: str) -> List[str]:
         # 保存当前工作目录
         original_dir = os.getcwd()
@@ -42,6 +49,7 @@ class SourcePackager(Packager):
                     str(Path(original_dir) / "apigateway/biz/sdk/maven/settings.xml"),
                     "clean",
                     "package",
+                    "-DmirrorUrl=" + self.repository_config.mirror_url,
                 ],
                 env={"HOME": output_dir},
                 cwd=output_dir,

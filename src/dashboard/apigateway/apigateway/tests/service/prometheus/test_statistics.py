@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,7 +18,7 @@
 #
 import pytest
 
-from apigateway.service.prometheus import statistics
+import apigateway.service.prometheus as statistics
 
 
 class TestStatisticsGatewayRequestMetrics:
@@ -35,7 +35,7 @@ class TestStatisticsGatewayRequestMetrics:
         ],
     )
     def test_get_query_promql(self, mocker, step, expected):
-        mocker.patch("apigateway.service.prometheus.dimension.BaseMetrics.default_labels", return_value=[])
+        mocker.patch("apigateway.service.prometheus.BaseMetrics.default_labels", return_value=[])
 
         metrics = statistics.StatisticsGatewayRequestMetrics()
         result = metrics._get_query_promql(step)
@@ -56,7 +56,7 @@ class TestStatisticsGatewayRequestDurationMetrics:
         ],
     )
     def test_get_query_promql(self, mocker, step, expected):
-        mocker.patch("apigateway.service.prometheus.dimension.BaseMetrics.default_labels", return_value=[])
+        mocker.patch("apigateway.service.prometheus.BaseMetrics.default_labels", return_value=[])
 
         metrics = statistics.StatisticsGatewayRequestDurationMetrics()
         result = metrics._get_query_promql(step)
@@ -77,7 +77,7 @@ class TestStatisticsAppRequestMetrics:
         ],
     )
     def test_get_query_promql(self, mocker, step, expected):
-        mocker.patch("apigateway.service.prometheus.dimension.BaseMetrics.default_labels", return_value=[])
+        mocker.patch("apigateway.service.prometheus.BaseMetrics.default_labels", return_value=[])
 
         metrics = statistics.StatisticsAppRequestMetrics()
         result = metrics._get_query_promql(step)
@@ -98,7 +98,7 @@ class TestStatisticsAppRequestByResourceMetrics:
         ],
     )
     def test_get_query_promql(self, mocker, step, expected):
-        mocker.patch("apigateway.service.prometheus.dimension.BaseMetrics.default_labels", return_value=[])
+        mocker.patch("apigateway.service.prometheus.BaseMetrics.default_labels", return_value=[])
 
         metrics = statistics.StatisticsAppRequestByResourceMetrics()
         result = metrics._get_query_promql(step)

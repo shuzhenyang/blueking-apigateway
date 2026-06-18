@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -154,7 +154,7 @@ watch(
 // 获取日志列表
 const getLogsList = async () => {
   try {
-    const response = await getReleaseEvents(apigwId.value, historyId);
+    const response = await getReleaseEvents(apigwId.value, historyId!);
     stageStore.setDoing(true);
     if (response.status !== 'doing') {
       stageStore.setDoing(false);
@@ -170,6 +170,11 @@ const getLogsList = async () => {
     state.objectSteps = [];
     state.totalDuration = 0;
     logBody.value = '';
+
+    // 展示数据面
+    if (response.data_plane?.id) {
+      logBody.value += `[data_plane: ${response.data_plane.name}]\n\n`;
+    }
 
     const events = response.events || [];
     const eventTemplates = response.events_template || [];

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,29 +16,23 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from django.conf import settings
 from django.utils.translation import gettext as _
 from django.utils.translation.trans_null import gettext_lazy
-from pydantic import TypeAdapter
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
 from apigateway.apps.mcp_server.constants import (
-    MCPServerAppPermissionGrantTypeEnum,
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
 )
-from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission
+from apigateway.apps.mcp_server.models import MCPServer, MCPServerCategory
 from apigateway.apps.permission.constants import FormattedGrantDimensionEnum, GrantDimensionEnum
-from apigateway.apps.plugin.constants import PluginBindingScopeEnum
-from apigateway.apps.plugin.models import PluginType
 from apigateway.apps.support.constants import DocLanguageEnum, ProgrammingLanguageEnum
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND, SEMVER_PATTERN
-from apigateway.biz.mcp_server import MCPServerHandler
-from apigateway.biz.plugin import PluginConfigData, PluginSynchronizer
-from apigateway.biz.stage import StageHandler
+from apigateway.biz.stage import StageHandler, StageSyncHandler
 from apigateway.biz.validators import (
     BKAppCodeListValidator,
     GatewayAPIDocMaintainerValidator,
@@ -69,7 +63,6 @@ from apigateway.core.constants import (
     LoadBalanceTypeEnum,
 )
 from apigateway.core.models import Backend, BackendConfig, Gateway, ResourceVersion, Stage
-from apigateway.service.plugin.validator import PluginConfigYamlValidator
 from apigateway.utils.time import NeverExpiresTime
 
 
@@ -123,6 +116,14 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
     )
     user_config = UserConfigSLZ(required=False)
     allow_delete_sensitive_params = serializers.BooleanField(default=True)
+    # Data plane names to bind to when creating a new gateway
+    # If empty, will use 'default' data plane
+    data_planes = serializers.ListField(
+        child=serializers.CharField(max_length=32),
+        required=False,
+        allow_empty=True,
+        help_text="Data plane names to bind the gateway to (defaults to 'default')",
+    )
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.GatewaySyncInputSLZ"
@@ -138,6 +139,7 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
             "api_type",
             "user_config",
             "allow_delete_sensitive_params",
+            "data_planes",
         ]
         extra_kwargs = {
             "description_en": {
@@ -178,7 +180,12 @@ class GatewaySyncOutputSLZ(serializers.Serializer):
 
 
 class HostSLZ(serializers.Serializer):
-    host = serializers.RegexField(DOMAIN_PATTERN)
+    host = serializers.RegexField(
+        DOMAIN_PATTERN,
+        error_messages={
+            "invalid": _("host 格式不正确，需以 http:// 或 https:// 开头，且为合法的域名，service 地址或 ip:port"),
+        },
+    )
     weight = serializers.IntegerField(min_value=1, required=False)
 
     class Meta:
@@ -380,7 +387,9 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         default=dict,
     )
 
-    backends = serializers.ListSerializer(help_text="后端配置", child=BackendSLZ(), allow_null=False, required=True)
+    backends = serializers.ListSerializer(
+        help_text="后端配置", child=BackendSLZ(), allow_null=False, allow_empty=False, required=True
+    )
 
     plugin_configs = serializers.ListSerializer(
         help_text="插件配置", child=PluginConfigSLZ(), allow_null=True, required=False
@@ -428,7 +437,7 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         ]
 
     def validate(self, data):
-        self._validate_plugin_configs(data.get("plugin_configs"))
+        StageSyncHandler.validate_plugin_configs(data.get("plugin_configs"))
         self._validate_scheme_host(data.get("backends"))
         # validate stage backend
         if data.get("backends") is None:
@@ -447,32 +456,12 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
 
         # 3.create config backend
         backend_configs = []
-        names = [DEFAULT_BACKEND_NAME]
         for backend_info in validated_data.get("backends", []):
-            names.append(backend_info["name"])
             backend, _ = Backend.objects.get_or_create(
                 gateway=instance.gateway,
                 name=backend_info["name"],
             )
-            config = self._get_stage_backend_config_v2(backend_info)
-            backend_config = BackendConfig(
-                gateway=instance.gateway,
-                backend=backend,
-                stage=instance,
-                config=config,
-            )
-            backend_configs.append(backend_config)
-
-        # 4. create other backend config with empty host
-        backends = Backend.objects.filter(gateway=instance.gateway).exclude(name__in=names)
-        config = {
-            "type": "node",
-            "timeout": 30,
-            "loadbalance": "roundrobin",
-            "hosts": [{"scheme": "http", "host": "", "weight": 100}],
-        }
-
-        for backend in backends:
+            config = StageSyncHandler.build_backend_config(backend_info)
             backend_config = BackendConfig(
                 gateway=instance.gateway,
                 backend=backend,
@@ -484,32 +473,14 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         if backend_configs:
             BackendConfig.objects.bulk_create(backend_configs)
 
-        # 5. sync stage plugin
-        self._sync_plugins(instance.gateway_id, instance.id, validated_data.get("plugin_configs", None))
+        # 4. sync stage plugin
+        StageSyncHandler.sync_plugin_configs(
+            gateway_id=instance.gateway_id,
+            stage_id=instance.id,
+            plugin_configs=validated_data.get("plugin_configs", None),
+        )
 
         return instance
-
-    def _get_stage_backend_config_v2(self, backend: dict):
-        hosts = []
-        for host in backend["config"]["hosts"]:
-            scheme, _host = host["host"].rstrip("/").split("://")
-            hosts.append({"scheme": scheme, "host": _host, "weight": host["weight"]})
-        loadbalance = backend["config"]["loadbalance"]
-        config = {
-            "type": "node",
-            "timeout": backend["config"]["timeout"],
-            "loadbalance": loadbalance,
-            "hosts": hosts,
-        }
-        if loadbalance == LoadBalanceTypeEnum.CHASH.value:
-            config["hash_on"] = backend["config"]["hash_on"]
-            config["key"] = backend["config"]["key"]
-
-        # Add health check configuration if present
-        if "checks" in backend["config"] and backend["config"]["checks"]:
-            config["checks"] = backend["config"]["checks"]
-
-        return config
 
     def update(self, instance, validated_data):
         validated_data.pop("name", None)
@@ -539,58 +510,17 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
                     backend=backend,
                     stage=instance,
                 )
-            backend_config.config = self._get_stage_backend_config_v2(backend_info)
+            backend_config.config = StageSyncHandler.build_backend_config(backend_info)
             backend_config.save()
 
         # 4. sync stage plugin
-        self._sync_plugins(instance.gateway_id, instance.id, validated_data.get("plugin_configs", None))
+        StageSyncHandler.sync_plugin_configs(
+            gateway_id=instance.gateway_id,
+            stage_id=instance.id,
+            plugin_configs=validated_data.get("plugin_configs", None),
+        )
 
         return instance
-
-    def _validate_plugin_configs(self, plugin_configs):
-        """
-        校验插件配置
-        - 1. 插件类型不能重复
-        - 2. 插件类型必须已存在
-        - 3. 插件配置，必须符合插件类型的 schema 约束
-        """
-        if not plugin_configs:
-            return
-
-        types = set()
-        for plugin_config in plugin_configs:
-            plugin_type = plugin_config["type"]
-            if plugin_type in types:
-                raise serializers.ValidationError(_("插件类型重复：{plugin_type}。").format(plugin_type=plugin_type))
-            types.add(plugin_type)
-
-        all_plugin_type = PluginType.objects.all()
-
-        exist_plugin_types = set(all_plugin_type.values_list("code", flat=True))
-        not_exist_types = types - exist_plugin_types
-        if not_exist_types:
-            raise serializers.ValidationError(
-                _("插件类型 {not_exist_types} 不存在。").format(not_exist_types=", ".join(not_exist_types))
-            )
-
-        plugin_types = {plugin_type.code: plugin_type for plugin_type in all_plugin_type}
-        yaml_validator = PluginConfigYamlValidator()
-
-        for plugin_config in plugin_configs:
-            plugin_type = plugin_types[plugin_config["type"]]
-            try:
-                yaml_validator.validate(
-                    plugin_type.code,
-                    plugin_config["yaml"],
-                    plugin_type.schema and plugin_type.schema.schema,
-                )
-            except Exception as err:  # pylint: disable=broad-except
-                raise serializers.ValidationError(
-                    _("插件配置校验失败，插件类型：{plugin_type_code}，错误信息：{err}。").format(
-                        plugin_type_code=plugin_type.code,
-                        err=err,
-                    )
-                )
 
     def _validate_scheme_host(self, backends):
         if backends is None:
@@ -598,20 +528,6 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         for backend in backends:
             validator = SchemeHostInputValidator(hosts=backend["config"]["hosts"], backend=backend)
             validator.validate_scheme(CallSourceTypeEnum.OpenAPI.value)
-
-    def _sync_plugins(self, gateway_id: int, stage_id: int, plugin_configs: Optional[Dict[str, Any]] = None):
-        # plugin_configs 为 None 则，plugin_config_datas 设置 [] 则清空对应配置
-        plugin_config_datas = (
-            TypeAdapter(Optional[List[PluginConfigData]]).validate_python(plugin_configs) if plugin_configs else []
-        )
-
-        scope_id_to_plugin_configs = {stage_id: plugin_config_datas}
-        synchronizer = PluginSynchronizer()
-        synchronizer.sync(
-            gateway_id=gateway_id,
-            scope_type=PluginBindingScopeEnum.STAGE,
-            scope_id_to_plugin_configs=scope_id_to_plugin_configs,
-        )
 
 
 class StageSyncOutputSLZ(serializers.Serializer):
@@ -654,7 +570,7 @@ class SDKGenerateInputSLZ(serializers.Serializer):
         help_text="需要生成SDK的语言列表",
         default=[ProgrammingLanguageEnum.PYTHON.value],
     )
-    version = serializers.CharField(default="", max_length=128, help_text="版本号")
+    version = serializers.RegexField(SEMVER_PATTERN, default="", allow_blank=True, max_length=128, help_text="版本号")
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.SDKGenerateInputSLZ"
@@ -723,18 +639,32 @@ class GatewayPermissionListOutputSLZ(serializers.Serializer):
 class GatewayAppPermissionGrantInputSLZ(serializers.Serializer):
     """
     网关关联应用，主动为应用授权访问网关API的权限
+
+    grant_dimension 推荐使用 gateway/resource，兼容旧值 api（等价于 gateway）
     """
+
+    GRANT_DIMENSION_CHOICES = [
+        (FormattedGrantDimensionEnum.GATEWAY.value, "网关"),
+        (FormattedGrantDimensionEnum.RESOURCE.value, "资源"),
+        (GrantDimensionEnum.API.value, "按网关(兼容旧值)"),
+    ]
 
     # 主动授权时，应用可能尚未创建，因此不校验 app_code 是否存在
     target_app_code = serializers.CharField(label="", max_length=32, required=True)
     expire_days = serializers.IntegerField(required=False)
-    grant_dimension = serializers.ChoiceField(choices=GrantDimensionEnum.get_choices())
+    grant_dimension = serializers.ChoiceField(choices=GRANT_DIMENSION_CHOICES)
     resource_names = serializers.ListField(
         child=serializers.CharField(required=True), allow_empty=True, required=False
     )
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.GatewayAppPermissionGrantInputSLZ"
+
+    def validate_grant_dimension(self, value: str) -> str:
+        """将 gateway 映射为 api（PermissionDimensionManager 使用 GrantDimensionEnum 值）"""
+        if value == FormattedGrantDimensionEnum.GATEWAY.value:
+            return GrantDimensionEnum.API.value
+        return value
 
 
 class ResourceVersionCreateInputSLZ(serializers.Serializer):
@@ -831,6 +761,22 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
     target_app_codes = serializers.ListSerializer(
         help_text="主动授权的app_code", child=serializers.CharField(), allow_empty=True, default=list, required=False
     )
+    oauth2_public_client_enabled = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权",
+    )
+    raw_response_enabled = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否返回原始响应，开启后 mcp-proxy 将直接返回 API 响应结果，不添加 request_id 等额外信息",
+    )
+    category_names = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+        help_text="MCPServer 分类名称列表，不传则保持原分类不变",
+    )
 
     class Meta:
         model = MCPServer
@@ -846,60 +792,51 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
             "status",
             "protocol_type",
             "target_app_codes",
+            "oauth2_public_client_enabled",
+            "raw_response_enabled",
+            "category_names",
         )
         lookup_field = "id"
-        non_model_fields = ["target_app_codes"]
+        non_model_fields = ["target_app_codes", "category_names"]
         validators = [MCPServerValidator()]
 
-    def _fill_data(self, data):
-        data["gateway_id"] = self.context["gateway"].id
-        data["stage_id"] = self.context["stage"].id
+    def validate_resource_names(self, resource_names):
+        """验证资源名称列表"""
+        if not resource_names:
+            raise serializers.ValidationError("资源名称列表不能为空")
 
-    def _sync_permission(self, mcp_server_id: int, app_codes: List[str]):
-        # sync permission
-        for app_code in app_codes:
-            MCPServerAppPermission.objects.save_permission(
-                mcp_server_id=mcp_server_id,
-                bk_app_code=app_code,
-                grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
-                expire_days=None,
-            )
-        MCPServerHandler.sync_permissions(mcp_server_id)
+        if len(resource_names) != len(set(resource_names)):
+            raise serializers.ValidationError("资源名称列表中不能存在重复的资源名称")
 
-    def create(self, validated_data):
-        self._fill_data(validated_data)
+        return resource_names
 
-        resource_names = validated_data.pop("resource_names", None)
-        tool_names = validated_data.pop("tool_names", None)
-        if not tool_names:
-            tool_names = resource_names
+    def validate_tool_names(self, tool_names):
+        """验证工具名称列表"""
+        if tool_names and len(tool_names) != len(set(tool_names)):
+            raise serializers.ValidationError("工具名称不能重复")
 
-        target_app_codes = validated_data.pop("target_app_codes", [])
+        return tool_names
 
-        instance = MCPServer(**validated_data)
-        if resource_names is not None:
-            instance.update_resource_names(resource_names, tool_names)
-        instance.save()
+    def validate_category_names(self, category_names):
+        if not category_names:
+            return category_names
 
-        self._sync_permission(instance.id, target_app_codes)
-        return instance
+        existing_names = set(MCPServerCategory.objects.filter(name__in=category_names).values_list("name", flat=True))
+        invalid_names = set(category_names) - existing_names
+        if invalid_names:
+            raise serializers.ValidationError(f"分类不存在: {', '.join(invalid_names)}")
 
-    def update(self, instance, validated_data):
-        self._fill_data(validated_data)
+        return category_names
 
-        resource_names = validated_data.pop("resource_names", None)
-        tool_names = validated_data.pop("tool_names", None)
-        if not tool_names:
-            tool_names = resource_names
+    def validate(self, data):
+        """验证 tool_names 和 resource_names 的长度一致性"""
+        tool_names = data.get("tool_names")
+        resource_names = data.get("resource_names")
 
-        target_app_codes = validated_data.pop("target_app_codes", [])
+        if tool_names and len(tool_names) != len(resource_names):
+            raise serializers.ValidationError("工具名称列表长度与资源名称列表长度不一致")
 
-        instance = super().update(instance, validated_data)
-        instance.update_resource_names(resource_names, tool_names)
-        instance.save()
-
-        self._sync_permission(instance.id, target_app_codes)
-        return instance
+        return data
 
 
 class StageMcpServersSyncInputSLZ(serializers.Serializer):

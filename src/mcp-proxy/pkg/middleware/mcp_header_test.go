@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -38,7 +38,7 @@ var _ = Describe("MCPHeader", func() {
 
 	Describe("MCPServerHeaderMiddleware", func() {
 		DescribeTable("handles timeout header correctly",
-			func(timeout string, allowedHeaders string, expectedTimeoutSeconds int) {
+			func(timeout, allowedHeaders string, expectedTimeoutSeconds int) {
 				w := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(w)
 				c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -86,6 +86,54 @@ var _ = Describe("MCPHeader", func() {
 			Expect(headers).NotTo(BeNil())
 			Expect(headers["X-Custom-Header"]).To(Equal("custom-value"))
 			Expect(headers["X-Another-Header"]).To(Equal("another-value"))
+		})
+
+		It("should parse X-Bkapi-ItsmFlex header", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			itsmFlexJSON := `{"agent.info.code":"ai-test-appcode","agent.info.name":"AgentName","agent.info.service_catalogue":"test1/test2/test3","agent.session.caller_bk_biz_env":"public","agent.session.caller_bk_biz_id":"6000086","agent.session.caller_executor":"judge-caller","agent.session.executor":"judge-executor"}`
+			c.Request.Header.Set(constant.BkApiItsmFlexKey, itsmFlexJSON)
+
+			mw := middleware.MCPServerHeaderMiddleware()
+			mw(c)
+
+			data := util.GetBkApiItsmFlexData(c.Request.Context())
+			Expect(data).NotTo(BeNil())
+			Expect(data.AgentCode).To(Equal("ai-test-appcode"))
+			Expect(data.AgentName).To(Equal("AgentName"))
+			Expect(data.ServiceCatalogue).To(Equal("test1/test2/test3"))
+			Expect(data.CallerBizEnv).To(Equal("public"))
+			Expect(data.CallerBizID).To(Equal("6000086"))
+			Expect(data.CallerExecutor).To(Equal("judge-caller"))
+			Expect(data.Executor).To(Equal("judge-executor"))
+		})
+
+		It("should ignore invalid X-Bkapi-ItsmFlex header", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			c.Request.Header.Set(constant.BkApiItsmFlexKey, "not-json")
+
+			mw := middleware.MCPServerHeaderMiddleware()
+			mw(c)
+
+			data := util.GetBkApiItsmFlexData(c.Request.Context())
+			Expect(data).To(BeNil())
+		})
+
+		It("should handle missing X-Bkapi-ItsmFlex header", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			mw := middleware.MCPServerHeaderMiddleware()
+			mw(c)
+
+			data := util.GetBkApiItsmFlexData(c.Request.Context())
+			Expect(data).To(BeNil())
 		})
 	})
 })

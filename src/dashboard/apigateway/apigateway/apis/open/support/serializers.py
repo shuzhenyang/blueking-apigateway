@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,6 +19,7 @@
 from rest_framework import serializers
 
 from apigateway.apps.support.constants import ProgrammingLanguageEnum
+from apigateway.biz.constants import SEMVER_PATTERN
 
 
 class SDKGenerateV1SLZ(serializers.Serializer):
@@ -28,4 +29,4 @@ class SDKGenerateV1SLZ(serializers.Serializer):
         help_text="需要生成SDK的语言列表",
         default=[ProgrammingLanguageEnum.PYTHON.value],
     )
-    version = serializers.CharField(default="", max_length=128, help_text="版本号")
+    version = serializers.RegexField(SEMVER_PATTERN, default="", allow_blank=True, max_length=128, help_text="版本号")

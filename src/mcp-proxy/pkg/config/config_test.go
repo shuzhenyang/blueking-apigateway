@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -280,7 +280,11 @@ var _ = Describe("Config", func() {
 				func(tracing config.Tracing, expected bool) {
 					Expect(tracing.GinAPIEnabled()).To(Equal(expected))
 				},
-				Entry("both enabled", config.Tracing{Enable: true, Instrument: config.Instrument{GinAPI: true}}, true),
+				Entry(
+					"both enabled",
+					config.Tracing{Enable: true, Instrument: config.Instrument{GinAPI: true}},
+					true,
+				),
 				Entry(
 					"tracing disabled",
 					config.Tracing{Enable: false, Instrument: config.Instrument{GinAPI: true}},
@@ -305,7 +309,11 @@ var _ = Describe("Config", func() {
 				func(tracing config.Tracing, expected bool) {
 					Expect(tracing.DBAPIEnabled()).To(Equal(expected))
 				},
-				Entry("both enabled", config.Tracing{Enable: true, Instrument: config.Instrument{DbAPI: true}}, true),
+				Entry(
+					"both enabled",
+					config.Tracing{Enable: true, Instrument: config.Instrument{DbAPI: true}},
+					true,
+				),
 				Entry(
 					"tracing disabled",
 					config.Tracing{Enable: false, Instrument: config.Instrument{DbAPI: true}},
@@ -337,7 +345,7 @@ var _ = Describe("Config", func() {
 
 		It("should load valid config", func() {
 			v := viper.New()
-			v.Set("databases", []map[string]interface{}{
+			v.Set("databases", []map[string]any{
 				{
 					"id": "default", "host": "localhost", "port": 3306,
 					"user": "root", "password": "password", "name": "testdb",
@@ -355,17 +363,18 @@ var _ = Describe("Config", func() {
 			Expect(cfg.McpServer.MessageUrlFormat).NotTo(BeEmpty())
 			Expect(cfg.McpServer.MessageApplicationUrlFormat).NotTo(BeEmpty())
 			Expect(cfg.McpServer.InnerJwtExpireTime).NotTo(BeZero())
-			Expect(cfg.PProf.Username).NotTo(BeEmpty())
-			Expect(cfg.PProf.Password).NotTo(BeEmpty())
+			Expect(config.DerivePublicPathPrefix(cfg.McpServer.MessageUrlFormat)).To(
+				Equal("/api/bk-apigateway/prod/api/v2/mcp-servers"),
+			)
 		})
 
 		It("should fail with invalid TLS config", func() {
 			v := viper.New()
-			v.Set("databases", []map[string]interface{}{
+			v.Set("databases", []map[string]any{
 				{
 					"id": "default", "host": "localhost", "port": 3306,
 					"user": "root", "password": "password", "name": "testdb",
-					"tls": map[string]interface{}{"enabled": true, "certcafile": "/non/existent/ca.pem"},
+					"tls": map[string]any{"enabled": true, "certcafile": "/non/existent/ca.pem"},
 				},
 			})
 
@@ -375,7 +384,7 @@ var _ = Describe("Config", func() {
 
 		It("should set global config", func() {
 			v := viper.New()
-			v.Set("databases", []map[string]interface{}{
+			v.Set("databases", []map[string]any{
 				{
 					"id": "default", "host": "localhost", "port": 3306,
 					"user": "root", "password": "password", "name": "testdb",
@@ -390,7 +399,7 @@ var _ = Describe("Config", func() {
 
 		It("should create database map", func() {
 			v := viper.New()
-			v.Set("databases", []map[string]interface{}{
+			v.Set("databases", []map[string]any{
 				{
 					"id": "primary", "host": "localhost", "port": 3306,
 					"user": "root", "password": "password", "name": "testdb1",
@@ -428,7 +437,9 @@ var _ = Describe("Config", func() {
 				Buffered: true,
 				Desensitization: config.DesensitizationConfig{
 					Enabled: true,
-					Fields:  []config.DesensitizationFiled{{Key: "password", JsonPath: []string{"$.password"}}},
+					Fields: []config.DesensitizationFiled{
+						{Key: "password", JsonPath: []string{"$.password"}},
+					},
 				},
 			}
 			Expect(logConfig.Level).To(Equal("info"))
@@ -454,10 +465,307 @@ var _ = Describe("Config", func() {
 			Expect(mcpServer.MessageUrlFormat).To(Equal("/mcp/%s/message"))
 		})
 
+		It("DerivePublicPathPrefix derives prefix from message URL formats", func() {
+			Expect(
+				config.DerivePublicPathPrefix("/prod/api/v2/mcp-servers/%s/sse/message"),
+			).To(Equal("/prod/api/v2/mcp-servers"))
+			Expect(config.DerivePublicPathPrefix("/prod/api/v2/mcp-servers/%s/application/sse/message")).To(
+				Equal("/prod/api/v2/mcp-servers"),
+			)
+			Expect(config.DerivePublicPathPrefix("/%s/sse")).To(BeEmpty())
+			Expect(config.DerivePublicPathPrefix("")).To(BeEmpty())
+		})
+
 		It("Pprof should have correct fields", func() {
 			pprof := config.Pprof{Username: "admin", Password: "secret"}
 			Expect(pprof.Username).To(Equal("admin"))
 			Expect(pprof.Password).To(Equal("secret"))
+		})
+	})
+
+	Describe("LogTruncate", func() {
+		Describe("GetAuditLogMaxBodySize", func() {
+			It("should return configured value when set", func() {
+				lt := config.LogTruncate{AuditLogMaxBodySize: 8192}
+				Expect(lt.GetAuditLogMaxBodySize()).To(Equal(8192))
+			})
+
+			It("should return default value when zero", func() {
+				lt := config.LogTruncate{}
+				Expect(lt.GetAuditLogMaxBodySize()).To(Equal(4096))
+			})
+
+			It("should return default value when negative", func() {
+				lt := config.LogTruncate{AuditLogMaxBodySize: -1}
+				Expect(lt.GetAuditLogMaxBodySize()).To(Equal(4096))
+			})
+		})
+
+		Describe("GetAuditLogMaxResponseSize", func() {
+			It("should return configured value when set", func() {
+				lt := config.LogTruncate{AuditLogMaxResponseSize: 8192}
+				Expect(lt.GetAuditLogMaxResponseSize()).To(Equal(8192))
+			})
+
+			It("should return default value when zero", func() {
+				lt := config.LogTruncate{}
+				Expect(lt.GetAuditLogMaxResponseSize()).To(Equal(4096))
+			})
+
+			It("should return default value when negative", func() {
+				lt := config.LogTruncate{AuditLogMaxResponseSize: -1}
+				Expect(lt.GetAuditLogMaxResponseSize()).To(Equal(4096))
+			})
+		})
+
+		Describe("GetAPILogRequestSize", func() {
+			It("should return configured value when set", func() {
+				lt := config.LogTruncate{APILogRequestSize: 4096}
+				Expect(lt.GetAPILogRequestSize()).To(Equal(4096))
+			})
+
+			It("should return default value when zero", func() {
+				lt := config.LogTruncate{}
+				Expect(lt.GetAPILogRequestSize()).To(Equal(2048))
+			})
+
+			It("should return default value when negative", func() {
+				lt := config.LogTruncate{APILogRequestSize: -100}
+				Expect(lt.GetAPILogRequestSize()).To(Equal(2048))
+			})
+		})
+
+		Describe("GetAPILogResponseSize", func() {
+			It("should return configured value when set", func() {
+				lt := config.LogTruncate{APILogResponseSize: 2048}
+				Expect(lt.GetAPILogResponseSize()).To(Equal(2048))
+			})
+
+			It("should return default value when zero", func() {
+				lt := config.LogTruncate{}
+				Expect(lt.GetAPILogResponseSize()).To(Equal(1024))
+			})
+
+			It("should return default value when negative", func() {
+				lt := config.LogTruncate{APILogResponseSize: -1}
+				Expect(lt.GetAPILogResponseSize()).To(Equal(1024))
+			})
+		})
+
+		Describe("GetAPILogErrorResponseSize", func() {
+			It("should return configured value when set", func() {
+				lt := config.LogTruncate{APILogErrorResponseSize: 8192}
+				Expect(lt.GetAPILogErrorResponseSize()).To(Equal(8192))
+			})
+
+			It("should return default value when zero", func() {
+				lt := config.LogTruncate{}
+				Expect(lt.GetAPILogErrorResponseSize()).To(Equal(4096))
+			})
+
+			It("should return default value when negative", func() {
+				lt := config.LogTruncate{APILogErrorResponseSize: -1}
+				Expect(lt.GetAPILogErrorResponseSize()).To(Equal(4096))
+			})
+		})
+	})
+
+	Describe("Load defaults", func() {
+		It("should load bkAIDevTrace config from env when values are empty", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+
+			Expect(os.Setenv("BKAI_DEV_TRACE_ENABLE", "true")).To(Succeed())
+			Expect(os.Setenv("BKAI_DEV_TRACE_ENDPOINT", "127.0.0.1:4318")).To(Succeed())
+			Expect(os.Setenv("BKAI_DEV_TRACE_SERVICE_NAME", "env-trace-service")).To(Succeed())
+			Expect(os.Setenv("BKAI_DEV_TRACE_TOKEN", "env-trace-token")).To(Succeed())
+			DeferCleanup(func() {
+				_ = os.Unsetenv("BKAI_DEV_TRACE_ENABLE")
+				_ = os.Unsetenv("BKAI_DEV_TRACE_ENDPOINT")
+				_ = os.Unsetenv("BKAI_DEV_TRACE_SERVICE_NAME")
+				_ = os.Unsetenv("BKAI_DEV_TRACE_TOKEN")
+			})
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfg.BkAIDevTrace.Enable).To(BeTrue())
+			Expect(cfg.BkAIDevTrace.Endpoint).To(Equal("127.0.0.1:4318"))
+			Expect(cfg.BkAIDevTrace.ServiceName).To(Equal("env-trace-service"))
+			Expect(cfg.BkAIDevTrace.Token).To(Equal("env-trace-token"))
+		})
+
+		It("should override config file values with env vars for bkAIDevTrace", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+			v.Set("bkAIDevTrace.enable", false)
+			v.Set("bkAIDevTrace.endpoint", "from-config:4318")
+			v.Set("bkAIDevTrace.serviceName", "from-config-service")
+			v.Set("bkAIDevTrace.token", "from-config-token")
+
+			Expect(os.Setenv("BKAI_DEV_TRACE_ENABLE", "true")).To(Succeed())
+			Expect(os.Setenv("BKAI_DEV_TRACE_ENDPOINT", "from-env:4318")).To(Succeed())
+			Expect(os.Setenv("BKAI_DEV_TRACE_SERVICE_NAME", "from-env-service")).To(Succeed())
+			Expect(os.Setenv("BKAI_DEV_TRACE_TOKEN", "from-env-token")).To(Succeed())
+			DeferCleanup(func() {
+				_ = os.Unsetenv("BKAI_DEV_TRACE_ENABLE")
+				_ = os.Unsetenv("BKAI_DEV_TRACE_ENDPOINT")
+				_ = os.Unsetenv("BKAI_DEV_TRACE_SERVICE_NAME")
+				_ = os.Unsetenv("BKAI_DEV_TRACE_TOKEN")
+			})
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfg.BkAIDevTrace.Enable).To(BeTrue())
+			Expect(cfg.BkAIDevTrace.Endpoint).To(Equal("from-env:4318"))
+			Expect(cfg.BkAIDevTrace.ServiceName).To(Equal("from-env-service"))
+			Expect(cfg.BkAIDevTrace.Token).To(Equal("from-env-token"))
+		})
+
+		It("should set Transport defaults", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.McpServer.Transport.MaxIdleConns).To(Equal(200))
+			Expect(cfg.McpServer.Transport.MaxIdleConnsPerHost).To(Equal(20))
+			Expect(cfg.McpServer.Transport.IdleConnTimeoutSecond).To(Equal(90))
+		})
+
+		It("should set LogTruncate defaults", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.McpServer.LogTruncate.AuditLogMaxBodySize).To(Equal(4096))
+			Expect(cfg.McpServer.LogTruncate.AuditLogMaxResponseSize).To(Equal(4096))
+			Expect(cfg.McpServer.LogTruncate.APILogRequestSize).To(Equal(2048))
+			Expect(cfg.McpServer.LogTruncate.APILogResponseSize).To(Equal(1024))
+			Expect(cfg.McpServer.LogTruncate.APILogErrorResponseSize).To(Equal(4096))
+		})
+
+		It("should leave pprof credentials empty when config and env are empty", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+
+			DeferCleanup(func() {
+				_ = os.Unsetenv("PPROF_USERNAME")
+				_ = os.Unsetenv("PPROF_PASSWORD")
+			})
+			Expect(os.Unsetenv("PPROF_USERNAME")).To(Succeed())
+			Expect(os.Unsetenv("PPROF_PASSWORD")).To(Succeed())
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.PProf.Username).To(BeEmpty())
+			Expect(cfg.PProf.Password).To(BeEmpty())
+		})
+
+		It("should override pprof config file values with env vars", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+			v.Set("pprof.username", "config-user")
+			v.Set("pprof.password", "config-password")
+
+			Expect(os.Setenv("PPROF_USERNAME", "env-user")).To(Succeed())
+			Expect(os.Setenv("PPROF_PASSWORD", "env-password")).To(Succeed())
+			DeferCleanup(func() {
+				_ = os.Unsetenv("PPROF_USERNAME")
+				_ = os.Unsetenv("PPROF_PASSWORD")
+			})
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.PProf.Username).To(Equal("env-user"))
+			Expect(cfg.PProf.Password).To(Equal("env-password"))
+		})
+
+		It("should set MaxConcurrentPrefetch default", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.McpServer.MaxConcurrentPrefetch).To(Equal(20))
+		})
+
+		It("should preserve custom Transport values", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+			v.Set("mcpServer.transport.maxIdleConns", 500)
+			v.Set("mcpServer.transport.maxIdleConnsPerHost", 50)
+			v.Set("mcpServer.transport.idleConnTimeoutSecond", 120)
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.McpServer.Transport.MaxIdleConns).To(Equal(500))
+			Expect(cfg.McpServer.Transport.MaxIdleConnsPerHost).To(Equal(50))
+			Expect(cfg.McpServer.Transport.IdleConnTimeoutSecond).To(Equal(120))
+		})
+
+		It("should preserve custom LogTruncate values", func() {
+			v := viper.New()
+			v.Set("databases", []map[string]any{
+				{
+					"id": "default", "host": "localhost", "port": 3306,
+					"user": "root", "password": "password", "name": "testdb",
+				},
+			})
+			v.Set("mcpServer.logTruncate.auditLogMaxBodySize", 8192)
+			v.Set("mcpServer.logTruncate.auditLogMaxResponseSize", 8192)
+
+			cfg, err := config.Load(v)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cfg.McpServer.LogTruncate.AuditLogMaxBodySize).To(Equal(8192))
+			Expect(cfg.McpServer.LogTruncate.AuditLogMaxResponseSize).To(Equal(8192))
 		})
 	})
 })

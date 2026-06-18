@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -105,6 +105,11 @@ func BkGatewayJWTAuthMiddleware() func(c *gin.Context) {
 		}
 		util.SetBkAppCode(c, claims.App.AppCode)
 		util.SetBkUsername(c, claims.User.Username)
+		// Store client IP for downstream logging
+		util.SetClientIP(c)
+		// Set initial client_id based on app_code; LoggingMiddleware will override
+		// with clientInfo.Name from the MCP initialize handshake if available.
+		util.SetClientID(c, claims.App.AppCode)
 		// 将 claims 转换为延迟签发结构体，保存到 context
 		// 只有在调用外部 API 的 tool handler 中才会签发 JWT
 		lazySigningClaims := &util.JWTClaimsForLazySigning{
@@ -124,7 +129,11 @@ func BkGatewayJWTAuthMiddleware() func(c *gin.Context) {
 func SignBkInnerJWTToken(c *gin.Context, claims *CustomClaims, privateKeyText []byte) error {
 	innerJwtClaims := CustomClaims{
 		App: AppInfo{
-			AppCode:  fmt.Sprintf(constant.BkVirtualAppCodeFormat, util.GetMCPServerID(c), claims.App.AppCode),
+			AppCode: fmt.Sprintf(
+				constant.BkVirtualAppCodeFormat,
+				util.GetMCPServerID(c),
+				claims.App.AppCode,
+			),
 			Verified: claims.App.Verified,
 		},
 		User: UserInfo{
@@ -156,7 +165,7 @@ func SignBkInnerJWTToken(c *gin.Context, claims *CustomClaims, privateKeyText []
 
 // BKJWTAuthMiddleware parse the bk jwt
 func parseBKJWTToken(tokenString string, publicKey []byte) (*CustomClaims, error) {
-	keyFunc := func(token *jwt.Token) (interface{}, error) {
+	keyFunc := func(token *jwt.Token) (any, error) {
 		pubKey, err := jwt.ParseRSAPublicKeyFromPEM(publicKey)
 		if err != nil {
 			return pubKey, fmt.Errorf("jwt parse fail, err=%w", err)

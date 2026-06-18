@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,7 +18,7 @@
 from django.contrib import admin
 from djangoql.admin import DjangoQLSearchMixin
 
-from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm, PluginType
+from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginType
 
 
 class PluginTypeAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
@@ -26,13 +26,6 @@ class PluginTypeAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
     list_display = ["id", "code", "name", "is_public", "scope"]
     search_fields = ["code", "name"]
     list_filter = ["code", "is_public", "scope"]
-
-
-class PluginFormAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
-    djangoql_completion_enabled_by_default = False
-    list_display = ["id", "type", "style", "language"]
-    search_fields = ["notes"]
-    list_filter = ["type", "language", "style"]
 
 
 class PluginConfigAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
@@ -50,6 +43,5 @@ class PluginBindingAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
 
 
 admin.site.register(PluginType, PluginTypeAdmin)
-admin.site.register(PluginForm, PluginFormAdmin)
 admin.site.register(PluginConfig, PluginConfigAdmin)
 admin.site.register(PluginBinding, PluginBindingAdmin)

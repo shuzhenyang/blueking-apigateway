@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,6 +19,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -44,7 +45,7 @@ func (v ValidationFieldError) String() string {
 
 	switch e.Tag() {
 	case "required":
-		return fmt.Sprintf("%s is required", e.Field())
+		return e.Field() + " is required"
 	case "max":
 		return fmt.Sprintf("%s cannot be longer than %s", e.Field(), e.Param())
 	case "min":
@@ -70,11 +71,12 @@ func (v ValidationFieldError) String() string {
 
 // ValidationErrorMessage ...
 func ValidationErrorMessage(err error) string {
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		return "EOF, json decode fail"
 	}
 
-	validationErrs, ok := err.(validator.ValidationErrors)
+	var validationErrs validator.ValidationErrors
+	ok := errors.As(err, &validationErrs)
 	if !ok {
 		message := fmt.Sprintf("json decode or validate fail, err=%s", err)
 		logging.GetLogger().Info(message)

@@ -19,14 +19,33 @@
 <template>
   <div class="w-full flex items-center gap-12px mcp-server-top-bar">
     <!-- 新建按钮模板 -->
-    <slot name="mcpServerAdd" />
+    <slot name="mcpServerBtn" />
+    <BkPopover
+      placement="top"
+      :content="t('请先在下方卡片左上角 勾选 至少1个MCP Server, 然后即可点击此按钮进行批量复制。')"
+      :popover-delay="0"
+      :disabled="selections?.size > 0"
+    >
+      <BkButton
+        :disabled="selections?.size < 1"
+        @click="handleBatchCopy"
+      >
+        <AgIcon
+          name="copy"
+          class="mr-4px"
+        />
+        {{ t("批量复制") }}
+      </BkButton>
+    </BkPopover>
     <!-- tab选项模板 -->
     <slot name="mcpServerTab" />
     <!-- 搜索组件 -->
     <div class="flex-1">
+      <slot name="customSearch" />
       <BkSearchSelect
+        v-if="!slots?.customSearch"
         v-model="searchValue"
-        class="bg-#fff"
+        class="bg-white"
         :data="searchData"
         :placeholder="placeholder"
         :value-split-code="'+'"
@@ -80,18 +99,24 @@
 
 <script lang="ts" setup>
 import { t } from '@/locales';
-import type { ISearchSelectData } from '@/types/common';
+import type { ISearchItem } from 'bkui-vue/lib/search-select/utils';
+import type { IMCPServerWithUIState } from '@/services/source/mcp-server';
+import type { IMarketplaceItemWithUIState } from '@/services/source/mcp-market';
 
 interface IProps {
   placeholder?: string
   isShowPublishTime?: boolean
-  searchData?: ISearchSelectData[]
+  searchData?: ISearchItem[]
+  selections: Map<string | number, IMCPServerWithUIState | IMarketplaceItemWithUIState>
 }
 
-interface IEmits { 'sort-change': [sort: string] }
+interface IEmits {
+  'sort-change': [sort: string]
+  'batch-copy': [void]
+}
 
 const searchValue = defineModel('searchValue', {
-  required: true,
+  required: false,
   type: Array,
 });
 
@@ -109,6 +134,8 @@ const {
 
 const emit = defineEmits<IEmits>();
 
+const slots = useSlots();
+
 const isOpen = ref(false);
 
 // 发布时间选项
@@ -119,7 +146,7 @@ const publishTimeDropData = ref([
   },
   {
     label: t('字母 A-Z'),
-    value: '-name',
+    value: 'name',
   },
 ]);
 
@@ -131,6 +158,10 @@ const handleSortChange = (value: string) => {
   publishTime.value = value;
   isOpen.value = false;
   emit('sort-change', value);
+};
+
+const handleBatchCopy = () => {
+  emit('batch-copy');
 };
 </script>
 

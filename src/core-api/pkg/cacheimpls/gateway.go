@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -38,7 +38,10 @@ func (k GatewayNameKey) Key() string {
 }
 
 func retrieveGatewayByName(ctx context.Context, k cache.Key) (any, error) {
-	key := k.(GatewayNameKey)
+	key, ok := k.(GatewayNameKey)
+	if !ok {
+		return nil, errors.New("invalid key type, expected GatewayNameKey")
+	}
 
 	manager := dao.NewGatewayManager()
 	return manager.GetByName(ctx, key.Name)

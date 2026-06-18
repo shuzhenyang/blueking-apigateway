@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,11 +20,12 @@ from contextlib import nullcontext as does_not_raise
 
 import pytest
 
-from apigateway.service.plugin.checker import (
+from apigateway.service.plugin import (
     BkAccessTokenSourceChecker,
     BkCorsChecker,
     BkIPRestrictionChecker,
     BKRequestBodyLimitChecker,
+    BkTrafficLabelChecker,
     BKUserRestrictionChecker,
     FaultInjectionChecker,
     HeaderRewriteChecker,
@@ -33,6 +34,7 @@ from apigateway.service.plugin.checker import (
     RedirectChecker,
     RequestValidationChecker,
     ResponseRewriteChecker,
+    UriBlockerChecker,
 )
 from apigateway.utils.yaml import yaml_dumps
 
@@ -278,6 +280,12 @@ class TestPluginConfigYamlChecker:
                     "allow_credential": True,
                 },
             ),
+            (
+                "uri-blocker",
+                {
+                    "block_rules": ["["],
+                },
+            ),
         ],
     )
     def test_check__error(self, type_code, data):
@@ -411,6 +419,54 @@ class TestRequestValidationChecker:
     )
     def test_check(self, data, ctx):
         checker = RequestValidationChecker()
+        with ctx:
+            checker.check(yaml_dumps(data))
+
+
+class TestUriBlockerChecker:
+    @pytest.mark.parametrize(
+        "data, ctx",
+        [
+            (
+                {
+                    "block_rules": [
+                        ".*wp-admin.*",
+                        ".*\\.php$",
+                    ],
+                    "case_insensitive": True,
+                    "rejected_code": 403,
+                    "rejected_msg": "access is not allowed",
+                },
+                does_not_raise(),
+            ),
+            (
+                {
+                    "block_rules": [],
+                },
+                pytest.raises(ValueError),
+            ),
+            (
+                {
+                    "block_rules": ["["],
+                },
+                pytest.raises(ValueError),
+            ),
+            (
+                {
+                    "block_rules": ["foo", "foo"],
+                },
+                pytest.raises(ValueError),
+            ),
+            (
+                {
+                    "block_rules": ["foo", 1],
+                },
+                pytest.raises(TypeError),
+            ),
+        ],
+    )
+    def test_check(self, data, ctx):
+        checker = UriBlockerChecker()
         with ctx:
             checker.check(yaml_dumps(data))
 
@@ -710,5 +766,176 @@ class TestProxyCacheChecker:
     )
     def test_check(self, data, ctx):
         checker = ProxyCacheChecker()
+        with ctx:
+            checker.check(yaml_dumps(data))
+
+
+class TestBkTrafficLabelChecker:
+    @pytest.mark.parametrize(
+        "data, ctx",
+        [
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [{"set_headers": {"X-Server-Id": "100"}}],
+                        }
+                    ]
+                },
+                does_not_raise(),
+            ),
+            (
+                {
+                    "rules": [
+                        {
+                            "match": ["OR", ["arg_version", "==", "v1"], ["arg_env", "==", "dev"]],
+                            "actions": [{"set_headers": {"X-Server-Id": "100"}}],
+                        }
+                    ]
+                },
+                does_not_raise(),
+            ),
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [
+                                {"set_headers": {"X-Server-Id": "100"}, "weight": 3},
+                                {"set_headers": {"X-API-Version": "v2"}, "weight": 2},
+                                {"set_headers": {"X-Canary": "true"}, "weight": 5},
+                            ],
+                        }
+                    ]
+                },
+                does_not_raise(),
+            ),
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["arg_version", "==", "v1"]],
+                            "actions": [{"set_headers": {"X-Server-Id": "100"}}],
+                        },
+                        {
+                            "match": [["arg_version", "==", "v2"]],
+                            "actions": [{"set_headers": {"X-Server-Id": "200"}}],
+                        },
+                    ]
+                },
+                does_not_raise(),
+            ),
+            # empty YAML
+            (
+                {},
+                pytest.raises(ValueError),
+            ),
+            # empty rules
+            (
+                {"rules": []},
+                pytest.raises(ValueError),
+            ),
+            # empty actions
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+            # empty match
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [],
+                            "actions": [{"set_headers": {"X-Server-Id": "100"}}],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+            # no match key
+            (
+                {
+                    "rules": [
+                        {
+                            "actions": [{"set_headers": {"X-Server-Id": "100"}}],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+            # no actions key
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+            # negative weight
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [{"set_headers": {"X-Server-Id": "100"}, "weight": -1}],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+            # set_headers value not a string
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [{"set_headers": {"X-Server-Id": 100}}],
+                        }
+                    ]
+                },
+                pytest.raises(TypeError),
+            ),
+            # action missing set_headers
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [{"weight": 5}],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+            # one action missing set_headers among multiple
+            (
+                {
+                    "rules": [
+                        {
+                            "match": [["uri", "==", "/headers"]],
+                            "actions": [
+                                {"set_headers": {"X-Server-Id": "100"}, "weight": 3},
+                                {"weight": 5},
+                            ],
+                        }
+                    ]
+                },
+                pytest.raises(ValueError),
+            ),
+        ],
+    )
+    def test_check(self, data, ctx):
+        checker = BkTrafficLabelChecker()
         with ctx:
             checker.check(yaml_dumps(data))

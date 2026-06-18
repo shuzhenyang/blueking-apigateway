@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -28,8 +28,9 @@ from apigateway.apps.permission.constants import (
     PermissionApplyExpireDaysEnum,
 )
 from apigateway.apps.permission.models import AppPermissionApply, AppPermissionRecord
-from apigateway.biz.permission.permission import ResourcePermissionHandler
+from apigateway.biz.permission import ResourcePermissionHandler
 from apigateway.biz.validators import BKAppCodeValidator, ResourceIDValidator
+from apigateway.service.bk_itsm import ItsmPermissionApplyHelper
 from apigateway.utils.time import NeverExpiresTime, to_datetime_from_now
 
 
@@ -66,6 +67,7 @@ class AppPermissionOutputSLZ(serializers.Serializer):
         choices=GrantTypeEnum.get_choices(), default=GrantTypeEnum.INITIALIZE.value, help_text="授权类型"
     )
     renewable = serializers.SerializerMethodField(help_text="是否可续期")
+    handled_by = serializers.CharField(help_text="操作人", required=False, allow_blank=True)
 
     class Meta:
         ref_name = "apigateway.apis.web.permission.serializers.AppPermissionOutputSLZ"
@@ -230,6 +232,7 @@ class AppPermissionApplyOutputSLZ(serializers.ModelSerializer):
     expire_days_display = serializers.SerializerMethodField(help_text="过期天数")
     grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度")
     applied_by = serializers.SerializerMethodField(help_text="申请人")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
 
     class Meta:
         ref_name = "apigateway.apis.web.permission.serializers.AppPermissionApplyOutputSLZ"
@@ -242,6 +245,8 @@ class AppPermissionApplyOutputSLZ(serializers.ModelSerializer):
             "reason",
             "expire_days",
             "grant_dimension",
+            "itsm_ticket_id",
+            "itsm_ticket_url",
             "created_time",
             "expire_days_display",
             "grant_dimension_display",
@@ -264,11 +269,15 @@ class AppPermissionApplyOutputSLZ(serializers.ModelSerializer):
             self.context.get("gateway_tenant_id"),
         )
 
+    def get_itsm_ticket_url(self, obj):
+        return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
+
 
 class AppPermissionRecordOutputSLZ(serializers.ModelSerializer):
     handled_resources = serializers.SerializerMethodField(help_text="已处理的资源列表")
     expire_days_display = serializers.SerializerMethodField(help_text="过期天数")
     grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
 
     class Meta:
         ref_name = "apigateway.apis.web.permission.serializers.AppPermissionRecordOutputSLZ"
@@ -289,6 +298,8 @@ class AppPermissionRecordOutputSLZ(serializers.ModelSerializer):
             "handled_resources",
             "expire_days_display",
             "grant_dimension_display",
+            "itsm_ticket_id",
+            "itsm_ticket_url",
         ]
         lookup_field = "id"
 
@@ -315,6 +326,9 @@ class AppPermissionRecordOutputSLZ(serializers.ModelSerializer):
 
     def get_grant_dimension_display(self, obj):
         return GrantDimensionEnum.get_choice_label(obj.grant_dimension)
+
+    def get_itsm_ticket_url(self, obj):
+        return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
 
 
 class AppPermissionApplyApprovalInputSLZ(serializers.Serializer):

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -25,12 +25,28 @@
     >
       <tbody class="table-body">
         <tr class="table-body-row">
-          <td class="table-body-row-cell">
-            <AgIcon name="right-shape" />
+          <td
+            class="table-body-row-cell indicator"
+            :style="iconCellStyle"
+          >
+            <AgIcon
+              color="#979BA5"
+              size="10"
+              name="circle-shape"
+              class="ml-12px"
+            />
+            <div
+              v-show="!!row.body?.length"
+              class="level-line"
+              :style="{
+                'left': `${(level + 1) * 16}px`,
+                'height': `${countRowChildren(row) * 42}px`
+              }"
+            />
           </td>
           <!-- 字段名 -->
           <td
-            class="table-body-row-cell"
+            class="table-body-row-cell name"
             :class="{ 'has-error': invalidRowIdMap[row.id] }"
           >
             <div
@@ -43,6 +59,7 @@
               v-else
               v-model="row.name"
               :placeholder="t('字段名')"
+              :disabled="parent?.type === 'array'"
               @input="() => clearInvalidState(row.id)"
             >
               <template
@@ -65,22 +82,30 @@
               v-if="readonly"
               class="readonly-value-wrapper"
             >
-              {{ typeList.find(item => item.value === row.type)?.label || '--' }}
+              {{ typeList.find((item: any) => item.value === row.type)?.label || '--' }}
             </div>
-            <BkSelect
+            <div
               v-else
-              v-model="row.type"
-              :clearable="false"
-              :filterable="false"
-              @change="() => handleTypeChange(row)"
+              class="h-full flex items-center"
             >
-              <BkOption
-                v-for="item in typeList"
-                :id="item.value"
-                :key="item.value"
-                :name="item.label"
+              <BkSelect
+                v-model="row.type"
+                :clearable="false"
+                :filterable="false"
+                @change="() => handleTypeChange(row)"
+              >
+                <BkOption
+                  v-for="item in typeList"
+                  :id="item.value"
+                  :key="item.value"
+                  :name="item.label"
+                />
+              </BkSelect>
+              <ParamsRowConfig
+                :row="row"
+                @change="(config: any) => handleConfigChange(row, config)"
               />
-            </BkSelect>
+            </div>
           </td>
           <!-- 字段必填 -->
           <td class="table-body-row-cell required">
@@ -99,20 +124,30 @@
           </td>
           <!-- 字段默认值 -->
           <td
-            :style="readonly ? 'width: 150px' : undefined"
+            :style="readonly ? 'width: 160px' : undefined"
             class="table-body-row-cell default"
           >
             <div
               v-if="readonly"
               class="readonly-value-wrapper"
             >
-              {{ row.default || '--' }}
+              {{ (isBoolean(row.default) || row.default) ? row.default : '--' }}
             </div>
-            <BkInput
-              v-else
-              v-model="row.default"
-              :placeholder="t('默认值')"
-            />
+            <template v-else>
+              <BkSelect
+                v-if="row.type === 'boolean'"
+                v-model="row.default"
+                clearable
+                :filterable="false"
+                :list="[{value: true, label: 'true'}, {value: false, label: 'false'}]"
+                :allow-empty-values="[false]"
+              />
+              <BkInput
+                v-else
+                v-model="row.default"
+                :placeholder="t('默认值')"
+              />
+            </template>
           </td>
           <!-- 字段备注 -->
           <td class="table-body-row-cell description">
@@ -149,16 +184,21 @@
           </td>
         </tr>
       </tbody>
-      <tfoot v-if="row.body?.length">
+      <tfoot
+        v-if="row.body?.length"
+        class="table-foot"
+      >
         <tr>
           <td
+            class="sub-table-cell"
             :colspan="readonly ? 6 : 7"
-            class="pl-16px"
           >
             <RequestParamsTable
               ref="recursive-sub-table-refs"
               v-model="row.body"
               :readonly="readonly"
+              :level="level + 1"
+              :parent="row"
             />
           </td>
         </tr>
@@ -168,26 +208,41 @@
 </template>
 
 <script lang="ts" setup>
-import { uniqueId } from 'lodash-es';
+import { isBoolean, uniqueId } from 'lodash-es';
+import ParamsRowConfig, { type IConfig } from '../ParamsRowConfig.vue';
 
-const tableData = defineModel<IBodyRow[]>();
-
-const { readonly = false } = defineProps<IProps>();
-
-interface IProps { readonly?: boolean }
-
-const { t } = useI18n();
-
-interface IBodyRow {
+export interface IBodyRow {
   id: string
   name: string
   type: string
+  enum?: any[]
   required: boolean
   default: string
   description: string
   isEdit: boolean
   body?: IBodyRow[]
 }
+
+interface IProps {
+  readonly?: boolean
+  level?: number
+  parent: Partial<IBodyRow>
+}
+
+const tableData = defineModel<IBodyRow[]>();
+
+const {
+  readonly = false,
+  level = 0,
+  parent,
+} = defineProps<IProps>();
+
+const emit = defineEmits<{
+  // 当最后一行被移除时
+  'last-row-removed': [void]
+}>();
+
+const { t } = useI18n();
 
 const recursiveSubTableRef = useTemplateRef('recursive-sub-table-refs');
 
@@ -216,6 +271,22 @@ const typeList = [
   },
 ];
 
+const iconCellStyle = computed(() => ({
+  paddingLeft: `${level * 16}px`,
+  width: `${level * 16 + 32}px`,
+}));
+
+const countRowChildren = (row: IBodyRow) => {
+  if (!row.body?.length) {
+    return 0;
+  }
+  let count = row.body.length;
+  row.body.forEach((child) => {
+    count += countRowChildren(child);
+  });
+  return count;
+};
+
 const genBodyRow = (id?: string) => {
   return {
     id: id || uniqueId(),
@@ -229,7 +300,7 @@ const genBodyRow = (id?: string) => {
 };
 
 const handleTypeChange = (row: IBodyRow) => {
-  const _row = tableData.value!.find(data => data.id === row.id);
+  const _row = tableData.value!.find((data: any) => data.id === row.id);
   if (_row) {
     if (_row.type !== 'object' && _row.type !== 'array') {
       delete _row.body;
@@ -237,6 +308,7 @@ const handleTypeChange = (row: IBodyRow) => {
     else {
       _row.body = [genBodyRow()];
     }
+    delete _row.enum;
   }
 };
 
@@ -251,7 +323,7 @@ const isAddFieldVisible = (row: IBodyRow) => {
 };
 
 const addField = (row: IBodyRow) => {
-  const bodyRow = tableData.value!.find(data => data.id === row.id);
+  const bodyRow = tableData.value!.find((data: any) => data.id === row.id);
   if (bodyRow) {
     if (bodyRow.body) {
       bodyRow.body.push(genBodyRow());
@@ -263,16 +335,34 @@ const addField = (row: IBodyRow) => {
 };
 
 const removeField = (row: IBodyRow) => {
-  const index = tableData.value!.findIndex(data => data.id === row.id);
+  const index = tableData.value!.findIndex((data: any) => data.id === row.id);
   if (index !== -1) {
     tableData.value!.splice(index, 1);
+  }
+  // 如果所有行都被删除了，通知父组件
+  if (!tableData.value?.length) {
+    emit('last-row-removed');
+  }
+};
+
+const handleConfigChange = (row: IBodyRow, config: IConfig) => {
+  const { enums } = config;
+  const bodyRow = tableData.value!.find((data: any) => data.id === row.id);
+  if (bodyRow) {
+    if (enums?.enabled && enums.values?.length) {
+      bodyRow.enum = enums.values;
+    }
+    else {
+      delete bodyRow.enum;
+    }
   }
 };
 
 const setInvalidRowId = () => {
   invalidRowIdMap.value = {};
-  tableData.value?.forEach((row) => {
-    if (!row.name) {
+  tableData.value?.forEach((row: any) => {
+    // 每行的 name 不能为空，但是数组类型下的可以
+    if (!row.name && parent.type !== 'array') {
       invalidRowIdMap.value[row.id] = true;
     }
   });
@@ -284,8 +374,8 @@ const clearInvalidState = (rowId: string) => {
 
 defineExpose({
   validate: () => {
-    if (recursiveSubTableRef.value?.[0]) {
-      return recursiveSubTableRef.value[0].validate().then(() => new Promise((resolve, reject) => {
+    if ((recursiveSubTableRef.value as any)?.[0]) {
+      return (recursiveSubTableRef.value as any)[0].validate().then(() => new Promise((resolve, reject) => {
         setInvalidRowId();
         if (Object.keys(invalidRowIdMap.value).length > 0) {
           reject('invalid request params');
@@ -315,11 +405,7 @@ defineExpose({
   border-spacing: 0;
 
   .table-body {
-
-    td {
-      border-top: 1px solid #dcdee5;
-      border-bottom: none !important;
-    }
+    border-bottom: none;
 
     .readonly-value-wrapper {
       padding-left: 16px;
@@ -328,17 +414,29 @@ defineExpose({
     }
 
     .table-body-row {
+       border-bottom: 1px solid #dcdee5;
 
       .table-body-row-cell {
         height: 42px;
 
-        &:first-child {
-          width: 32px;
-          text-align: center;
+        &.indicator {
+          position: relative;
+
+          .level-line {
+            position: absolute;
+            top: 32px;
+            z-index: 999;
+            width: 1px;
+            background-color: #DCDEE5;
+          }
+        }
+
+        &.name {
+          border-left: none;
         }
 
         &.type {
-          width: 100px;
+          width: 140px;
         }
 
         &.required {
@@ -350,11 +448,11 @@ defineExpose({
         }
 
         &.description {
-          width: 300px;
+          width: 260px;
         }
 
         &.actions {
-          width: 110px;
+          width: 140px;
           padding-left: 16px;
         }
 
@@ -396,6 +494,13 @@ defineExpose({
           }
         }
       }
+    }
+  }
+
+  .table-foot {
+
+    .sub-table-cell {
+      border-top: none;
     }
   }
 }

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -84,7 +84,10 @@
               >
                 {{ t('权限申请') }}
               </span>：
-              {{ (api.allow_apply_permission || api.component_permission_required) ? t('是') : t('否') }}
+              {{ api.verified_app_required ?
+                ((api.allow_apply_permission || api.component_permission_required) ? t('是') : t('否'))
+                : t('否')
+              }}
             </span>
           </section>
           <section class="basic-cell">
@@ -170,7 +173,7 @@ const activeDocHeadingId = ref('');
 const { y } = useScroll(detailWrapRef, {
   // 监听 API 文档容器的滚动结束事件，获取距离容器最上方且可见的标题元素
   onStop: () => {
-    const topVisibleHeading = minBy(docHeadingElements.value, (el) => {
+    const topVisibleHeading = minBy(docHeadingElements.value, (el: HTMLElement) => {
       const { top } = useElementBounding(el);
       const offsetTop = top.value - 100;
       return offsetTop > 0 ? offsetTop : Infinity;
@@ -180,20 +183,20 @@ const { y } = useScroll(detailWrapRef, {
 });
 
 const appVerifiedTooltips = computed(() => {
-  if (curTab.value === 'gateway') return t('应用访问该网关API时，是否需提供应用认证信息');
-  if (curTab.value === 'component') return t('应用访问该组件API时，是否需提供应用认证信息');
+  if (curTab?.value === 'gateway') return t('应用访问该网关API时，是否需提供应用认证信息');
+  if (curTab?.value === 'component') return t('应用访问该组件API时，是否需提供应用认证信息');
   return '--';
 });
 
 const resourcePermTooltips = computed(() => {
-  if (curTab.value === 'gateway') return t('应用访问该网关API前，是否需要在开发者中心申请该网关API权限');
-  if (curTab.value === 'component') return t('应用访问该组件API前，是否需要在开发者中心申请该组件API权限');
+  if (curTab?.value === 'gateway') return t('应用访问该网关API前，是否需要在开发者中心申请该网关API权限');
+  if (curTab?.value === 'component') return t('应用访问该组件API前，是否需要在开发者中心申请该组件API权限');
   return '--';
 });
 
 const userVerifiedTooltips = computed(() => {
-  if (curTab.value === 'gateway') return t('应用访问该网关API时，是否需要提供用户认证信息');
-  if (curTab.value === 'component') return t('应用访问该组件API时，是否需要提供用户认证信息');
+  if (curTab?.value === 'gateway') return t('应用访问该网关API时，是否需要提供用户认证信息');
+  if (curTab?.value === 'component') return t('应用访问该组件API时，是否需要提供用户认证信息');
   return '--';
 });
 
@@ -232,9 +235,10 @@ const initMarkdownHtml = (box: string) => {
       btn.className = 'ag-copy-btn';
       codeBox.className = 'code-box';
       btn.innerHTML = '<span title="复制"><i class="apigateway-icon icon-ag-copy-info"></i></span>';
-      btn.setAttribute('data-copy', code);
+      btn.setAttribute('data-copy', code ?? '');
       parentDiv?.appendChild(btn);
-      codeBox?.appendChild(item?.querySelector('code'));
+      const codeEl = item?.querySelector('code');
+      if (codeEl) codeBox?.appendChild(codeEl);
       item?.appendChild(codeBox);
       item?.parentNode?.replaceChild(parentDiv, item);
       parentDiv?.appendChild(item);
@@ -266,7 +270,6 @@ const handleSdkInstructionClick = () => {
 @use "sass:color";
 
 $primary-color: #3a84ff;
-// $code-bc: #1e1e1e;
 $code-color: #63656e;
 
 .content-wrap {
@@ -535,11 +538,13 @@ $code-color: #63656e;
     font-size: 14px;
     line-height: 24px;
     text-align: left;
+
     // background: $code-bc;
     border-radius: 2px;
 
     code {
       font-family: "Lucida Console", "Courier New", Monaco, monospace;
+
       // color: #dcdcdc;
       // color: #1f2328;
     }

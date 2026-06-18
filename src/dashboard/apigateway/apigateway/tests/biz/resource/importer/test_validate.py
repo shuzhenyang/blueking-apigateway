@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,8 +20,8 @@ import pytest
 from ddf import G
 
 from apigateway.apps.label.models import APILabel
-from apigateway.biz.plugin.synchronizers import PluginConfigData
-from apigateway.biz.resource.importer.validate import ResourceImportValidator
+from apigateway.biz.openapi import ResourceImportValidator
+from apigateway.biz.plugin import PluginConfigData
 from apigateway.core.models import Resource
 from apigateway.utils.yaml import yaml_dumps
 
@@ -357,3 +357,63 @@ class TestResourceImportValidator:
             return
 
         assert len(validator.schema_validate_result) > 0
+
+    @pytest.mark.parametrize(
+        "resource_updates, expected_error_count",
+        [
+            # 正常情况：所有字段长度在限制内
+            (
+                {"name": "normal_name", "description": "normal description", "path": "/normal/path"},
+                0,
+            ),
+            # name 超长 (限制 256)
+            (
+                {"name": "a" * 300},
+                1,
+            ),
+            # description 超长 (限制 2048)
+            (
+                {"description": "a" * 2100},
+                1,
+            ),
+            # description_en 超长 (限制 2048)
+            (
+                {"description_en": "a" * 2100},
+                1,
+            ),
+            # path 超长 (限制 2048)
+            (
+                {"path": "/" + "a" * 2100},
+                1,
+            ),
+            # 多个字段同时超长
+            (
+                {"name": "a" * 300, "description": "a" * 2100},
+                2,
+            ),
+            # 边界情况：刚好在限制内
+            (
+                {"name": "a" * 256, "description": "a" * 2048},
+                0,
+            ),
+            # 边界情况：刚好超出限制
+            (
+                {"name": "a" * 257, "description": "a" * 2049},
+                2,
+            ),
+            # 空值不校验
+            (
+                {"description": "", "description_en": None},
+                0,
+            ),
+        ],
+    )
+    def test_validate_resource_field_length(
+        self, fake_gateway, fake_resource_data, resource_updates, expected_error_count
+    ):
+        resource_data_list = [
+            fake_resource_data.copy(update=resource_updates, deep=True),
+        ]
+        validator = ResourceImportValidator(fake_gateway, resource_data_list, False)
+        validator._validate_resource_field_length()
+        assert len(validator.schema_validate_result) == expected_error_count

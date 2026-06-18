@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -35,7 +35,7 @@ import (
 var _ = Describe("MCPServer", func() {
 	Describe("MCPServerKey", func() {
 		DescribeTable("should return correct key",
-			func(name string, expectedKey string) {
+			func(name, expectedKey string) {
 				key := cacheimpls.MCPServerKey{Name: name}
 				Expect(key.Key()).To(Equal(expectedKey))
 			},
@@ -57,7 +57,7 @@ var _ = Describe("MCPServer", func() {
 				Status:    model.McpServerStatusActive,
 			}
 
-			retrieveFunc := func(ctx context.Context, key cache.Key) (interface{}, error) {
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
 				return expectedServer, nil
 			}
 			mockCache := memory.NewCache("mockMCPServerCache", retrieveFunc, expiration, nil)
@@ -71,7 +71,7 @@ var _ = Describe("MCPServer", func() {
 		})
 
 		It("should return error when record not found", func() {
-			retrieveFunc := func(ctx context.Context, key cache.Key) (interface{}, error) {
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
 				return nil, errors.New("record not found")
 			}
 			mockCache := memory.NewCache("mockMCPServerCache", retrieveFunc, expiration, nil)
@@ -82,7 +82,7 @@ var _ = Describe("MCPServer", func() {
 		})
 
 		It("should return error for invalid type", func() {
-			retrieveFunc := func(ctx context.Context, key cache.Key) (interface{}, error) {
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
 				return "invalid type", nil
 			}
 			mockCache := memory.NewCache("mockMCPServerCache", retrieveFunc, expiration, nil)
@@ -91,6 +91,59 @@ var _ = Describe("MCPServer", func() {
 			_, err := cacheimpls.GetMCPServerByName(context.Background(), "test-server")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("not model.mcp in cache"))
+		})
+	})
+
+	Describe("DeleteMCPServerCache", func() {
+		expiration := 5 * time.Minute
+
+		It("should delete cache successfully", func() {
+			expectedServer := &model.MCPServer{
+				ID:        1,
+				Name:      "test-server",
+				GatewayID: 123,
+				StageID:   456,
+				Status:    model.McpServerStatusActive,
+			}
+
+			callCount := 0
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
+				callCount++
+				return expectedServer, nil
+			}
+			mockCache := memory.NewCache("mockMCPServerCache", retrieveFunc, expiration, nil)
+			cacheimpls.SetMCPServerCache(mockCache)
+
+			// First call should cache the result
+			_, err := cacheimpls.GetMCPServerByName(context.Background(), "test-server")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(callCount).To(Equal(1))
+
+			// Second call should use cache
+			_, err = cacheimpls.GetMCPServerByName(context.Background(), "test-server")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(callCount).To(Equal(1)) // Still 1, using cache
+
+			// Delete cache
+			err = cacheimpls.DeleteMCPServerCache(context.Background(), "test-server")
+			Expect(err).NotTo(HaveOccurred())
+
+			// Third call should retrieve again after cache deleted
+			_, err = cacheimpls.GetMCPServerByName(context.Background(), "test-server")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(callCount).To(Equal(2)) // Now 2, cache was deleted
+		})
+
+		It("should not error when deleting non-existent cache", func() {
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
+				return nil, errors.New("record not found")
+			}
+			mockCache := memory.NewCache("mockMCPServerCache", retrieveFunc, expiration, nil)
+			cacheimpls.SetMCPServerCache(mockCache)
+
+			// Delete non-existent cache should not error
+			err := cacheimpls.DeleteMCPServerCache(context.Background(), "non-existent")
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

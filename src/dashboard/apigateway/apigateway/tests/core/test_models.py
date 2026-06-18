@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,6 @@
 import pytest
 from django_dynamic_fixture import G
 
-from apigateway.biz.resource import ResourceHandler
 from apigateway.core import models
 from apigateway.core.constants import GatewayStatusEnum, PublishEventNameTypeEnum, PublishEventStatusEnum
 
@@ -100,14 +99,10 @@ class TestGateway:
     #     assert gateway._extra_info == {}
 
 
-class TestResource:
-    def test_snapshot(self, fake_resource):
-        snapshot = ResourceHandler.snapshot(fake_resource, as_dict=True)
-        assert snapshot
-        assert isinstance(snapshot, dict)
-
-
 class TestPublishEvent:
+    def test_meta_indexes(self):
+        assert any(index.fields == ["gateway", "publish"] for index in models.PublishEvent._meta.indexes)
+
     @pytest.mark.parametrize(
         "name, expected",
         [

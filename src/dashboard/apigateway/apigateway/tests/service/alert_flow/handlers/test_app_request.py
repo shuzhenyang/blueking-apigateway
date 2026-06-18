@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,7 +18,7 @@
 #
 import pytest
 
-from apigateway.service.alert_flow.handlers import app_request
+from apigateway.service.alert_flow import app_request
 
 
 class TestAppRequestAppCodeRequiredFilter:
@@ -49,12 +49,35 @@ class TestAppRequestAppCodeRequiredFilter:
                 },
                 True,
             ),
+            (
+                {
+                    "alarm_record_id": 1,
+                    "event_dimensions": {
+                        "api_id": 2,
+                        "resource_id": 3,
+                        "stage": "prod",
+                        "app_code": None,
+                    },
+                },
+                True,
+            ),
+            (
+                {
+                    "alarm_record_id": 1,
+                    "event_dimensions": {
+                        "api_id": 2,
+                        "resource_id": 3,
+                        "stage": "prod",
+                    },
+                },
+                True,
+            ),
         ],
     )
     def test_do(self, mocker, event, expected_none):
         event = mocker.MagicMock(**event)
         mock_update_alarm = mocker.patch(
-            "apigateway.service.alert_flow.handlers.app_request.AlarmRecord.objects.update_alarm",
+            "apigateway.service.alert_flow.app_request.AlarmRecord.objects.update_alarm",
             return_value=None,
         )
 
@@ -75,13 +98,23 @@ class TestAppRequestAlerter:
         self.alerter = app_request.AppRequestAlerter(notice_ways=[])
 
     def test_get_receivers(self, mocker, faker, mock_event):
-        mocker.patch("apigateway.service.alert_flow.handlers.app_request.get_app_maintainers", return_value=["admin"])
+        mocker.patch("apigateway.service.alert_flow.app_request.get_app_maintainers", return_value=["admin"])
 
         result = self.alerter.get_receivers(mock_event)
         assert result == ["admin"]
 
     def test_get_message(self, mocker, faker):
+        mocker.patch(
+            "apigateway.service.alert_flow.app_request.Resource.objects.filter"
+        ).return_value.values_list.return_value.first.return_value = "test-resource"
+
         event = mocker.MagicMock(
+            event_dimensions={
+                "api_id": 1,
+                "resource_id": 2,
+                "stage": "prod",
+                "app_code": faker.pystr(),
+            },
             extend={
                 "log_records": [
                     {
@@ -107,7 +140,7 @@ class TestAppRequestAlerter:
         assert result != ""
 
     @pytest.mark.parametrize(
-        "record_source, expected",
+        "record_source, resource_name, expected",
         [
             (
                 {
@@ -115,7 +148,8 @@ class TestAppRequestAlerter:
                     "http_host": "bkapi.example.com",
                     "http_path": "/",
                 },
-                "GET, bkapi.example.com, /",
+                "my-resource",
+                "my-resource, GET, bkapi.example.com, /",
             ),
             (
                 {
@@ -123,7 +157,8 @@ class TestAppRequestAlerter:
                     "http_host": "bkapi.example.com",
                     "http_path": "/foo",
                 },
-                "GET, bkapi.example.com, /foo",
+                "my-resource",
+                "my-resource, GET, bkapi.example.com, /foo",
             ),
             (
                 {
@@ -131,10 +166,20 @@ class TestAppRequestAlerter:
                     "http_host": "bkapi.example.com",
                     "http_path": "/foo?color=red&size=large",
                 },
-                "GET, bkapi.example.com, /foo",
+                "my-resource",
+                "my-resource, GET, bkapi.example.com, /foo",
+            ),
+            (
+                {
+                    "method": "POST",
+                    "http_host": "bkapi.example.com",
+                    "http_path": "/bar",
+                },
+                "",
+                "POST, bkapi.example.com, /bar",
             ),
         ],
     )
-    def test_get_request_info(self, record_source, expected):
-        result = self.alerter._get_request_info(record_source)
+    def test_get_request_info(self, record_source, resource_name, expected):
+        result = self.alerter._get_request_info(record_source, resource_name)
         assert result == expected

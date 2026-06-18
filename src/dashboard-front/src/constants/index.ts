@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -98,6 +98,7 @@ export const PLUGIN_ICONS = [
   'response-rewrite', // 响应重写插件
   'serverless', // 无服务器插件
   'user-restriction', // 用户限制插件
+  'bk-traffic-label', // 流量染色插件
 ];
 
 // 插件图表列表 - 小号图表
@@ -107,7 +108,6 @@ export const PLUGIN_ICONS_MIN = [
   'bk-opentelemetry',
   'bk-query-string-rewrite',
   'proxy-cache',
-  'traffic-label',
   'bk-request-body-limit',
   'bk-user-restriction',
   'bk-username-required',
@@ -173,6 +173,7 @@ export const MCP_PROTOCOL_TYPE = [
   },
 ];
 
+//  MCP详情选项卡
 export const MCP_TAB_LIST = [
   {
     name: 'tools',
@@ -197,3 +198,131 @@ export const MCP_TAB_LIST = [
     show: true,
   };
 });
+
+// 状态列表
+export const STATUS_LIST = [
+  {
+    name: t('全部'),
+    id: 'all',
+  },
+  {
+    name: t('成功'),
+    id: 'success',
+  },
+  {
+    name: t('失败'),
+    id: 'failed',
+  },
+];
+
+// 定时刷新时间列表
+export const INTERVAL_TIME_LIST = [
+  {
+    label: 'Off',
+    value: 'off',
+  },
+  {
+    label: '5s',
+    value: '5s',
+  },
+  {
+    label: '10s',
+    value: '10s',
+  },
+  {
+    label: '15s',
+    value: '15s',
+  },
+  {
+    label: '30s',
+    value: '30s',
+  },
+  {
+    label: '1m',
+    value: '1m',
+  },
+  {
+    label: '5m',
+    value: '5m',
+  },
+  {
+    label: '15m',
+    value: '15m',
+  },
+  {
+    label: '30m',
+    value: '30m',
+  },
+  {
+    label: '1h',
+    value: '1h',
+  },
+  {
+    label: '2h',
+    value: '2h',
+  },
+  {
+    label: '1d',
+    value: '1d',
+  },
+];
+
+// 精度刷新时间列表
+export const PRECISION_STEPS_LIST = [
+  {
+    label: 'Auto',
+    value: 'auto',
+  },
+  {
+    label: '1m',
+    value: '1m',
+  },
+  {
+    label: '5m',
+    value: '5m',
+  },
+  {
+    label: '10m',
+    value: '10m',
+  },
+  {
+    label: '30m',
+    value: '30m',
+  },
+  {
+    label: '1h',
+    value: '1h',
+  },
+  {
+    label: '3h',
+    value: '3h',
+  },
+  {
+    label: '12h',
+    value: '12h',
+  },
+];
+
+// 已授权应用操作类型列表
+export const AUTHORIZATION_APPLICATION_OPERATE_TYPE = [
+  {
+    name: t('主动授权'),
+    id: 'grant',
+  },
+  {
+    name: t('申请审批'),
+    id: 'apply',
+  },
+];
+
+// 授权维度列表
+export const GRANT_DIMENSION_TYPE_LIST = [
+  {
+    label: t('按网关'),
+    value: 'api',
+  },
+  {
+    label: t('按资源'),
+    value: 'resource',
+  },
+];

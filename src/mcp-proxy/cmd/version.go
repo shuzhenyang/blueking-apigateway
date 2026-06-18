@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -30,8 +30,8 @@ import (
 // versionCmd represents the version command
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the version number of core-api",
-	Long:  `All software has versions. This is core-api's`,
+	Short: "Print the version number of mcp-proxy",
+	Long:  `All software has versions. This is mcp-proxy's`,
 	Run: func(cmd *cobra.Command, args []string) {
 		info := []string{
 			"Version: " + version.Version,

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -43,13 +43,13 @@ func Init(config config.Sentry) error {
 			Dsn: config.DSN,
 		})
 		if err != nil {
-			return fmt.Errorf("init sentry fail: %s", err)
+			return fmt.Errorf("init sentry fail: %w", err)
 		}
 
 		// init gin sentry
 		err = raven.SetDSN(config.DSN)
 		if err != nil {
-			return fmt.Errorf("init gin sentry fail: %s", err)
+			return fmt.Errorf("init gin sentry fail: %w", err)
 		}
 		s.enabled = true
 	}

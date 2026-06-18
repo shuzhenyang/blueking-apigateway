@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,9 +19,20 @@
 from django.conf import settings
 from django.urls import include, path
 
-from . import views
+from . import itsm_views, monitor_views, views
 
 urlpatterns = [
+    path(
+        "itsm/callback/",
+        itsm_views.ItsmCallbackApi.as_view(),
+        name="openapi.v2.inner.itsm.callback",
+    ),
+    # POST /api/v2/inner/monitor/alarm-types/{alarm_type}/callback/
+    path(
+        "monitor/alarm-types/<slug:alarm_type>/callback/",
+        monitor_views.AlarmCallbackApi.as_view(),
+        name="openapi.v2.inner.monitor.alarm_callback",
+    ),
     # /api/v2/inner/ 用于 paasv3 内部调用; 鉴权：来自于网关（主动授权）
     # 所有的接口必须隐藏 + 不允许申请权限（需主动授权）
     # 作为 resource 注册到网关时
@@ -147,6 +158,19 @@ urlpatterns = [
                     "apply-records/<int:record_id>/",
                     views.MCPServerAppPermissionRecordRetrieveApi.as_view(),
                     name="openapi.v2.inner.mcp_server.permission.apply-record-detail",
+                ),
+            ]
+        ),
+    ),
+    path(
+        "mcp-servers/",
+        include(
+            [
+                # GET /api/v2/inner/mcp-servers/
+                path(
+                    "",
+                    views.MCPServerListApi.as_view(),
+                    name="openapi.v2.inner.mcp_server.list",
                 ),
             ]
         ),

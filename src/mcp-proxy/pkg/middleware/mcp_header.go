@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,6 +19,8 @@
 package middleware
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 
@@ -33,6 +35,20 @@ func MCPServerHeaderMiddleware() func(c *gin.Context) {
 		util.SetBkApiTimeout(c, cast.ToInt(c.Request.Header.Get(constant.BkApiTimeoutHeaderKey)))
 		// 处理 AllowedHeaders
 		util.SetBkApiAllowedHeaders(c, c.Request.Header.Get(constant.BkApiAllowedHeadersKey))
+		// 解析 ItsmFlex header
+		parseBkApiItsmFlex(c)
 		c.Next()
 	}
+}
+
+func parseBkApiItsmFlex(c *gin.Context) {
+	itsmFlexStr := c.Request.Header.Get(constant.BkApiItsmFlexKey)
+	if itsmFlexStr == "" {
+		return
+	}
+	var data util.ItsmFlexData
+	if err := json.Unmarshal([]byte(itsmFlexStr), &data); err != nil {
+		return
+	}
+	util.SetBkApiItsmFlexData(c, &data)
 }

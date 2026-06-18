@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -81,8 +81,9 @@ var _ = Describe("Config", func() {
 	Describe("MCPServerConfig", func() {
 		It("should have correct fields", func() {
 			config := proxy.MCPServerConfig{
-				Name:              "test-server",
-				ResourceVersionID: 123,
+				Name:               "test-server",
+				ResourceVersionID:  123,
+				RawResponseEnabled: true,
 				Tools: []*proxy.ToolConfig{
 					{
 						Name: "tool1", Description: "Test tool 1",
@@ -94,8 +95,18 @@ var _ = Describe("Config", func() {
 
 			Expect(config.Name).To(Equal("test-server"))
 			Expect(config.ResourceVersionID).To(Equal(123))
+			Expect(config.RawResponseEnabled).To(BeTrue())
 			Expect(config.Tools).To(HaveLen(1))
 			Expect(config.Tools[0].Name).To(Equal("tool1"))
+		})
+
+		It("should default RawResponseEnabled to false", func() {
+			config := proxy.MCPServerConfig{
+				Name:              "test-server",
+				ResourceVersionID: 1,
+			}
+
+			Expect(config.RawResponseEnabled).To(BeFalse())
 		})
 	})
 

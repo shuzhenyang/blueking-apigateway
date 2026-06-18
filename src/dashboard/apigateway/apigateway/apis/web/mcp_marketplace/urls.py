@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,10 @@
 from django.urls import include, path
 
 from .views import (
+    MCPMarketplaceApplicableAppListApi,
+    MCPMarketplaceBatchConfigApi,
     MCPMarketplaceCategoryListApi,
+    MCPMarketplaceServerAppPermissionApplyCreateApi,
     MCPMarketplaceServerConfigListApi,
     MCPMarketplaceServerListApi,
     MCPMarketplaceServerRetrieveApi,
@@ -29,6 +32,10 @@ from .views import (
 urlpatterns = [
     # 分类列表
     path("categories/", MCPMarketplaceCategoryListApi.as_view(), name="mcp_marketplace.category.list"),
+    # 批量获取配置
+    path("batch-configs/", MCPMarketplaceBatchConfigApi.as_view(), name="mcp_marketplace.batch_configs"),
+    # 发起权限申请时可选择的蓝鲸应用列表
+    path("applicable-apps/", MCPMarketplaceApplicableAppListApi.as_view(), name="mcp_marketplace.applicable_apps"),
     path(
         "servers/",
         include(
@@ -48,6 +55,11 @@ urlpatterns = [
                                 "configs/",
                                 MCPMarketplaceServerConfigListApi.as_view(),
                                 name="mcp_marketplace.server.config_list",
+                            ),
+                            path(
+                                "app-permission-apply/",
+                                MCPMarketplaceServerAppPermissionApplyCreateApi.as_view(),
+                                name="mcp_marketplace.server.app_permission_apply.create",
                             ),
                             path(
                                 "tools/<str:tool_name>/doc/",

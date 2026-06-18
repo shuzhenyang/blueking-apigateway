@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -202,6 +202,109 @@ var _ = Describe("Context", func() {
 		})
 	})
 
+	Describe("TraceID", func() {
+		It("should set and get trace ID from gin context and request context", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetTraceID(c, "11223344556677889900aabbccddeeff")
+
+			traceID, exists := c.Get(string(constant.TraceID))
+			Expect(exists).To(BeTrue())
+			Expect(traceID).To(Equal("11223344556677889900aabbccddeeff"))
+
+			traceIDFromCtx := c.Request.Context().Value(constant.TraceID)
+			Expect(traceIDFromCtx).To(Equal("11223344556677889900aabbccddeeff"))
+		})
+	})
+
+	Describe("ClientIP", func() {
+		It("should set and get client IP from gin context and request context", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetClientIP(c)
+
+			ip, exists := c.Get(string(constant.ClientIP))
+			Expect(exists).To(BeTrue())
+			Expect(ip).NotTo(BeEmpty())
+
+			ipFromCtx := util.GetClientIPFromContext(c.Request.Context())
+			Expect(ipFromCtx).To(Equal(ip))
+		})
+
+		It("should return empty when not set", func() {
+			ctx := context.Background()
+			ip := util.GetClientIPFromContext(ctx)
+			Expect(ip).To(BeEmpty())
+		})
+	})
+
+	Describe("ClientID", func() {
+		It("should set and get client ID from gin context and request context", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetClientID(c, "my-mcp-client")
+
+			clientID, exists := c.Get(string(constant.ClientID))
+			Expect(exists).To(BeTrue())
+			Expect(clientID).To(Equal("my-mcp-client"))
+
+			clientIDFromCtx := util.GetClientIDFromContext(c.Request.Context())
+			Expect(clientIDFromCtx).To(Equal("my-mcp-client"))
+		})
+
+		It("should return empty when not set", func() {
+			ctx := context.Background()
+			clientID := util.GetClientIDFromContext(ctx)
+			Expect(clientID).To(BeEmpty())
+		})
+
+		It("should overwrite previous value", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetClientID(c, "old-client")
+			util.SetClientID(c, "new-client")
+
+			clientIDFromCtx := util.GetClientIDFromContext(c.Request.Context())
+			Expect(clientIDFromCtx).To(Equal("new-client"))
+		})
+	})
+
+	Describe("GatewayName", func() {
+		It("should set and get gateway name", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetGatewayName(c, "test-gateway")
+
+			name := util.GetGatewayName(c)
+			Expect(name).To(Equal("test-gateway"))
+
+			nameFromCtx := util.GetGatewayNameFromContext(c.Request.Context())
+			Expect(nameFromCtx).To(Equal("test-gateway"))
+		})
+
+		It("should return empty when not set", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			name := util.GetGatewayName(c)
+			Expect(name).To(BeEmpty())
+
+			nameFromCtx := util.GetGatewayNameFromContext(context.Background())
+			Expect(nameFromCtx).To(BeEmpty())
+		})
+	})
+
 	Describe("BkApiAllowedHeaders", func() {
 		It("should set and get allowed headers", func() {
 			w := httptest.NewRecorder()
@@ -264,6 +367,46 @@ var _ = Describe("Context", func() {
 			Expect(headers).NotTo(BeNil())
 			Expect(headers["X-Header-1"]).To(Equal("value1"))
 			Expect(headers["X-Header-2"]).To(Equal("value2"))
+		})
+	})
+
+	Describe("BkApiItsmFlexData", func() {
+		It("should set and get ItsmFlex data", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			data := &util.ItsmFlexData{
+				AgentCode:      "ai-test-appcode",
+				AgentName:      "AgentName",
+				CallerExecutor: "judge-caller",
+				Executor:       "judge-executor",
+			}
+			util.SetBkApiItsmFlexData(c, data)
+
+			retrieved := util.GetBkApiItsmFlexData(c.Request.Context())
+			Expect(retrieved).NotTo(BeNil())
+			Expect(retrieved.AgentCode).To(Equal("ai-test-appcode"))
+			Expect(retrieved.AgentName).To(Equal("AgentName"))
+			Expect(retrieved.CallerExecutor).To(Equal("judge-caller"))
+			Expect(retrieved.Executor).To(Equal("judge-executor"))
+		})
+
+		It("should return nil when not set", func() {
+			ctx := context.Background()
+			data := util.GetBkApiItsmFlexData(ctx)
+			Expect(data).To(BeNil())
+		})
+
+		It("should return nil when set to nil", func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			util.SetBkApiItsmFlexData(c, nil)
+
+			retrieved := util.GetBkApiItsmFlexData(c.Request.Context())
+			Expect(retrieved).To(BeNil())
 		})
 	})
 })

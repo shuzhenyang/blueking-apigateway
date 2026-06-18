@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -94,7 +94,7 @@ class StageHandler:
 
     @staticmethod
     def delete(stage: Stage):
-        # 删除stage CR  先删除crd，发布过程需要用到,发布过程中有用到release相关数据，这里需要同步发布
+        # 删除 stage CR  先删除 crd，发布过程需要用到，发布过程中有用到 release 相关数据，这里需要同步发布
         trigger_gateway_publish(PublishSourceEnum.STAGE_DELETE, "admin", stage.gateway.id, stage.id, is_sync=True)
 
         with transaction.atomic():

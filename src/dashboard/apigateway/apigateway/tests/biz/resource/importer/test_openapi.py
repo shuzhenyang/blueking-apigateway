@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,11 +20,14 @@ import json
 
 import pytest
 from ddf import G
+from openapi_spec_validator.versions import get_spec_version
 
 from apigateway.apps.support.constants import OpenAPIFormatEnum
-from apigateway.biz.resource.importer.openapi import OpenAPIExportManager, OpenAPIImportManager
-from apigateway.biz.resource.importer.parser import BaseExporter
-from apigateway.core.models import Gateway
+from apigateway.biz.openapi import OpenAPIImportManager
+from apigateway.biz.resource.importer import sync_openapi_resources_from_content
+from apigateway.core.constants import DEFAULT_BACKEND_NAME
+from apigateway.core.models import Backend, Gateway
+from apigateway.service.resource_version import BaseExporter, OpenAPIExportManager
 from apigateway.utils.yaml import yaml_loads
 
 
@@ -749,6 +752,161 @@ class TestOpenAPIManger:
             assert resources == expected
 
 
+class TestOpenAPIImportManagerParse:
+    """Regression tests for OpenAPIImportManager.parse() — ensures dict data
+    is serialized as valid JSON (not Python repr) before passing to ResolvingParser."""
+
+    def _make_gateway_with_backend(self):
+        gateway = G(Gateway)
+        G(Backend, gateway=gateway, name=DEFAULT_BACKEND_NAME)
+        return gateway
+
+    def _make_manager(self, data):
+        gateway = self._make_gateway_with_backend()
+        manager = OpenAPIImportManager(gateway=gateway, data=data)
+        manager.version = get_spec_version(data)
+        return manager
+
+    def test_parse_swagger2_dict(self):
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "schemes": ["http"],
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "description": "test",
+                        "tags": ["test"],
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {
+                                "type": "HTTP",
+                                "path": "/test/",
+                                "method": "get",
+                                "timeout": 30,
+                            },
+                        },
+                    }
+                }
+            },
+        }
+        manager = self._make_manager(data)
+        manager.parse()
+
+        resources = manager.get_resource_list(raw=True)
+        assert len(resources) == 1
+        assert resources[0]["name"] == "get_test"
+        assert resources[0]["method"] == "GET"
+        assert resources[0]["path"] == "/test/"
+
+    def test_parse_openapi3_dict(self):
+        data = {
+            "openapi": "3.0.1",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "post": {
+                        "operationId": "post_test",
+                        "description": "test post",
+                        "tags": ["demo"],
+                        "responses": {"200": {"description": "success"}},
+                        "x-bk-apigateway-resource": {
+                            "isPublic": False,
+                            "backend": {
+                                "type": "HTTP",
+                                "path": "/backend/test/",
+                                "method": "post",
+                                "timeout": 10,
+                            },
+                        },
+                    }
+                }
+            },
+        }
+        manager = self._make_manager(data)
+        manager.parse()
+
+        resources = manager.get_resource_list(raw=True)
+        assert len(resources) == 1
+        assert resources[0]["name"] == "post_test"
+        assert resources[0]["is_public"] is False
+
+    def test_parse_from_yaml_content(self):
+        yaml_content = """\
+swagger: "2.0"
+basePath: /
+info:
+  version: "0.1"
+  title: Test
+schemes:
+  - http
+paths:
+  /yaml-test/:
+    get:
+      operationId: yaml_test_get
+      description: yaml originated
+      tags:
+        - yaml
+      x-bk-apigateway-resource:
+        isPublic: true
+        backend:
+          type: HTTP
+          path: /yaml-test/
+          method: get
+          timeout: 30
+"""
+        gateway = self._make_gateway_with_backend()
+        manager = OpenAPIImportManager.load_from_content(gateway=gateway, content=yaml_content)
+        manager.version = get_spec_version(manager.data)
+        manager.parse()
+
+        resources = manager.get_resource_list(raw=True)
+        assert len(resources) == 1
+        assert resources[0]["name"] == "yaml_test_get"
+
+    def test_parse_dict_with_boolean_and_none_values(self):
+        """Python True/False/None would break str() but work with json.dumps()."""
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "schemes": ["http"],
+            "paths": {
+                "/bool-test/": {
+                    "get": {
+                        "operationId": "bool_test",
+                        "description": "test booleans",
+                        "tags": [],
+                        "x-bk-apigateway-resource": {
+                            "isPublic": False,
+                            "allowApplyPermission": True,
+                            "backend": {
+                                "type": "HTTP",
+                                "path": "/bool-test/",
+                                "method": "get",
+                                "timeout": 0,
+                            },
+                            "authConfig": {
+                                "userVerifiedRequired": False,
+                                "appVerifiedRequired": False,
+                            },
+                        },
+                    }
+                }
+            },
+        }
+        manager = self._make_manager(data)
+        manager.parse()
+
+        resources = manager.get_resource_list(raw=True)
+        assert len(resources) == 1
+        assert resources[0]["name"] == "bool_test"
+        assert resources[0]["is_public"] is False
+        assert resources[0]["auth_config"]["auth_verified_required"] is False
+
+
 class TestOpenAPIExporter:
     def test_get_swagger_by_paths(self):
         paths = {
@@ -928,3 +1086,499 @@ class TestOpenAPIExporter:
         exporter = BaseExporter()
         result = exporter._adapt_auth_config(auth_config)
         assert result == expected
+
+    def test_generate_paths__plugin_configs_dict(self, fake_resource_dict):
+        """plugin_configs 为 dict 列表时（资源版本导出路径），pluginConfigs 应正确填充。"""
+        resource = dict(
+            fake_resource_dict,
+            plugin_configs=[
+                {
+                    "type": "bk-header-rewrite",
+                    "yaml": "remove:\n- X-Bar\nset:\n- key: X-Foo\n  value: test",
+                },
+            ],
+        )
+        exporter = BaseExporter()
+        paths = exporter._gen_swagger_paths([resource])
+        operation = paths[resource["path"]][resource["method"].lower()]
+
+        plugin_configs = operation["x-bk-apigateway-resource"]["pluginConfigs"]
+        assert len(plugin_configs) == 1
+        assert plugin_configs[0]["type"] == "bk-header-rewrite"
+        # yaml_dumps 输出末尾不应有多余换行
+        assert not plugin_configs[0]["yaml"].endswith("\n")
+        assert "remove:" in plugin_configs[0]["yaml"]
+
+    def test_generate_paths__plugin_configs_orm_obj(self, fake_plugin_config):
+        """plugin_configs 为 PluginConfig ORM 对象列表时（资源配置导出路径），应兼容。"""
+        resource = {
+            "method": "GET",
+            "path": "/test",
+            "name": "test_api",
+            "description": "",
+            "description_en": None,
+            "labels": [],
+            "is_public": True,
+            "allow_apply_permission": True,
+            "match_subpath": False,
+            "enable_websocket": False,
+            "backend": {
+                "name": "default",
+                "config": {"method": "GET", "path": "/test", "timeout": 0},
+            },
+            "auth_config": {"auth_verified_required": True},
+            "plugin_configs": [fake_plugin_config],
+        }
+        exporter = BaseExporter()
+        paths = exporter._gen_swagger_paths([resource])
+        operation = paths["/test"]["get"]
+
+        plugin_configs = operation["x-bk-apigateway-resource"]["pluginConfigs"]
+        assert len(plugin_configs) == 1
+        assert plugin_configs[0]["type"] == "bk-cors"
+        assert "allow_origins" in plugin_configs[0]["yaml"]
+
+
+class TestOpenAPIImportManagerValidateRefs:
+    """Tests for _validate_refs — ensures external $ref values are rejected."""
+
+    @pytest.mark.parametrize("ref_value", ["#/definitions/User", "#User", "#"])
+    def test_internal_ref_allowed(self, ref_value):
+        """Pure internal fragment refs should pass validation."""
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "definitions": {
+                "User": {"type": "object", "properties": {"name": {"type": "string"}}},
+            },
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {"schema": {"$ref": ref_value}},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+        OpenAPIImportManager._validate_refs(data)
+
+    def test_openapi_31_anchor_ref_allowed(self):
+        data = {
+            "openapi": "3.1.0",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"$ref": "#userSchema"},
+                                    }
+                                }
+                            },
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+
+        OpenAPIImportManager._validate_refs(data)
+
+    def test_external_url_ref_rejected(self):
+        """HTTP(S) URL $ref should be rejected to prevent SSRF."""
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {"schema": {"$ref": "http://evil.com/schema.json#/definitions/User"}},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+        with pytest.raises(ValueError, match="external \\$ref"):
+            OpenAPIImportManager._validate_refs(data)
+
+    def test_local_file_ref_rejected(self):
+        """Local file path $ref should be rejected to prevent file read."""
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {"schema": {"$ref": "/etc/passwd"}},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+        with pytest.raises(ValueError, match="external \\$ref"):
+            OpenAPIImportManager._validate_refs(data)
+
+    def test_relative_file_ref_rejected(self):
+        """Relative file path $ref should be rejected."""
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {"schema": {"$ref": "../common/models.yaml#/User"}},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+        with pytest.raises(ValueError, match="external \\$ref"):
+            OpenAPIImportManager._validate_refs(data)
+
+    def test_validate_returns_schema_err_for_unsafe_ref(self):
+        """validate() should return SchemaValidateErr when $ref is external, not raise."""
+        gateway = G(Gateway)
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "schemes": ["http"],
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "description": "test",
+                        "tags": ["test"],
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                        "responses": {
+                            "200": {"schema": {"$ref": "http://internal-service.local/schema.json"}},
+                        },
+                    }
+                }
+            },
+        }
+        manager = OpenAPIImportManager(gateway=gateway, data=data)
+        validate_err_list = manager.validate()
+        assert len(validate_err_list) > 0
+        assert "external $ref" in validate_err_list[0].message
+        assert "http://internal-service.local/schema.json" not in validate_err_list[0].message
+
+    def test_validate_and_parse_use_same_unsafe_ref_message(self):
+        gateway = G(Gateway)
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "schemes": ["http"],
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "description": "test",
+                        "tags": ["test"],
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                        "responses": {
+                            "200": {"schema": {"$ref": "http://internal-service.local/schema.json"}},
+                        },
+                    }
+                }
+            },
+        }
+        manager = OpenAPIImportManager(gateway=gateway, data=data)
+
+        validate_err_list = manager.validate()
+
+        with pytest.raises(ValueError) as err:
+            manager.parse()
+
+        assert validate_err_list[0].message == str(err.value)
+
+    def test_literal_ref_text_in_description_is_not_misclassified(self):
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "description": 'example text with {"$ref": "http://evil.com/schema.json"}',
+                        "responses": {
+                            "200": {"description": "success"},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+
+        OpenAPIImportManager._validate_refs(data)
+
+    def test_xss_like_ref_value_is_not_echoed_in_error_message(self):
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {"schema": {"$ref": "<img src=x onerror=alert(1)>"}},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+
+        with pytest.raises(ValueError) as err:
+            OpenAPIImportManager._validate_refs(data)
+
+        assert "<img src=x onerror=alert(1)>" not in str(err.value)
+
+    def test_xss_like_key_is_not_echoed_in_error_message(self):
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/<img src=x onerror=alert(1)>/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {
+                            "200": {"schema": {"$ref": "http://evil.com/schema.json#/definitions/User"}},
+                        },
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+
+        with pytest.raises(ValueError) as err:
+            OpenAPIImportManager._validate_refs(data)
+
+        assert "/<img src=x onerror=alert(1)>/" not in str(err.value)
+        assert "http://evil.com/schema.json" not in str(err.value)
+
+    def test_no_ref_passes(self):
+        """Document with no $ref at all should pass validation."""
+        data = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.1", "title": "Test"},
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "operationId": "get_test",
+                        "responses": {"200": {"description": "success"}},
+                        "x-bk-apigateway-resource": {
+                            "isPublic": True,
+                            "backend": {"type": "HTTP", "path": "/test/", "method": "get", "timeout": 30},
+                        },
+                    }
+                }
+            },
+        }
+        OpenAPIImportManager._validate_refs(data)
+
+    def test_has_unsafe_refs(self):
+        data = {
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "schema": {
+                                    "$ref": "http://evil.com/schema.json#/definitions/User",
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert OpenAPIImportManager._has_unsafe_refs(data) is True
+
+    def test_has_unsafe_refs_all_internal(self):
+        data = {
+            "paths": {
+                "/test/": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "schema": {
+                                    "$ref": "#/definitions/User",
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert OpenAPIImportManager._has_unsafe_refs(data) is False
+
+
+class TestSyncOpenAPIResourcesFromContent:
+    PATCH_PREFIX = "apigateway.biz.resource.importer.sync"
+
+    def _mock_sync_deps(self, mocker):
+        mgr = mocker.patch(f"{self.PATCH_PREFIX}.OpenAPIImportManager.load_from_content").return_value
+        mgr.validate.return_value = []
+        mgr.get_resource_list.return_value = []
+
+        imp_cls = mocker.patch(f"{self.PATCH_PREFIX}.ResourcesImporter")
+        imp = imp_cls.from_resources.return_value
+        imp.get_selected_resource_data_list.return_value = []
+        imp.get_deleted_resources.return_value = []
+        return mgr, imp
+
+    def test_returns_diff(self, fake_gateway, mocker):
+        self._mock_sync_deps(mocker)
+
+        ok, message, data = sync_openapi_resources_from_content(
+            gateway=fake_gateway,
+            username="admin",
+            content='{"swagger": "2.0", "paths": {}}',
+            delete_missing_resources=False,
+            doc_language="",
+        )
+
+        assert ok is True
+        assert message == ""
+        assert data["added"] == []
+        assert data["updated"] == []
+        assert data["deleted"] == []
+
+    def test_invalid_content_returns_not_ok(self, fake_gateway, mocker):
+        mocker.patch(
+            f"{self.PATCH_PREFIX}.OpenAPIImportManager.load_from_content",
+            side_effect=ValueError("bad yaml"),
+        )
+
+        ok, message, data = sync_openapi_resources_from_content(
+            gateway=fake_gateway,
+            username="admin",
+            content="not valid",
+            delete_missing_resources=False,
+        )
+
+        assert ok is False
+        assert "json/yaml" in message
+        assert "bad yaml" in message
+        assert data == {}
+
+    def test_validation_error_returns_not_ok(self, fake_gateway, mocker):
+        mgr, _ = self._mock_sync_deps(mocker)
+        mock_err = mocker.MagicMock()
+        mock_err.to_dict.return_value = {"message": "bad"}
+        mgr.validate.return_value = [mock_err]
+
+        ok, message, data = sync_openapi_resources_from_content(
+            gateway=fake_gateway,
+            username="admin",
+            content='{"swagger": "2.0", "paths": {}}',
+            delete_missing_resources=False,
+        )
+
+        assert ok is False
+        assert "bad" in message
+        assert data == {}
+
+    def test_with_doc_language(self, fake_gateway, mocker):
+        self._mock_sync_deps(mocker)
+
+        mock_parser = mocker.patch(f"{self.PATCH_PREFIX}.OpenAPIParser").return_value
+        mock_parser.parse.return_value = []
+        mock_doc_importer = mocker.patch(f"{self.PATCH_PREFIX}.DocImporter").return_value
+
+        ok, message, data = sync_openapi_resources_from_content(
+            gateway=fake_gateway,
+            username="admin",
+            content='{"swagger": "2.0", "paths": {}}',
+            delete_missing_resources=False,
+            doc_language="zh",
+        )
+
+        mock_parser.parse.assert_called_once()
+        mock_doc_importer.import_docs.assert_called_once()
+        assert ok is True
+        assert message == ""
+
+    def test_added_and_updated_classification(self, fake_gateway, mocker):
+        _, imp = self._mock_sync_deps(mocker)
+
+        created_rd = mocker.MagicMock()
+        created_rd.metadata = {"is_created": True}
+        created_rd.resource.id = 1
+
+        updated_rd = mocker.MagicMock()
+        updated_rd.metadata = {}
+        updated_rd.resource.id = 2
+
+        imp.get_selected_resource_data_list.return_value = [created_rd, updated_rd]
+        imp.get_deleted_resources.return_value = [{"id": 3}]
+
+        ok, message, data = sync_openapi_resources_from_content(
+            gateway=fake_gateway,
+            username="admin",
+            content='{"swagger": "2.0", "paths": {}}',
+            delete_missing_resources=True,
+        )
+
+        assert ok is True
+        assert message == ""
+        assert data["added"] == [{"id": 1}]
+        assert data["updated"] == [{"id": 2}]
+        assert data["deleted"] == [{"id": 3}]

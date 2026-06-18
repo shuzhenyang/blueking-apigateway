@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -21,8 +21,8 @@ from datetime import datetime
 
 from celery import shared_task
 
+from apigateway.apps.data_plane.models import DataPlane
 from apigateway.apps.support.models import ReleasedResourceDoc, ResourceDocVersion
-from apigateway.biz.resource_version import ResourceDocVersionHandler
 from apigateway.common.constants import RELEASE_GATEWAY_INTERVAL_SECOND
 from apigateway.controller.distributor.base import BaseDistributor
 from apigateway.controller.distributor.etcd import GatewayResourceDistributor
@@ -36,8 +36,9 @@ from apigateway.core.models import (
     ResourceVersion,
     Stage,
 )
-from apigateway.service.event.event import PublishEventReporter
-from apigateway.service.mcp.mcp_server import update_stage_mcp_server_related_resource_names
+from apigateway.service.event import PublishEventReporter
+from apigateway.service.mcp import update_stage_mcp_server_related_resource_names
+from apigateway.service.resource_doc import clear_unreleased_resource_doc
 from apigateway.utils.time import now_datetime
 
 logger = logging.getLogger(__name__)
@@ -80,13 +81,24 @@ def _release_gateway(
 
 
 @shared_task(ignore_result=True)
-def release_gateway_by_registry(publish_id):
+def release_gateway_by_registry(publish_id: int, data_plane_id: int):
     """发布资源到共享网关，为了使得类似环境变量等引用生效，同时会将所有配置都进行同步"""
-    logger.info("release_gateway_by_etcd: publish_id=%s", publish_id)
+    logger.info("release_gateway_by_etcd: publish_id=%s, data_plane_id=%s", publish_id, data_plane_id)
 
     release_history = ReleaseHistory.objects.get(id=publish_id)
     if not release_history:
         logger.error("release_gateway_by_etcd:publish_id=%s, can't find release_history", publish_id)
+        return None
+
+    # Get data_plane - required
+    try:
+        data_plane = DataPlane.objects.get(id=data_plane_id)
+    except DataPlane.DoesNotExist:
+        logger.exception(
+            "release_gateway_by_etcd: publish_id=%s, data_plane_id=%s, can't find data_plane",
+            publish_id,
+            data_plane_id,
+        )
         return None
 
     # 改成了延迟更新发布关联数据，这里的 release 数据需要用 release_history 相关的数据来获取
@@ -97,16 +109,17 @@ def release_gateway_by_registry(publish_id):
         comment=release_history.comment,
         username=release_history.created_by,
     )
+
     procedure_logger = ReleaseProcedureLogger(
-        "release_gateway_by_etcd",
+        f"release_gateway_by_etcd (data_plane={data_plane.name})",
         logger=logger,
         gateway=release.gateway,
         stage=release.stage,
-        release_task_id=publish_id,
+        release_task_id=str(publish_id),
         publish_id=publish_id,
     )
     return _release_gateway(
-        distributor=GatewayResourceDistributor(release),
+        distributor=GatewayResourceDistributor(release, data_plane=data_plane),
         release_history=release_history,
         procedure_logger=procedure_logger,
     )
@@ -178,6 +191,12 @@ def update_release_data_after_success(
         )
         return
 
+    # at this point, the release is published to one data_plane successfully
+    # its'ok to update the release and stage status here
+    # - release risk: the resource_version is not the newest if two data_plane with different resource_version?
+    # - stage risk: no risk
+
+    # NOTE: here would update the release object each data_plane release
     # update release
     release.resource_version = resource_version
     release.comment = comment
@@ -198,7 +217,7 @@ def update_release_data_after_success(
         resource_version.id,
     )
     ReleasedResourceDoc.objects.save_released_resource_doc(resource_doc_version)
-    ResourceDocVersionHandler().clear_unreleased_resource_doc(release.gateway.id)
+    clear_unreleased_resource_doc(release.gateway.id)
 
     # update the mcp_server related resource_names
     update_stage_mcp_server_related_resource_names(

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,9 +22,8 @@ from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
 
-from apigateway.biz.esb.decorators import check_board_exist
-from apigateway.biz.esb.sdk.models import DocTemplates, DummySDKDocContext, SDKDocContext
-from apigateway.biz.esb.sdk.sdk_factory import ESBSDKFetcher
+from apigateway.biz.esb import check_board_exist
+from apigateway.biz.esb.sdk import DocTemplates, DummySDKDocContext, ESBSDKFetcher, SDKDocContext
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
 from apigateway.utils.responses import OKJsonResponse

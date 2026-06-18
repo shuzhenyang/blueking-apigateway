@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) 2026 Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -17,17 +17,18 @@
  */
 
 <template>
-  <div class="page-content">
+  <div class="mcp-tool-wrapper">
     <BkResizeLayout
       :border="false"
       :max="400"
-      :min="293"
-      initial-divide="293px"
+      initial-divide="234px"
       placement="left"
+      collapsible
+      @collapse-change="handleToolCollapseChange"
     >
       <!--  左栏，API 列表  -->
       <template #aside>
-        <div class="left-aside-wrap">
+        <div :class="`${toolCollapseMargin} left-aside-wrap`">
           <!--  筛选器  -->
           <header class="left-aside-header">
             <header class="title">
@@ -121,10 +122,7 @@
       </template>
       <!--  中间栏，当前 API 文档内容  -->
       <template #main>
-        <div
-          class="main-content-wrap"
-          :style="{ height: setMainMaxH }"
-        >
+        <div class="main-content-wrap">
           <template v-if="selectedTool">
             <header class="tool-name">
               <div
@@ -152,29 +150,29 @@
                 {{ t('查看文档详情') }}
               </BkButton>
             </header>
-            <div class="pl-40px pr-40px mb-16px">
-              <AgDescription class="color-#979ba5 break-all gap-4px">
-                <template #description>
-                  {{ selectedTool?.description }}
-                </template>
-              </AgDescription>
-            </div>
             <article class="tool-basics">
-              <section class="basic-cell">
-                <span>
-                  <span class="label">{{ t('更新时间') }}</span>：
-                  {{ updatedTime || '--' }}
-                </span>
-              </section>
-              <section class="basic-cell">
+              <section class="mb-8px basic-cell">
                 <span>
                   <span
                     v-bk-tooltips="t('应用访问该网关API时，是否需提供应用认证信息')"
                     class="label"
                   >
                     {{ t('应用认证') }}
-                  </span>：
+                  </span>
+                  <span class="colon">:</span>
                   {{ selectedTool?.verified_app_required ? t('是') : t('否') }}
+                </span>
+              </section>
+              <section class="mb-8px basic-cell">
+                <span>
+                  <span
+                    v-bk-tooltips="t('应用访问该网关API时，是否需要提供用户认证信息')"
+                    class="label"
+                  >
+                    {{ t('用户认证') }}
+                  </span>
+                  <span class="colon">:</span>
+                  {{ selectedTool?.verified_user_required ? t('是') : t('否') }}
                 </span>
               </section>
               <section class="basic-cell">
@@ -184,22 +182,36 @@
                     class="label"
                   >
                     {{ t('权限申请') }}
-                  </span>：
+                  </span>
+                  <span class="colon">:</span>
                   {{ selectedTool?.allow_apply_permission ? t('是') : t('否') }}
                 </span>
               </section>
               <section class="basic-cell">
                 <span>
-                  <span
-                    v-bk-tooltips="t('应用访问该网关API时，是否需要提供用户认证信息')"
-                    class="label"
-                  >
-                    {{ t('用户认证') }}
-                  </span>：
-                  {{ selectedTool?.verified_user_required ? t('是') : t('否') }}
+                  <span class="label">
+                    {{ t('更新时间') }}
+                  </span>
+                  <span class="colon">:</span>
+                  {{ updatedTime || '--' }}
                 </span>
               </section>
             </article>
+            <div class="pl-24px pr-24px mb-16px! text-14px">
+              <div class="color-#4d4f56 font-700 mb-16px">
+                {{ t('描述') }}
+              </div>
+              <AgDescription
+                ref="descriptionRef"
+                class="color-#4d4f56 break-all gap-4px"
+                :max-lines="5"
+                :line-height="'22px'"
+              >
+                <template #description>
+                  {{ selectedTool?.description }}
+                </template>
+              </AgDescription>
+            </div>
           </template>
           <!--  API markdown 文档  -->
           <article class="tool-detail-content">
@@ -242,7 +254,7 @@
 </template>
 
 <script lang="ts" setup>
-import TableEmpty from '@/components/table-empty/Index.vue';
+import { truncate } from 'lodash-es';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
 import { useRouteParams } from '@vueuse/router';
 import { useFeatureFlag, useGateway } from '@/stores';
@@ -252,6 +264,7 @@ import {
   getServerToolDoc,
   getServerTools,
 } from '@/services/source/mcp-server';
+import type { IMCPServerToolOutput } from '@/services/types/responses/gateways.ts';
 import { getMcpServerToolDoc } from '@/services/source/mcp-market';
 import { copy } from '@/utils';
 import MarkdownIt from 'markdown-it';
@@ -260,7 +273,7 @@ import AgIcon from '@/components/ag-icon/Index.vue';
 import ResponseParams from '@/views/resource-management/components/response-params/Index.vue';
 import RequestParams from '@/views/resource-management/components/request-params/Index.vue';
 import AgDescription from '@/components/ag-description/Index.vue';
-import { truncate } from 'lodash-es';
+import TableEmpty from '@/components/table-empty/Index.vue';
 
 type MCPServerType = Awaited<ReturnType<typeof getServer>>;
 
@@ -301,29 +314,31 @@ const md = new MarkdownIt({
   },
 });
 
-const toolList = ref<IMCPServerTool[]>([]);
+const descriptionRef = ref<InstanceType<typeof AgDescription> | null>(null);
+const toolList = ref<IMCPServerToolOutput[]>([]);
 const keyword = ref(''); // 筛选器输入框的搜索关键字
 const activeGroupPanelNames = ref<string[]>([]); // 分类 collapse 展开的 panel
-const selectedTool = ref<IMCPServerTool | null>(null); // 当前选中的 tool
+const selectedTool = ref<IMCPServerToolOutput | null>(null); // 当前选中的 tool
 const selectedToolName = ref('');
 const selectedToolMarkdownHtml = ref('');
 const selectedToolSchema = ref();
 const updatedTime = ref<string | null>(null);
 const isLoading = ref(false);
+const toolCollapseMargin = ref('');
 
 const filteredToolList = computed(() => {
   const regex = new RegExp(keyword.value, 'i');
-  return toolList.value.filter((tool) => {
+  return toolList.value.filter((tool: any) => {
     const searchName = tool.tool_name || tool.name;
     return regex.test(searchName) || regex.test(tool.description);
   });
 });
 // tool 分类列表
 const toolGroupList = computed(() => {
-  return filteredToolList.value?.reduce((groupList, tool) => {
+  return filteredToolList.value?.reduce((groupList: any, tool: any) => {
     if (tool.labels[0]) {
       const { id, name } = tool.labels[0];
-      const group = groupList.find(item => item.id === id);
+      const group = groupList.find((item: any) => item.id === id);
       if (group) {
         group.toolList.push(tool);
       }
@@ -336,7 +351,7 @@ const toolGroupList = computed(() => {
       }
     }
     else {
-      const group = groupList.find(item => item.id === 0);
+      const group = groupList.find((item: any) => item.id === 0);
       if (group) {
         group.toolList.push(tool);
       }
@@ -353,7 +368,7 @@ const toolGroupList = computed(() => {
   }, [] as {
     id: number
     name: string
-    toolList: typeof toolList.value
+    toolList: any[]
   }[]);
 });
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
@@ -361,24 +376,18 @@ const setSideMaxH = computed(() => {
   if (page === 'market') {
     return '100%';
   }
-  const offsetH = isShowNoticeAlert.value ? 516 : 476;
-  return `calc(100vh - ${offsetH}px)`;
-});
-const setMainMaxH = computed(() => {
-  if (page === 'market') {
-    return '100%';
-  }
-  const offsetH = isShowNoticeAlert.value ? 410 : 370;
+  const offsetH = isShowNoticeAlert.value ? 530 : 490;
   return `calc(100vh - ${offsetH}px)`;
 });
 
-watch(() => server, () => {
+// 这里初始化、或者修改别名的时候触发监听
+watch(() => [server?.id, server?.name], () => {
   fetchToolList();
-}, { deep: true });
+});
 
 // 分类列表变化时更新 collapse 展开状态
 watch(toolGroupList, () => {
-  activeGroupPanelNames.value = toolGroupList.value.map(item => item.name);
+  activeGroupPanelNames.value = toolGroupList.value.map((item: any) => item.name);
 });
 
 watch(selectedToolMarkdownHtml, () => {
@@ -406,7 +415,7 @@ const fetchToolList = async () => {
       selectedToolName.value = route.query.tool_name as string;
     }
     if (selectedToolName.value) {
-      selectedTool.value = toolList.value.find(tool => tool.name === selectedToolName.value) ?? null;
+      selectedTool.value = toolList.value.find((tool: any) => tool.name === selectedToolName.value) ?? null;
     }
     else {
       selectedTool.value = toolList.value[0] ?? null;
@@ -427,7 +436,7 @@ const handleToolClick = async (resId: number, toolName: string) => {
   try {
     isLoading.value = true;
     selectedToolName.value = toolName;
-    selectedTool.value = toolList.value.find(tool => tool.name === selectedToolName.value) ?? null;
+    selectedTool.value = toolList.value.find((tool: any) => tool.name === selectedToolName.value) ?? null;
     if (selectedTool.value) {
       await getDoc();
     }
@@ -452,10 +461,10 @@ const getDoc = async () => {
 
     let res: any = {};
     if (page === 'market') {
-      res = await getMcpServerToolDoc(server.id, selectedTool.value.name);
+      res = await getMcpServerToolDoc(server.id, selectedTool.value!.name);
     }
     else {
-      res = await getServerToolDoc(gatewayId.value, server.id, selectedTool.value.name);
+      res = await getServerToolDoc(gatewayId.value, server.id, selectedTool.value!.name);
     }
 
     const { content, updated_time, schema } = res;
@@ -484,9 +493,9 @@ const initMarkdownHtml = (box: string) => {
       btn.className = 'ag-copy-btn';
       codeBox.className = 'code-box';
       btn.innerHTML = '<span title="复制"><i class="apigateway-icon icon-ag-copy-info"></i></span>';
-      btn.setAttribute('data-copy', code);
+      btn.setAttribute('data-copy', code!);
       parentDiv?.appendChild(btn);
-      codeBox?.appendChild(item?.querySelector('code'));
+      codeBox?.appendChild(item?.querySelector('code') as Node);
       item?.appendChild(codeBox);
       item?.parentNode?.replaceChild(parentDiv, item);
       parentDiv?.appendChild(item);
@@ -518,18 +527,28 @@ const handleNavDocDetail = () => {
     name: 'ApiDocDetail',
     params: {
       curTab: 'gateway',
-      targetName: gatewayStore?.currentGateway?.name || server?.gateway?.name || '',
+      targetName: gatewayStore?.currentGateway?.name || (server as any)?.gateway?.name || '',
     },
-    query: { apiName: selectedTool.value.name },
+    query: { apiName: selectedTool.value!.name },
   });
   window.open(routeData.href, '_blank');
+};
+
+const handleToolCollapseChange = (isCollapse: boolean) => {
+  if (isCollapse) {
+    toolCollapseMargin.value = 'hidden mt-0';
+  }
+  else {
+    toolCollapseMargin.value = 'mt-16px';
+  }
+  descriptionRef.value?.updateCheckOverflow();
 };
 
 const handleToolMouseenter = (e: MouseEvent, row: IMCPServerTool) => {
   const cell = (e.target as HTMLElement).closest('.truncate');
   if (cell) {
-    row.isOverflow = cell.scrollWidth > cell.offsetWidth;
-  };
+    row.isOverflow = (cell as HTMLElement).scrollWidth > (cell as HTMLElement).offsetWidth;
+  }
 };
 
 const handleToolMouseleave = (row: IMCPServerTool) => {
@@ -549,18 +568,17 @@ $primary-color: #3a84ff;
 $code-bc: #f6f8fa;
 $code-color: #63656e;
 
-.page-content {
-  display: flex;
+.mcp-tool-wrapper {
+  flex: 1;
   height: 100%;
   box-shadow: 0 2px 4px 0 #1919290d;
 
   .left-aside-wrap {
     width: auto;
-    min-width: 290px;
     height: 100%;
-    background-color: #ffffff;
+    min-width: 230px;
+    background-color: #fff;
     border-radius: 2px;
-    box-shadow: 0 2px 4px 0 #1919290d;
 
     .left-aside-header {
       padding: 24px 16px;
@@ -674,12 +692,12 @@ $code-color: #63656e;
 
   .main-content-wrap {
     overflow-y: auto;
-    background-color: #ffffff;
+    background-color: #fff;
 
     .tool-name,
     .tool-basics,
     .tool-detail-content {
-      padding: 24px 24px 24px 40px;
+      margin: 24px;
       background-color: #fff;
       border-radius: 2px;
     }
@@ -690,7 +708,6 @@ $code-color: #63656e;
       gap: 6px;
 
       .name {
-        max-width: 660px;
         font-size: 16px;
         font-weight: 700;
         line-height: 22px;
@@ -699,30 +716,35 @@ $code-color: #63656e;
     }
 
     .tool-basics {
-      padding-block: 0;
       display: grid;
-      grid-template-columns: 280px 280px;
-      grid-template-rows: 40px 40px;
+      grid-template-columns: 264px 264px;
+      padding-block: 12px;
+      background-color: #f5f7fa;
 
       @container (width < 640px) {
         padding-block: 12px;
         grid-template-columns: 1fr;
-        grid-template-rows: 40px 40px 40px 40px;
       }
 
       .basic-cell {
         display: flex;
+        padding: 0 12px;
+        font-size: 12px;
+        line-height: 20px;
+        color: #63656e;
         align-items: center;
-        line-height: 22px;
-        color: #313238;
 
         .label {
-          font-size: 14px;
-          color: #63656e;
+          color: #979ba5;
           border-bottom: 1px dashed #979ba5;
         }
 
-        &:first-of-type .label {
+        .colon {
+          margin: 0 2px;
+          color: #979ba5;
+        }
+
+        &:last-of-type .label {
           border: none;
         }
       }
@@ -943,11 +965,11 @@ $code-color: #63656e;
 
     .title {
       padding: 0;
-      margin: 25px 0 10px;
-      font-size: 16px;
-      font-weight: bold;
+      margin: 25px 0 17px;
+      font-size: 14px;
+      font-weight: 700;
       line-height: 22px;
-      color: #313238;
+      color: #4d4f56;
       text-align: left;
     }
   }

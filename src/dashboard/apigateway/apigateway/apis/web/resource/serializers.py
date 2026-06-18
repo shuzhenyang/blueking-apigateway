@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -34,11 +34,12 @@ from apigateway.apis.web.resource.validators import (
 from apigateway.apps.plugin.models import PluginConfig
 from apigateway.apps.support.constants import DocLanguageEnum, OpenAPIFormatEnum
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND
-from apigateway.biz.gateway import GatewayHandler, GatewayLabelHandler
+from apigateway.biz.gateway import GatewayLabelHandler
 from apigateway.biz.resource import ResourceHandler
 from apigateway.biz.validators import MaxCountPerGatewayValidator
 from apigateway.common.django.validators import NameValidator
 from apigateway.common.fields import CurrentGatewayDefault
+from apigateway.common.gateway_limits import get_max_resource_count
 from apigateway.core.constants import HTTP_METHOD_ANY, RESOURCE_METHOD_CHOICES
 from apigateway.core.models import Backend, Gateway, Resource
 from apigateway.core.utils import get_path_display
@@ -304,7 +305,7 @@ class ResourceInputSLZ(serializers.ModelSerializer):
         validators = [
             MaxCountPerGatewayValidator(
                 Resource,
-                max_count_callback=lambda gateway: GatewayHandler.get_max_resource_count(gateway.name),
+                max_count_callback=lambda gateway: get_max_resource_count(gateway.name),
                 message=gettext_lazy("每个网关最多创建 {max_count} 个资源。"),
             ),
             UniqueTogetherValidator(
@@ -408,6 +409,7 @@ class ResourceOutputSLZ(serializers.ModelSerializer):
     backend = serializers.SerializerMethodField(help_text="后端服务")
     labels = serializers.SerializerMethodField(help_text="标签列表")
     schema = serializers.SerializerMethodField(help_text="参数协议")
+    released_stages = serializers.SerializerMethodField(help_text="已使用的环境列表")
 
     class Meta:
         ref_name = "apigateway.apis.web.resource.serializers.ResourceOutputSLZ"
@@ -427,6 +429,7 @@ class ResourceOutputSLZ(serializers.ModelSerializer):
             "backend",
             "labels",
             "schema",
+            "released_stages",
         ]
         read_only_fields = fields
 
@@ -482,6 +485,9 @@ class ResourceOutputSLZ(serializers.ModelSerializer):
         # 填充路径参数
         parameters = extract_openapi_parameters_from_path(obj.path)
         return {"parameters": parameters}
+
+    def get_released_stages(self, obj):
+        return self.context.get("released_stages", [])
 
 
 class ResourceBatchUpdateInputSLZ(serializers.Serializer):

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -29,7 +29,7 @@
         <div class="params-header">
           <div class="params-header-title">
             <AgIcon
-              name="angle-up-fill"
+              name="down-shape"
               class="params-header-fold"
               :class="[activeIndex?.includes(1) ? '' : 'fold']"
             />
@@ -52,7 +52,7 @@
         <div class="params-header">
           <div class="params-header-title">
             <AgIcon
-              name="angle-up-fill"
+              name="down-shape"
               class="params-header-fold"
               :class="[activeIndex?.includes(2) ? '' : 'fold']"
             />
@@ -103,17 +103,17 @@ const pathList = ref<any[]>([]);
 const activeIndex = ref<number[]>([1]);
 
 watch(
-  () => [queryPayload, pathPayload, priorityPath],
+  () => [queryPayload, pathPayload, priorityPath] as const,
   ([v1, v2, v3]) => {
-    queryList.value = v1;
-    pathList.value = v3?.length ? v3 : v2;
+    queryList.value = v1 as any[];
+    pathList.value = (v3 as any[])?.length ? v3 as any[] : v2 as any[];
   },
   { deep: true },
 );
 
 watch(
   () => pathList.value,
-  (value) => {
+  (value: any) => {
     if (value?.length && value[0]?.name) {
       activeIndex.value = [1, 2];
     }

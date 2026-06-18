@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -26,6 +26,7 @@ from apigateway.apps.plugin.models import PluginType
 from apigateway.biz.backend import BackendHandler
 from apigateway.biz.plugin import PluginBindingHandler
 from apigateway.core.models import Gateway, ResourceVersion
+from apigateway.service.backend import get_backend_id_to_instance
 
 
 class TestResourceVersionInfoSLZ:
@@ -97,6 +98,7 @@ class TestResourceVersionListOutputSLZ:
                 ],
                 "created_by": "x",
                 "created_time": "2019-01-01 20:30:00",
+                "deletable": False,
             },
         ]
 
@@ -108,7 +110,7 @@ class TestResourceVersionRetrieveOutputSLZ:
         slz = serializers.ResourceVersionRetrieveOutputSLZ(
             instance=fake_resource_version_v1,
             context={
-                "resource_backends": BackendHandler.get_id_to_instance(fake_gateway.id),
+                "resource_backends": get_backend_id_to_instance(fake_gateway.id),
                 "resource_backend_configs": BackendHandler.get_backend_configs_by_stage(
                     fake_gateway.id, fake_stage.id
                 ),
@@ -176,7 +178,7 @@ class TestResourceVersionRetrieveOutputSLZ:
         slz = serializers.ResourceVersionRetrieveOutputSLZ(
             instance=fake_resource_version_v2,
             context={
-                "resource_backends": BackendHandler.get_id_to_instance(fake_gateway.id),
+                "resource_backends": get_backend_id_to_instance(fake_gateway.id),
                 "resource_backend_configs": BackendHandler.get_backend_configs_by_stage(
                     fake_gateway.id, fake_stage.id
                 ),
@@ -260,7 +262,7 @@ class TestResourceVersionRetrieveOutputSLZ:
         slz = serializers.ResourceVersionRetrieveOutputSLZ(
             instance=fake_resource_version_v2,
             context={
-                "resource_backends": BackendHandler.get_id_to_instance(fake_gateway.id),
+                "resource_backends": get_backend_id_to_instance(fake_gateway.id),
                 "resource_backend_configs": BackendHandler.get_backend_configs_by_stage(
                     fake_gateway.id, fake_stage.id
                 ),
@@ -315,7 +317,7 @@ class TestResourceVersionRetrieveOutputSLZ:
         slz = serializers.ResourceVersionRetrieveOutputSLZ(
             instance=fake_resource_version_v2,
             context={
-                "resource_backends": BackendHandler.get_id_to_instance(fake_gateway.id),
+                "resource_backends": get_backend_id_to_instance(fake_gateway.id),
                 "resource_backend_configs": BackendHandler.get_backend_configs_by_stage(
                     fake_gateway.id, fake_stage.id
                 ),
@@ -353,7 +355,7 @@ class TestResourceVersionRetrieveOutputSLZ:
         slz = serializers.ResourceVersionRetrieveOutputSLZ(
             instance=fake_resource_version_v2,
             context={
-                "resource_backends": BackendHandler.get_id_to_instance(fake_gateway.id),
+                "resource_backends": get_backend_id_to_instance(fake_gateway.id),
                 "resource_backend_configs": BackendHandler.get_backend_configs_by_stage(
                     fake_gateway.id, fake_stage.id
                 ),

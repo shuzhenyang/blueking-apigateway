@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,11 +18,19 @@
 #
 import json
 import operator
+import re
 
 from django.utils.translation import gettext as _
 from rest_framework import serializers
 
-from apigateway.apps.monitor.constants import DETECT_METHOD_CHOICES, AlarmStatusEnum, NoticeRoleEnum, NoticeWayEnum
+from apigateway.apps.monitor.constants import (
+    DETECT_METHOD_CHOICES,
+    AlarmFilterMatchMethodEnum,
+    AlarmFilterTypeEnum,
+    AlarmStatusEnum,
+    NoticeRoleEnum,
+    NoticeWayEnum,
+)
 from apigateway.apps.monitor.models import AlarmRecord, AlarmStrategy
 from apigateway.biz.gateway import GatewayLabelHandler
 from apigateway.common.fields import CurrentGatewayDefault, TimestampField
@@ -70,10 +78,31 @@ class NoticeConfigSLZ(serializers.Serializer):
         ref_name = "apigateway.apis.web.monitor.serializers.NoticeConfigSLZ"
 
 
+class FilterConfigSLZ(serializers.Serializer):
+    type = serializers.ChoiceField(choices=AlarmFilterTypeEnum.get_choices(), help_text="过滤类型")
+    match = serializers.ChoiceField(choices=AlarmFilterMatchMethodEnum.get_choices(), help_text="匹配方式")
+    items = serializers.ListField(child=serializers.CharField(), allow_empty=True, help_text="匹配项列表")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.monitor.serializers.FilterConfigSLZ"
+
+    def validate(self, data):
+        if data.get("match") == AlarmFilterMatchMethodEnum.REGEX_MATCH.value:
+            for item in data.get("items", []):
+                try:
+                    re.compile(item)
+                except re.error as e:
+                    raise serializers.ValidationError(
+                        _("匹配项 '{item}' 不是合法的正则表达式: {error}").format(item=item, error=str(e))
+                    )
+        return data
+
+
 class AlarmStrategyConfigSLZ(serializers.Serializer):
     detect_config = DetectConfigSLZ(help_text="检测配置")
     converge_config = ConvergeConfigSLZ(help_text="收敛配置")
     notice_config = NoticeConfigSLZ(help_text="通知配置")
+    filter_config = FilterConfigSLZ(help_text="过滤配置", required=False, allow_null=True, default=None)
 
     class Meta:
         ref_name = "apigateway.apis.web.monitor.serializers.AlarmStrategyConfigSLZ"
@@ -152,7 +181,10 @@ class AlarmStrategyListOutputSLZ(serializers.ModelSerializer):
         lookup_field = "id"
 
     def get_gateway_labels(self, obj):
-        return sorted(obj.api_labels.values("id", "name"), key=operator.itemgetter("name"))
+        return sorted(
+            [{"id": label.id, "name": label.name} for label in obj.api_labels.all()],
+            key=operator.itemgetter("name"),
+        )
 
 
 class AlarmStrategyUpdateStatusInputSLZ(serializers.ModelSerializer):
@@ -195,7 +227,7 @@ class AlarmRecordQueryOutputSLZ(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_alarm_strategy_names(self, obj):
-        return sorted(obj.alarm_strategies.values_list("name", flat=True))
+        return sorted(strategy.name for strategy in obj.alarm_strategies.all())
 
 
 class AlarmStrategyQueryInputSLZ(serializers.Serializer):
@@ -210,32 +242,3 @@ class AlarmStrategyQueryInputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.monitor.serializers.AlarmStrategyQueryInputSLZ"
-
-
-class AlarmRecordSummaryQueryInputSLZ(serializers.Serializer):
-    time_start = TimestampField(allow_null=True, required=False, help_text="开始时间")
-    time_end = TimestampField(allow_null=True, required=False, help_text="结束时间")
-
-    class Meta:
-        ref_name = "apigateway.apis.web.monitor.serializers.AlarmRecordSummaryQueryInputSLZ"
-
-
-class AlarmStrategySummaryQuerySLZ(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True, help_text="策略 id")
-    name = serializers.CharField(read_only=True, help_text="策略名称")
-    alarm_record_count = serializers.IntegerField(read_only=True, help_text="告警记录总数")
-    latest_alarm_record = serializers.DictField(read_only=True, help_text="最新告警记录")
-
-    class Meta:
-        ref_name = "apigateway.apis.web.monitor.serializers.AlarmStrategySummaryQuerySLZ"
-
-
-class AlarmRecordSummaryQueryOutputSLZ(serializers.Serializer):
-    gateway = serializers.DictField(read_only=True, help_text="网关")
-    alarm_record_count = serializers.IntegerField(read_only=True, help_text="告警记录总数")
-    strategy_summary = serializers.ListField(
-        child=AlarmStrategySummaryQuerySLZ(), read_only=True, help_text="策略汇总"
-    )
-
-    class Meta:
-        ref_name = "apigateway.apis.web.monitor.serializers.AlarmRecordSummaryQueryOutputSLZ"

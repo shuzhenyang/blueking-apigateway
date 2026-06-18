@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -58,16 +58,16 @@ type TestClient struct {
 
 // MCPRequest MCP 请求结构
 type MCPRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
+	JSONRPC string `json:"jsonrpc"`
+	ID      any    `json:"id"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
 }
 
 // MCPResponse MCP 响应结构
 type MCPResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id"`
+	ID      any             `json:"id"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *MCPError       `json:"error,omitempty"`
 }
@@ -103,9 +103,9 @@ type PromptInfo struct {
 
 // InitializeResult initialize 响应结果
 type InitializeResult struct {
-	ProtocolVersion string                 `json:"protocolVersion"`
-	ServerInfo      map[string]interface{} `json:"serverInfo"`
-	Capabilities    map[string]interface{} `json:"capabilities"`
+	ProtocolVersion string         `json:"protocolVersion"`
+	ServerInfo      map[string]any `json:"serverInfo"`
+	Capabilities    map[string]any `json:"capabilities"`
 }
 
 // CustomClaims JWT claims

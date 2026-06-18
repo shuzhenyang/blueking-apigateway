@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -94,15 +94,19 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     title: t('SDK 版本号'),
     colKey: 'version_number',
+    ellipsis: true,
   },
   {
     title: t('SDK 名称'),
     colKey: 'name',
+    width: 200,
+    ellipsis: true,
   },
   {
     title: t('资源版本'),
     colKey: 'resource_version',
-    cell: (h, { row }) => (
+    ellipsis: true,
+    cell: (h: any, { row }: any) => (
       <bk-button
         text
         theme="primary"
@@ -119,7 +123,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     title: t('创建人'),
     colKey: 'created_by',
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: any) => (
       <div>
         {
           !featureFlagStore.isEnableDisplayName
@@ -146,11 +150,14 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     title: t('生成时间'),
     colKey: 'created_time',
+    width: 180,
+    ellipsis: true,
   },
   {
     title: t('操作'),
     colKey: 'operate',
-    cell: (h, { row }) => {
+    width: 160,
+    cell: (h: any, { row }: any) => {
       return (
         <div class="flex gap-10px">
           <bk-button

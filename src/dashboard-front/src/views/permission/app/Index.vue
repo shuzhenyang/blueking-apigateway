@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -17,7 +17,7 @@
  */
 <template>
   <div class="permission-app-container page-wrapper-padding">
-    <div class="flex justify-between header">
+    <div class="flex justify-between">
       <div class="flex items-center header-btn">
         <BkButton
           v-bk-tooltips="{
@@ -54,6 +54,7 @@
             :key="componentKey"
             v-model="filterValues"
             :data="filterConditions"
+            :validate-values="validateSearchSelect"
             :placeholder="t('搜索')"
             :value-split-code="'+'"
             clearable
@@ -65,7 +66,7 @@
       </BkForm>
     </div>
 
-    <div class="mt-16px app-content">
+    <div class="mt-24px app-content">
       <AgTable
         ref="tableRef"
         v-model:table-data="tableData"
@@ -123,14 +124,12 @@
 <script lang="tsx" setup>
 import { cloneDeep } from 'lodash-es';
 import { Button, Message } from 'bkui-vue';
-import { type ISearchItem } from 'bkui-lib/search-select/utils';
-import type { FilterValue, PrimaryTableProps } from '@blueking/tdesign-ui';
+import { type ISearchItem, type ISearchValue } from 'bkui-vue/lib/search-select/utils.d';
+import type { IGatewaysResourcesListQuery } from '@/services/types/query/gateways';
 import { useTableFilterChange } from '@/hooks/use-table-filter-change';
 import {
   type IAuthData,
-  type IBatchUpdateParams,
   type IExportParams,
-  type IFilterParams,
   batchUpdatePermission,
   deleteApiPermission,
   deleteResourcePermission,
@@ -139,10 +138,11 @@ import {
   getResourceListData,
   getResourcePermissionAppList,
 } from '@/services/source/permission';
-import { useGateway, usePermission } from '@/stores';
+import { useFeatureFlag, useGateway, usePermission } from '@/stores';
 import type { IDropList, ITableMethod } from '@/types/common';
-import { IFilterValues, IPermission, IResource } from '@/types/permission';
+import type { IPermission, IResource } from '@/types/permission';
 import { sortByKey } from '@/utils';
+import { GRANT_DIMENSION_TYPE_LIST } from '@/constants';
 import ProactiveAuthorization from '@/views/permission/app/components/ProactiveAuthorization.vue';
 import RenewalDialog from '@/views/permission/app/components/Renewal.vue';
 import BatchRenewal from '@/views/permission/app/components/BatchRenewal.vue';
@@ -153,19 +153,22 @@ const { t } = useI18n();
 const { handleTableFilterChange } = useTableFilterChange();
 const gatewayStore = useGateway();
 const permissionStore = usePermission();
+const featureFlagStore = useFeatureFlag();
 
 const tableRef = useTemplateRef<InstanceType<typeof AgTable> & ITableMethod>('tableRef');
-const tableColumns = shallowRef<PrimaryTableProps['columns']>([
+const tableColumns = shallowRef<any[]>([
   {
     title: t('蓝鲸应用ID'),
     colKey: 'bk_app_code',
     ellipsis: true,
+    width: 200,
   },
   {
     title: t('授权维度'),
     colKey: 'grant_dimension',
     ellipsis: true,
-    cell: (h, { row }: { row: IPermission }) => {
+    width: 120,
+    cell: (h: any, { row }: { row: IPermission }) => {
       return (
         <span class="ag-auto-text">
           { getSearchDimensionText(row.grant_dimension) }
@@ -176,25 +179,17 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
       type: 'single',
       showConfirmAndReset: true,
       popupProps: { overlayInnerClassName: 'custom-radio-filter-wrapper' },
-      list: [
-        {
-          label: t('按网关'),
-          value: 'api',
-        },
-        {
-          label: t('按资源'),
-          value: 'resource',
-        },
-      ],
+      list: GRANT_DIMENSION_TYPE_LIST,
     },
   },
   {
     title: t('资源名称'),
     colKey: 'resource_name',
     ellipsis: true,
-    cell: (h, { row }: { row: IPermission }) => {
+    cell: (h: any, { row }: { row: IPermission }) => {
+      const data = row as IPermission;
       return (
-        <span>{ row.resource_name || '--' }</span>
+        <span>{ data.resource_name || '--' }</span>
       );
     },
   },
@@ -202,9 +197,10 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('请求路径'),
     colKey: 'resource_path',
     ellipsis: true,
-    cell: (h, { row }: { row: IPermission }) => {
+    cell: (h: any, { row }: { row: IPermission }) => {
+      const data = row as IPermission;
       return (
-        <span>{ row.resource_path || '--' }</span>
+        <span>{ data.resource_path || '--' }</span>
       );
     },
   },
@@ -212,10 +208,12 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('有效期'),
     colKey: 'expires',
     ellipsis: true,
-    cell: (h, { row }: { row: IPermission }) => {
+    width: 100,
+    cell: (h: any, { row }: { row: IPermission }) => {
+      const data = row as IPermission;
       return (
-        <span style={{ color: permissionStore.getDurationTextColor(row.expires) }}>
-          { permissionStore.getDurationText(row.expires) }
+        <span style={{ color: permissionStore.getDurationTextColor(data.expires) }}>
+          { permissionStore.getDurationText(data.expires) }
         </span>
       );
     },
@@ -224,11 +222,27 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('授权类型'),
     colKey: 'grant_type',
     ellipsis: true,
-    cell: (h, { row }: { row: IPermission }) => {
+    width: 120,
+    cell: (h: any, { row }: { row: IPermission }) => {
+      const data = row as IPermission;
       return (
         <span>
-          { t(['initialize'].includes(row.grant_type) ? '主动授权' : '申请审批') }
+          { t(['initialize'].includes(data.grant_type) ? '主动授权' : '申请审批') }
         </span>
+      );
+    },
+  },
+  {
+    title: t('操作人'),
+    colKey: 'handled_by',
+    ellipsis: true,
+    width: 100,
+    cell: (h: any, { row }: { row: IPermission }) => {
+      const data = row as IPermission;
+      return (
+        !featureFlagStore.isEnableDisplayName
+          ? <span>{data.handled_by || '--'}</span>
+          : <span><bk-user-display-name user-id={data.handled_by} /></span>
       );
     },
   },
@@ -236,7 +250,8 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('操作'),
     colKey: 'operate',
     fixed: 'right',
-    cell: (h, { row }: { row: IPermission }) => {
+    width: 120,
+    cell: (h: any, { row }: { row: IPermission }) => {
       return (
         <div>
           <Button
@@ -265,12 +280,20 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     },
   },
 ]);
-const filterData = ref<IFilterParams>({});
+const filterData = ref<Record<string, string | string[]>>({});
 const resourceList = ref<IResource[]>([]);
-const curPermission = ref<Partial<IPermission>>({
-  bk_app_code: '',
-  detail: [],
+const curPermission = ref<IPermission>({
   id: -1,
+  bk_app_code: '',
+  resource_id: -1,
+  resource_name: '',
+  resource_path: '',
+  resource_method: '',
+  expires: '',
+  grant_dimension: '',
+  grant_type: '',
+  renewable: false,
+  detail: [],
 });
 const curSelections = ref<IPermission[]>([]);
 // 导出下拉
@@ -293,6 +316,7 @@ const exportDropData = ref<IDropList[]>([
 // 主动授权config
 const authSliderConf = reactive({
   isShow: false,
+  isLoading: false,
   title: t('主动授权'),
 });
 // 当前授权数据
@@ -326,7 +350,7 @@ const removeDialogConf = reactive({
 });
 // 导出参数
 const exportParams = ref<IExportParams>({ export_type: 'all' });
-const filterValues = ref<IFilterValues[]>([]);
+const filterValues = ref<ISearchValue[]>([]);
 const filterConditions = ref<ISearchItem[]>([
   {
     name: t('授权维度'),
@@ -342,12 +366,14 @@ const filterConditions = ref<ISearchItem[]>([
       },
     ],
     onlyRecommendChildren: true,
+    noValidate: true,
   },
   {
     name: t('蓝鲸应用ID'),
     id: 'bk_app_code',
     children: [],
     onlyRecommendChildren: true,
+    noValidate: true,
   },
   {
     name: t('资源名称'),
@@ -356,10 +382,12 @@ const filterConditions = ref<ISearchItem[]>([
   {
     name: t('请求路径'),
     id: 'resource_path',
+    noValidate: true,
   },
   {
     name: t('模糊搜索'),
     id: 'keyword',
+    noValidate: true,
   },
 ]);
 const tableData = ref([]);
@@ -367,16 +395,16 @@ const tableData = ref([]);
 const apigwId = computed(() => gatewayStore.apigwId);
 // 可续期的数量
 const applyCount = computed(() => {
-  return curSelections.value.filter((item: { renewable: boolean }) => item.renewable)
+  return curSelections.value.filter((item: IPermission) => item.renewable)
     .length;
 });
 // 资源维度权限列表
 const selectedResourcePermList = computed(() =>
-  curSelections.value.filter(perm => ['resource'].includes(perm.grant_dimension)),
+  curSelections.value.filter((perm: IPermission) => ['resource'].includes(perm.grant_dimension)),
 );
 // 网关维度权限列表
 const selectedApiPermList = computed(() =>
-  curSelections.value.filter(perm => ['api'].includes(perm.grant_dimension)),
+  curSelections.value.filter((perm: IPermission) => ['api'].includes(perm.grant_dimension)),
 );
 
 // 监听搜索是否变化
@@ -396,11 +424,11 @@ watch(
 // 处理表格复选框数据
 watch(
   curSelections,
-  (selection) => {
-    exportDropData.value.forEach((drop: IDropList) => {
+  (selection: IPermission[]) => {
+    exportDropData.value.forEach((val: IDropList) => {
       // 已选资源
-      if (['selected'].includes(drop.value)) {
-        drop.disabled = !selection.length;
+      if (['selected'].includes(val.value)) {
+        val.disabled = !selection.length;
       }
     });
   },
@@ -412,24 +440,24 @@ const getTableData = async (params: Record<string, any> = {}) => {
   return results ?? [];
 };
 
-const disabledSelection = (row) => {
+const disabledSelection = (row: any) => {
   row.selectionTip = row.renewable ? '' : t('权限有效期大于 360 天时，暂无法续期');
   return !row.renewable;
 };
 
 function getList() {
   tableRef.value?.fetchData(filterData.value, { resetPage: true });
-};
+}
 
 function handleSearch() {
   filterData.value = {};
   if (filterValues.value) {
     // 把纯文本搜索项转换成查询参数
-    const textItem = filterValues.value.find(val => val.type === 'text');
+    const textItem = filterValues.value.find((val: ISearchValue) => val.type === 'text');
     if (textItem) {
       filterData.value.keyword = textItem.name || '';
     }
-    filterValues.value.forEach((item) => {
+    filterValues.value.forEach((item: ISearchValue) => {
       if (item.values) {
         filterData.value[item.id] = item.values[0].id;
       }
@@ -444,13 +472,14 @@ function handleSearch() {
   getList();
 }
 
-const handleSelectionChange: PrimaryTableProps['onSelectChange'] = ({ selections }) => {
+// AgTable emit 类型已修复，无需 ts-expect-error
+const handleSelectionChange = ({ selections }: { selections: any[] }) => {
   isBatchRenewal.value = true;
-  curSelections.value = selections;
+  curSelections.value = selections as IPermission[];
 };
 
 // 处理表头筛选联动搜索框
-const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterItem: FilterValue) => {
+const handleFilterChange = (filterItem: any) => {
   handleTableFilterChange({
     filterItem,
     filterData,
@@ -461,35 +490,37 @@ const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filterItem: Fil
 };
 
 function handleClearSelection() {
-  tableRef.value.handleResetSelection();
+  tableRef.value?.handleResetSelection();
   curSelections.value = [];
   isBatchRenewal.value = false;
 };
 
 const getBkAppCodes = async () => {
   const appCodeOption = filterConditions.value.find(
-    condition => condition.id === 'bk_app_code',
+    (condition: ISearchItem) => condition.id === 'bk_app_code',
   );
   const response = ((await getResourcePermissionAppList(apigwId.value)) as string[]) || [];
-  appCodeOption.children = response.map(appCode => ({
-    id: appCode,
-    name: appCode,
-  }));
+  if (appCodeOption) {
+    appCodeOption.children = response.map(appCode => ({
+      id: appCode,
+      name: appCode,
+    }));
+  }
   componentKey.value += 1;
 };
 
 // 获取资源列表数据
 const getApigwResources = async () => {
-  const pageParams = {
+  const pageParams: IGatewaysResourcesListQuery = {
     limit: 3000,
     order_by: 'path',
   };
   const resourceIdOption = filterConditions.value.find(
-    condition => condition.id === 'resource_id',
+    (condition: ISearchItem) => condition.id === 'resource_id',
   );
   const response = await getResourceListData(apigwId.value, pageParams);
-  const resources: IResource[] = response.results || [];
-  const results = resources.map(resource => ({
+  const resources = response.results || [];
+  const results = resources.map((resource: any) => ({
     id: resource.id,
     name: resource.name,
     path: resource.path,
@@ -498,7 +529,7 @@ const getApigwResources = async () => {
   }));
   resourceList.value = sortByKey(results, 'name');
   if (resourceIdOption) {
-    resourceIdOption.children = resourceList.value.map(item => ({
+    resourceIdOption.children = resourceList.value.map((item: IResource) => ({
       id: String(item.id),
       name: item.name,
     }));
@@ -523,19 +554,19 @@ const handleExport = async () => {
 // 确定续期
 const handleBatchConfirm = async () => {
   batchApplySliderConf.saveLoading = true;
-  const data: IBatchUpdateParams = {
+  const data = {
     resource_dimension_ids: [] as number[],
     gateway_dimension_ids: [] as number[],
     expire_days: expireDays.value,
   };
   if (selectedResourcePermList.value.length > 0) {
     data.resource_dimension_ids = selectedResourcePermList.value.map(
-      permission => permission.id,
+      (permission: IPermission) => permission.id,
     );
   }
   if (selectedApiPermList.value.length > 0) {
     data.gateway_dimension_ids = selectedApiPermList.value.map(
-      permission => permission.id,
+      (permission: IPermission) => permission.id,
     );
   }
   try {
@@ -576,8 +607,8 @@ const handleRemove = (data: IPermission) => {
 // 删除权限
 const handleRemovePermission = async () => {
   const { id, grant_dimension } = curPermission.value;
-  const ids = [id];
-  const fetchMethod = ['resource'].includes(grant_dimension) ? deleteResourcePermission : deleteApiPermission;
+  const ids = [id!];
+  const fetchMethod = ['resource'].includes(grant_dimension ?? '') ? deleteResourcePermission : deleteApiPermission;
   await fetchMethod(apigwId.value, { ids });
   removeDialogConf.isShow = false;
   Message({
@@ -620,6 +651,30 @@ const init = () => {
   getApigwResources();
 };
 init();
+
+// 校验查询的资源名称，使用户只能从给出的资源选项中选择查询的 resource_id
+const validateSearchSelect = async (item: ISearchItem, values: {
+  id: string
+  name: string
+}[]) => {
+  if (item.id === 'resource_id') {
+    const resourceIdOption = filterConditions.value.find(
+      (condition: ISearchItem) => condition.id === 'resource_id',
+    );
+
+    if (resourceIdOption?.children) {
+      if (resourceIdOption.children.find(option => option.name === values[0].name)) {
+        return true;
+      }
+      else {
+        return t('请从选项中选择资源');
+      }
+    }
+    else {
+      return true;
+    }
+  }
+};
 </script>
 
 <style lang="scss" scoped>

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -42,7 +42,18 @@ export const useEnv = defineStore('useEnv', {
       BK_USER_WEB_API_URL: '',
       CREATE_CHAT_API: '',
       EDITION: '',
+      BK_SDK_LANGUAGES: [] as string[],
       SEND_CHAT_API: '',
+      CLI: {
+        DETAIL_URL: '',
+        USER_KEY: '',
+        USER_KEY_EXPIRE_DAYS: 0,
+        ACCESS_TOKEN_EXPIRE_DAYS: 0,
+        BK_API_URL_TMPL: '',
+        GIT_REPO_URL: '',
+        NPM_INSTALL_CMD: '',
+        SKILL_NPM_INSTALL_CMD: '',
+      },
       HELPER: {
         name: '',
         href: '',
@@ -106,6 +117,9 @@ export const useEnv = defineStore('useEnv', {
         PLUGIN_REQUEST_VALIDATION: '',
         PLUGIN_RESPONSE_REWRITE: '',
         PLUGIN_URI_BLOCKER: '',
+        PLUGIN_BK_OAUTH2_PROTECTED_RESOURCE: '',
+        PLUGIN_BK_OAUTH2_VERIFY: '',
+        PLUGIN_BK_OAUTH2_AUDIENCE_VALIDATE: '',
       },
     },
   }),

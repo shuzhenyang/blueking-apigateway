@@ -49,30 +49,33 @@
 
 <script lang="ts" setup>
 import { cloneDeep } from 'lodash-es';
-import i18n from '@/locales';
+import { t } from '@/locales';
+import type { ITableEmptyType } from '@/types/common';
 
 interface IProps {
-  emptyType?: 'empty' | 'search-empty' | 'searchEmpty' | 'refresh'
+  emptyType?: ITableEmptyType
   error?: Record<string, any> | null
   queryListParams?: any[]
+  noSearchFields?: string[]
   background?: string
+  description?: string
 }
 
 const {
   emptyType = 'empty',
   background = '#ffffff',
+  description = '',
   error = null,
   queryListParams = [],
+  noSearchFields = [],
 } = defineProps<IProps>();
 
 const emit = defineEmits<{
-  'clear-filter': void
-  'refresh': void
+  'clear-filter': []
+  'refresh': []
 }>();
 
-const { t } = i18n.global;
-
-const exceptionAttrs = computed(() => {
+const exceptionAttrs = computed<any>(() => {
   if (error || ['error'].includes(emptyType)) {
     return {
       type: 500,
@@ -81,10 +84,8 @@ const exceptionAttrs = computed(() => {
   }
 
   const queryParams = cloneDeep(queryListParams?.[0] ?? {});
-  delete queryParams.limit;
-  delete queryParams.offset;
   Object.keys(queryParams).forEach((key) => {
-    if ((typeof queryParams[key] === 'string' && !queryParams[key]) || ['offset', 'limit'].includes(key)) {
+    if ((typeof queryParams[key] === 'string' && !queryParams[key]) || ['offset', 'limit', ...noSearchFields].includes(key)) {
       delete queryParams[key];
     }
   });
@@ -92,12 +93,14 @@ const exceptionAttrs = computed(() => {
     return {
       type: 'search-empty',
       title: t('搜索结果为空'),
+      description,
     };
   }
 
   return {
     type: 'empty',
     title: t('暂无数据'),
+    description,
   };
 });
 

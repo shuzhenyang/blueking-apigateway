@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -58,8 +58,8 @@
         :labels-data="labelsData"
         :width="700"
         is-add
-        @update-success="init"
-        @label-add-success="handleLabelAddSuccess"
+        @updated="init"
+        @added="handleLabelAddSuccess"
       />
       <div v-else>
         <div
@@ -163,7 +163,7 @@ const formRef = ref(null);
 const formData = ref({
   name: '',
   description: '',
-  label_ids: [],
+  label_ids: [] as number[],
   auth_config: {
     auth_verified_required: true,
     app_verified_required: true,
@@ -217,7 +217,13 @@ watch(
         }
         // labels 由纯数组组成的情况
         else {
-          label_ids = labelsData.value.filter(label => labels.includes(label.name)).map(label => label.id);
+          label_ids = labelsData.value.filter((label: {
+            id: number
+            name: string
+          }) => labels.includes(label.name)).map((label: {
+            id: number
+            name: string
+          }) => label.id);
         }
       }
       formData.value = {
@@ -270,7 +276,7 @@ const setInvalidPropId = (property: string, result: boolean) => {
 
 const validate = async () => {
   invalidFormElementIds.value = [];
-  await formRef.value?.validate();
+  await (formRef.value as any)?.validate();
 };
 
 init();

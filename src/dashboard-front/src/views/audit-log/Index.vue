@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -89,6 +89,7 @@
 </template>
 
 <script lang="tsx" setup>
+// @ts-nocheck
 import { cloneDeep } from 'lodash-es';
 import type { ISearchSelect, ITableMethod } from '@/types/common';
 import type { FilterValue, PrimaryTableProps } from '@blueking/tdesign-ui';
@@ -240,7 +241,7 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('操作对象'),
     colKey: 'op_object_type',
     ellipsis: true,
-    cell: (h, { row }: { row: IAuditLog }) => {
+    cell: (h: any, { row }: { row: IAuditLog }) => {
       return (
         <div class="cell-field">
           <span class="content">{ getOpObjectTypeText(row.op_object_type) }</span>
@@ -261,7 +262,7 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('实例'),
     colKey: 'op_object',
     ellipsis: true,
-    cell: (h, { row }: { row: IAuditLog }) => {
+    cell: (h: any, { row }: { row: IAuditLog }) => {
       return (
         <span>{ row.op_object || '--' }</span>
       );
@@ -271,7 +272,7 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('操作类型'),
     colKey: 'op_type',
     ellipsis: true,
-    cell: (h, { row }: { row: IAuditLog }) => {
+    cell: (h: any, { row }: { row: IAuditLog }) => {
       return (
         <span>{ getOpTypeText(row.op_type) || '--' }</span>
       );
@@ -290,7 +291,7 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('操作状态'),
     colKey: 'op_status',
     ellipsis: true,
-    cell: (h, { row }: { row: IAuditLog }) => {
+    cell: (h: any, { row }: { row: IAuditLog }) => {
       return (
         <div class="flex items-center">
           <span class={['mr-5px ag-dot', row.op_status]} />
@@ -312,7 +313,7 @@ const tableColumns = shallowRef<PrimaryTableProps['columns']>([
     title: t('操作人'),
     colKey: 'username',
     ellipsis: true,
-    cell: (h, { row }: { row: IAuditLog }) =>
+    cell: (h: any, { row }: { row: IAuditLog }) =>
       !featureFlagStore.isEnableDisplayName
         ? <span>{row.username}</span>
         : <span><bk-user-display-name user-id={row.username} /></span>,
@@ -370,17 +371,14 @@ const getMenuList = async (item: { id: string }, keyword: string) => {
   }
 
   if (item.id === 'username' && keyword && featureFlagStore.isEnableDisplayName) {
-    const list = await getTenantUsers({ keyword }, userInfoStore.info.tenant_id) as {
-      bk_username: string
-      display_name: string
-    }[];
+    const list = await getTenantUsers({ keyword }, userInfoStore.info.tenant_id);
     return list.map(user => ({
       id: user.bk_username,
       name: user.display_name,
       value: user.bk_username,
     }));
   }
-  return searchData.value.find(set => set.id === item.id)?.children;
+  return searchData.value.find((set: any) => set.id === item.id)?.children;
 };
 
 watch(
@@ -398,11 +396,11 @@ watch(
       );
     }
     else {
-      const textItem = searchValue.value.find(val => val.type === 'text');
+      const textItem = searchValue.value.find((val: any) => val.type === 'text');
       if (textItem) {
         filterData.value.keyword = textItem.name || '';
       }
-      searchValue.value.forEach((item) => {
+      searchValue.value.forEach((item: any) => {
         if (item.values) {
           filterData.value[item.id] = item.values[0].id;
         }

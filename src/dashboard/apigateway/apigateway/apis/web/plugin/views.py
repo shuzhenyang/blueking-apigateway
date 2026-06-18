@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,7 +23,6 @@ from django.utils.decorators import method_decorator
 from django.utils.translation import get_language
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, status
-from rest_framework.generics import get_object_or_404
 
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.plugin.constants import (
@@ -31,11 +30,12 @@ from apigateway.apps.plugin.constants import (
     PLUGIN_TYPE_TAGS_EN,
     PluginBindingScopeEnum,
     PluginBindingSourceEnum,
-    PluginStyleEnum,
     PluginTypeScopeEnum,
 )
-from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm, PluginType
+from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginType
 from apigateway.biz.audit import Auditor
+from apigateway.common.constants import LanguageCodeEnum
+from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
 from apigateway.common.pagination import StandardLimitOffsetPagination
 from apigateway.common.renderers import BkStandardApiJSONRenderer
@@ -50,7 +50,6 @@ from .serializers import (
     PluginBindingListOutputSLZ,
     PluginConfigCreateInputSLZ,
     PluginConfigRetrieveUpdateInputSLZ,
-    PluginFormOutputSLZ,
     PluginTypeOutputSLZ,
     PluginTypeQueryInputSLZ,
     PluginTypeTagsOutputSLZ,
@@ -76,16 +75,6 @@ class PluginTypeListApi(generics.ListAPIView):
     pagination_class = PluginPagination
 
     def get_serializer_context(self):
-        # 需要返回描述，描述在 plugin_form 中
-        if get_language() != "zh-cn":
-            plugin_type_notes = {
-                i["type_id"]: i["notes"] for i in PluginForm.objects.filter(language="en").values("type_id", "notes")
-            }
-        else:
-            plugin_type_notes = {
-                i["type_id"]: i["notes"] for i in PluginForm.objects.exclude(language="en").values("type_id", "notes")
-            }
-
         # 需要返回每个 pluginType 是否已经被当前资源绑定
         current_scope_type = self.request.query_params.get("scope_type")
         current_scope_id = self.request.query_params.get("scope_id")
@@ -112,7 +101,6 @@ class PluginTypeListApi(generics.ListAPIView):
                 type_is_bound_to_current_scope[key] = True
 
         return {
-            "plugin_type_notes": plugin_type_notes,
             "type_related_scope_count": type_related_scope_count,
             "type_is_bound_to_current_scope": type_is_bound_to_current_scope,
         }
@@ -164,39 +152,6 @@ class PluginTypeTagsListApi(generics.ListAPIView):
         tags = PLUGIN_TYPE_TAGS_EN if get_language() != "zh-cn" else PLUGIN_TYPE_TAGS
         serializer = PluginTypeTagsOutputSLZ({"tags": tags})
         return OKJsonResponse(data=serializer.data)
-
-
-@method_decorator(
-    name="get",
-    decorator=swagger_auto_schema(
-        responses={status.HTTP_200_OK: PluginFormOutputSLZ()},
-        tags=["WebAPI.Plugin"],
-        operation_description="获取插件类型对应的动态表单",
-    ),
-)
-class PluginFormRetrieveApi(generics.RetrieveAPIView):
-    serializer_class = PluginFormOutputSLZ
-    renderer_classes = [BkStandardApiJSONRenderer]
-
-    def get_object(self):
-        plugin_type = get_object_or_404(
-            PluginType.objects.all(),
-            code=self.kwargs["code"],
-        )
-
-        form = plugin_type.pluginform_set.with_language().first()
-        if form:
-            return form
-
-        return PluginForm(
-            pk=None,
-            language="",
-            type=plugin_type,
-            notes="",
-            style=PluginStyleEnum.RAW.value,
-            default_value="",
-            config={},
-        )
 
 
 class ScopeValidationMixin:
@@ -511,10 +466,13 @@ class ScopePluginConfigListApi(generics.ListAPIView, ScopeValidationMixin):
             scope_id=scope_id,
         ).order_by("-config__type__priority")
 
+        language_code = get_current_language_code()
         data = [
             {
                 "code": binding.config.type.code,
-                "name": binding.config.type.name,
+                "name": binding.config.type.name_en
+                if language_code == LanguageCodeEnum.EN.value
+                else binding.config.type.name,
                 "config": binding.get_config(),
                 "config_id": binding.config.id,
             }

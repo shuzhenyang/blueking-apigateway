@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,12 +16,13 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import csv
+from copy import deepcopy
 from datetime import datetime
 from io import StringIO
 
 import pytest
 
-from apigateway.biz.access_log.constants import ES_LOG_FIELDS
+from apigateway.biz.access_log import ES_LOG_FIELDS, TOOLBOX_LOG_FIELD_MAPPINGS
 
 pytestmark = pytest.mark.django_db
 
@@ -137,6 +138,38 @@ class TestLogLinkRetrieveApi:
 
         assert response.status_code == 200
         assert result["data"]["link"]
+
+
+class TestLogDetailInfoApi:
+    def test_retrieve(self, mocker, request_view):
+        mocker.patch(
+            "apigateway.apis.web.access_log.views.LogHandler.search_logs_by_request_id_for_toolbox",
+            return_value=(1, [{"request_id": "rid", "gateway_name": "example-gateway"}]),
+        )
+
+        response = request_view(
+            "GET",
+            "access_log.logs.query",
+            path_params={"request_id": "rid"},
+        )
+        result = response.json()
+
+        assert response.status_code == 200
+        assert result["data"]["count"] == 1
+        assert result["data"]["results"][0]["gateway_name"] == "example-gateway"
+
+        fields = result["data"]["fields"]
+        expected_fields = deepcopy(ES_LOG_FIELDS)
+        mapping = TOOLBOX_LOG_FIELD_MAPPINGS[0]
+        expected_fields.insert(
+            mapping["insert_at"],
+            {
+                "label": mapping["label"],
+                "field": mapping["output_field"],
+                "is_filter": mapping["is_filter"],
+            },
+        )
+        assert fields == expected_fields
 
 
 class TestLogExportApi:

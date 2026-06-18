@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,17 +16,16 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-import datetime
 import json
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django_dynamic_fixture import G
-from rest_framework.fields import DateTimeField
 
 from apigateway.apis.web.monitor.views import (
     AlarmRecordListApi,
     AlarmRecordRetrieveApi,
-    AlarmRecordSummaryListApi,
     AlarmStrategyListCreateApi,
     AlarmStrategyRetrieveUpdateDestroyApi,
     AlarmStrategyUpdateStatusApi,
@@ -160,6 +159,22 @@ class TestAlarmStrategyListCreateApi(TestCase):
             result = get_response_json(response)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(result["data"]["results"], test["expected"])
+
+    def test_list_prefetches_gateway_labels(self):
+        label = G(APILabel, gateway=self.gateway, name="label")
+        for index in range(6):
+            strategy = G(AlarmStrategy, gateway=self.gateway, name=f"strategy-{index}")
+            strategy.api_labels.add(label)
+
+        request = self.factory.get(f"/apis/{self.gateway.id}/monitors/alarm/strategies/")
+        view = AlarmStrategyListCreateApi.as_view()
+
+        with CaptureQueriesContext(connection) as queries:
+            response = view(request, gateway_id=self.gateway.id)
+
+        result = get_response_json(response)
+        self.assertEqual(response.status_code, 200, result)
+        self.assertLessEqual(len(queries), 8)
 
 
 class TestAlarmStrategyRetrieveUpdateDestroyApi(TestCase):
@@ -349,6 +364,22 @@ class TestAlarmRecordListApi(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(len(result["data"]["results"]), test["expected"]["count"])
 
+    def test_list_prefetches_alarm_strategy_names(self):
+        strategies = [G(AlarmStrategy, gateway=self.gateway, name=f"strategy-{index}") for index in range(6)]
+        for index in range(6):
+            record = G(AlarmRecord, gateway=self.gateway, status="received")
+            record.alarm_strategies.set([strategies[index]])
+
+        request = self.factory.get(f"/apis/{self.gateway.id}/monitors/alarm/records/")
+        view = AlarmRecordListApi.as_view()
+
+        with CaptureQueriesContext(connection) as queries:
+            response = view(request, gateway_id=self.gateway.id)
+
+        result = get_response_json(response)
+        self.assertEqual(response.status_code, 200, result)
+        self.assertLessEqual(len(queries), 8)
+
 
 class TestAlarmRecordRetrieveApi(TestCase):
     @classmethod
@@ -368,97 +399,3 @@ class TestAlarmRecordRetrieveApi(TestCase):
 
         result = get_response_json(response)
         self.assertEqual(response.status_code, 200, result)
-
-
-class TestAlarmRecordSummaryListApi(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.factory = APIRequestFactory()
-        cls.gateway = create_gateway()
-
-    def test_get(self):
-        strategy_1 = G(AlarmStrategy, gateway=self.gateway)
-        strategy_2 = G(AlarmStrategy, gateway=self.gateway)
-
-        alarm_record_1 = G(AlarmRecord, created_time=dummy_time.time)
-        alarm_record_1.alarm_strategies.set([strategy_1])
-
-        alarm_record_2 = G(AlarmRecord, created_time=dummy_time.time)
-        alarm_record_2.alarm_strategies.set([strategy_1])
-
-        alarm_record_3 = G(AlarmRecord, created_time=dummy_time.time + datetime.timedelta(seconds=-300))
-        alarm_record_3.alarm_strategies.set([strategy_2])
-
-        data = [
-            {
-                "params": {},
-                "expected": [
-                    {
-                        "gateway": {
-                            "id": self.gateway.id,
-                            "name": self.gateway.name,
-                        },
-                        "alarm_record_count": 3,
-                        "strategy_summary": [
-                            {
-                                "id": strategy_1.id,
-                                "name": strategy_1.name,
-                                "alarm_record_count": 2,
-                                "latest_alarm_record": {
-                                    "id": alarm_record_2.id,
-                                    "message": alarm_record_2.message,
-                                    "created_time": dummy_time.str,
-                                },
-                            },
-                            {
-                                "id": strategy_2.id,
-                                "name": strategy_2.name,
-                                "alarm_record_count": 1,
-                                "latest_alarm_record": {
-                                    "id": alarm_record_3.id,
-                                    "message": alarm_record_3.message,
-                                    "created_time": DateTimeField().to_representation(alarm_record_3.created_time),
-                                },
-                            },
-                        ],
-                    }
-                ],
-            },
-            {
-                "params": {
-                    "time_start": dummy_time.timestamp,
-                    "time_end": dummy_time.timestamp + 10,
-                },
-                "expected": [
-                    {
-                        "gateway": {
-                            "id": self.gateway.id,
-                            "name": self.gateway.name,
-                        },
-                        "alarm_record_count": 2,
-                        "strategy_summary": [
-                            {
-                                "id": strategy_1.id,
-                                "name": strategy_1.name,
-                                "alarm_record_count": 2,
-                                "latest_alarm_record": {
-                                    "id": alarm_record_2.id,
-                                    "message": alarm_record_2.message,
-                                    "created_time": dummy_time.str,
-                                },
-                            },
-                        ],
-                    }
-                ],
-            },
-        ]
-
-        for test in data:
-            request = self.factory.get("/apis/monitors/alarm/records/summary/", data=test["params"])
-
-            view = AlarmRecordSummaryListApi.as_view()
-            response = view(request)
-
-            result = get_response_json(response)
-            self.assertEqual(response.status_code, 200, result)
-            self.assertEqual(result["data"], test["expected"])

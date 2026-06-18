@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -115,8 +115,8 @@ class ReleasedResourceAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
 
 class ReleaseHistoryAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
     djangoql_completion_enabled_by_default = False
-    list_display = ["gateway", "stage", "resource_version", "created_by", "created_time"]
-    list_filter = ["gateway", "created_time"]
+    list_display = ["id", "gateway", "data_plane", "stage", "resource_version", "created_by", "created_time"]
+    list_filter = ["gateway", "data_plane", "created_time"]
     search_fields = ["gateway__id", "gateway__name"]
     raw_id_fields = ["resource_version"]
 

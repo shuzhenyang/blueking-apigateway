@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -96,7 +96,7 @@
                   <BkTag
                     :theme="curPromptData?.is_public ? 'success' : 'warning'"
                   >
-                    {{ t( curPromptData?.is_public ? '公开' : '私有') }}
+                    {{ t(curPromptData?.is_public ? '公开' : '私有') }}
                   </BkTag>
                 </div>
               </div>
@@ -106,9 +106,10 @@
                 :dynamic-max-height="500"
               >
                 <template #description>
-                  <code class="color-#4d4f56 break-all whitespace-pre-line font-unset">
-                    {{ escapedCodeContent }}
-                  </code>
+                  <code
+                    v-bk-xss-html="curPromptData?.content"
+                    class="color-#4d4f56 break-all whitespace-pre-line font-unset"
+                  />
                 </template>
               </AgDescription>
               <div
@@ -132,12 +133,10 @@
 </template>
 
 <script lang="ts" setup>
-import { escape } from 'lodash-es';
-import { useFeatureFlag, useGateway } from '@/stores';
+import { useFeatureFlag } from '@/stores';
 import {
   type IMCPServerPrompt,
   getServer,
-  getServerPromptsDetail,
 } from '@/services/source/mcp-server';
 import AgDescription from '@/components/ag-description/Index.vue';
 
@@ -154,10 +153,9 @@ const emit = defineEmits<{ 'update-count': [count: number] }>();
 
 const { t } = useI18n();
 const featureFlagStore = useFeatureFlag();
-const gatewayStore = useGateway();
 
 const mcpPromptRef = ref<HTMLDivElement | null>(null);
-const curPromptData = ref<IMCPServerPrompt>({});
+const curPromptData = ref<IMCPServerPrompt>({} as IMCPServerPrompt);
 const promptCollapseMargin = ref('mt-16px');
 const promptDetailLoading = ref(false);
 
@@ -166,35 +164,17 @@ const setPageMaxH = computed(() => {
   if (page === 'market') {
     return '100%';
   }
-  const offsetH = isShowNoticeAlert.value ? 434 : 394;
+  const offsetH = isShowNoticeAlert.value ? 440 : 400;
   return `calc(100vh - ${offsetH}px)`;
 });
 const promptList = computed<IMCPServerPrompt[]>(() => {
-  const results = server?.prompts ?? [];
+  const results = (server?.prompts ?? []) as IMCPServerPrompt[];
   if (results.length) {
-    curPromptData.value = results?.[0];
+    curPromptData.value = results?.[0] as IMCPServerPrompt;
     emit('update-count', results.length);
   }
   return results;
 });
-const escapedCodeContent = computed(() => {
-  return escape(curPromptData.value?.content ?? '');
-});
-const gatewayId = computed(() => gatewayStore.currentGateway?.id || server?.gateway?.id);
-
-const fetchPromptDetail = async () => {
-  promptDetailLoading.value = true;
-  try {
-    const res = await getServerPromptsDetail(gatewayId.value, { ids: [curPromptData.value.id] });
-    curPromptData.value = Object.assign(curPromptData.value, res?.prompts?.[0] ?? {});
-  }
-  catch {
-    curPromptData.value = {};
-  }
-  finally {
-    promptDetailLoading.value = false;
-  }
-};
 
 const handlePromptCollapseChange = (isCollapse: boolean) => {
   if (isCollapse) {
@@ -206,11 +186,15 @@ const handlePromptCollapseChange = (isCollapse: boolean) => {
 };
 
 const handlePromptClick = (row: IMCPServerPrompt) => {
+  promptDetailLoading.value = true;
   const isRepeat = `${curPromptData.value.id}&${curPromptData.value.code}` === `${row.id}&${row.code}`;
   if (!isRepeat) {
     curPromptData.value = row;
-    fetchPromptDetail();
   }
+  // 增加个loading效果增加页面美化
+  setTimeout(() => {
+    promptDetailLoading.value = false;
+  }, 300);
 };
 
 const handlePromptMouseenter = (e: MouseEvent, row: IMCPServerPrompt) => {

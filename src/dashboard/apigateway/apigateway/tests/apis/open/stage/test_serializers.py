@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -67,3 +67,26 @@ class TestStageWithResourceVersionV1SLZ:
             },
         )
         assert slz.data == expected
+
+
+class TestStageSLZ:
+    def test_validate_delegates_plugin_validation_to_stage_sync_handler(self, mocker, fake_gateway):
+        mocked_validate = mocker.patch(
+            "apigateway.apis.open.stage.serializers.StageSyncHandler.validate_plugin_configs"
+        )
+
+        slz = serializers.StageSLZ(context={"gateway": fake_gateway})
+        slz.validate(
+            {
+                "gateway": fake_gateway,
+                "backends": [
+                    {
+                        "name": "default",
+                        "config": {"hosts": [{"host": "http://example.com", "weight": 100}]},
+                    }
+                ],
+                "plugin_configs": [{"type": "test-plugin", "yaml": "enabled: true"}],
+            }
+        )
+
+        mocked_validate.assert_called_once_with([{"type": "test-plugin", "yaml": "enabled: true"}])

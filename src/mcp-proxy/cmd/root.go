@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,11 +21,13 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"mcp_proxy/pkg/infra/logging"
 	"mcp_proxy/pkg/server"
 )
 
@@ -72,6 +74,7 @@ func init() {
 
 // Start the server, do init then run http server
 func Start() {
+	startTime := time.Now()
 	fmt.Println("It's mcp-proxy, start it now")
 
 	// 0. init config
@@ -86,8 +89,11 @@ func Start() {
 	initLogger()
 	initDatabase()
 	initTracing()
+	initBkAIDevTrace()
 	initSentry()
 	initMetrics()
+
+	logging.GetLogger().Infof("all components initialized, total startup duration=%s", time.Since(startTime))
 
 	server.Run(globalConfig)
 }

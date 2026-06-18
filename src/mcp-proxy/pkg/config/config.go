@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -71,9 +73,10 @@ type DesensitizationFiled struct {
 
 // Logger is the config for all logger, including default logger and api
 type Logger struct {
-	Default LogConfig
-	API     LogConfig
-	Audit   LogConfig
+	Default  LogConfig
+	API      LogConfig
+	Audit    LogConfig
+	Database LogConfig
 }
 
 // TLS is the config for tls
@@ -150,6 +153,95 @@ type Tracing struct {
 type Instrument struct {
 	GinAPI bool
 	DbAPI  bool
+	McpAPI bool
+}
+
+// BkAIDevTrace is the config for BKAIDev agent trace reporting.
+// It uses an independent OTLP/HTTP endpoint, fully isolated from the project's own tracing.
+type BkAIDevTrace struct {
+	Enable      bool
+	Endpoint    string
+	ServiceName string
+	Token       string
+}
+
+// Transport is the config for the shared HTTP transport used by tool calls.
+type Transport struct {
+	InsecureSkipVerify    bool
+	MaxIdleConns          int
+	MaxIdleConnsPerHost   int
+	IdleConnTimeoutSecond int
+}
+
+// LogTruncate default values.
+const (
+	defaultAuditLogMaxBodySize     = 4096
+	defaultAuditLogMaxResponseSize = 4096
+	defaultAPILogRequestSize       = 2048
+	defaultAPILogResponseSize      = 1024
+	defaultAPILogErrorRespSize     = 4096
+)
+
+// LogTruncate is the config for log truncation limits.
+// NOTE: All size limits are measured in string length (number of characters), not bytes.
+// For ASCII content this equals the byte count, but for multi-byte characters (e.g. CJK)
+// the actual byte size may be larger.
+type LogTruncate struct {
+	// AuditLogMaxBodySize limits the audit log body size for tool call requests and body params (string length).
+	// Defaults to 4096 if not set.
+	AuditLogMaxBodySize int
+	// AuditLogMaxResponseSize limits the audit log response size for tool call responses (string length).
+	// Defaults to 4096 if not set.
+	AuditLogMaxResponseSize int
+	// APILogRequestSize limits the MCP API log request params size (string length).
+	// Defaults to 2048 if not set.
+	APILogRequestSize int
+	// APILogResponseSize limits the MCP API log response size for normal responses (string length).
+	// Defaults to 1024 if not set.
+	APILogResponseSize int
+	// APILogErrorResponseSize limits the MCP API log response size for error responses (string length).
+	// Defaults to 4096 if not set.
+	APILogErrorResponseSize int
+}
+
+// GetAuditLogMaxBodySize returns AuditLogMaxBodySize with a safe default fallback.
+func (l LogTruncate) GetAuditLogMaxBodySize() int {
+	if l.AuditLogMaxBodySize <= 0 {
+		return defaultAuditLogMaxBodySize
+	}
+	return l.AuditLogMaxBodySize
+}
+
+// GetAuditLogMaxResponseSize returns AuditLogMaxResponseSize with a safe default fallback.
+func (l LogTruncate) GetAuditLogMaxResponseSize() int {
+	if l.AuditLogMaxResponseSize <= 0 {
+		return defaultAuditLogMaxResponseSize
+	}
+	return l.AuditLogMaxResponseSize
+}
+
+// GetAPILogRequestSize returns APILogRequestSize with a safe default fallback.
+func (l LogTruncate) GetAPILogRequestSize() int {
+	if l.APILogRequestSize <= 0 {
+		return defaultAPILogRequestSize
+	}
+	return l.APILogRequestSize
+}
+
+// GetAPILogResponseSize returns APILogResponseSize with a safe default fallback.
+func (l LogTruncate) GetAPILogResponseSize() int {
+	if l.APILogResponseSize <= 0 {
+		return defaultAPILogResponseSize
+	}
+	return l.APILogResponseSize
+}
+
+// GetAPILogErrorResponseSize returns APILogErrorResponseSize with a safe default fallback.
+func (l LogTruncate) GetAPILogErrorResponseSize() int {
+	if l.APILogErrorResponseSize <= 0 {
+		return defaultAPILogErrorRespSize
+	}
+	return l.APILogErrorResponseSize
 }
 
 // McpServer ...
@@ -162,6 +254,50 @@ type McpServer struct {
 	InnerJwtExpireTime          time.Duration
 	EncryptKey                  string
 	CryptoNonce                 string
+	// MaxConcurrentPrefetch limits the number of concurrent goroutines when prefetching server configs.
+	// Defaults to 20 if not set.
+	MaxConcurrentPrefetch int
+	// Transport is the config for the shared HTTP transport used by upstream tool calls.
+	Transport Transport
+	// LogTruncate configures log truncation limits for audit and API logs.
+	LogTruncate LogTruncate
+}
+
+// Metric is the config for metric/prometheus
+type Metric struct {
+	// NamePrefix is the prefix for all metric names.
+	// This should be aligned with the dashboard's PROMETHEUS_METRIC_NAME_PREFIX
+	// so that PromQL queries from the dashboard can match these metrics.
+	// Can be overridden by the PROMETHEUS_METRIC_NAME_PREFIX environment variable.
+	// Default: "bk_apigateway_"
+	NamePrefix string
+}
+
+// DerivePublicPathPrefix extracts the client-visible path prefix from a message URL format string
+// by taking the segment before the first "%" placeholder and trimming the trailing slash.
+//
+// Examples:
+//
+//	"/prod/api/v2/mcp-servers/%s/sse/message"             → "/prod/api/v2/mcp-servers"
+//	"/prod/api/v2/mcp-servers/%s/application/sse/message" → "/prod/api/v2/mcp-servers"
+//	"/%s/sse"                                             → "" (no meaningful prefix)
+func DerivePublicPathPrefix(messageURLFormat string) string {
+	messageURLFormat = strings.TrimSpace(messageURLFormat)
+	if messageURLFormat == "" {
+		return ""
+	}
+	i := strings.Index(messageURLFormat, "%")
+	if i <= 0 {
+		return ""
+	}
+	prefix := strings.TrimSuffix(messageURLFormat[:i], "/")
+	if prefix == "" {
+		return ""
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	return prefix
 }
 
 // Pprof is the config for pprof
@@ -180,8 +316,10 @@ type Config struct {
 	Databases   []Database
 	DatabaseMap map[string]Database
 
-	Logger  Logger
-	Tracing Tracing
+	Logger       Logger
+	Tracing      Tracing
+	Metric       Metric
+	BkAIDevTrace BkAIDevTrace
 
 	McpServer McpServer
 	PProf     Pprof
@@ -195,29 +333,43 @@ func Load(v *viper.Viper) (*Config, error) {
 		return nil, err
 	}
 
-	// parse the list to map
-	// 1. database
+	if err := initAndValidateDatabases(cfg); err != nil {
+		return nil, err
+	}
+
+	applyMcpServerDefaults(cfg)
+	applyBkAIDevTraceDefaults(v, cfg)
+	applyMetricDefaults(cfg)
+	applyPProfDefaults(cfg)
+
+	G = cfg
+	return cfg, nil
+}
+
+func initAndValidateDatabases(cfg *Config) error {
 	cfg.DatabaseMap = make(map[string]Database)
 	for _, db := range cfg.Databases {
 		cfg.DatabaseMap[db.ID] = db
 	}
 
 	if len(cfg.DatabaseMap) == 0 {
-		return nil, errors.New("database cannot be empty")
+		return errors.New("database cannot be empty")
 	}
 
-	// 验证所有数据库配置
 	for _, db := range cfg.Databases {
 		if err := db.ValidateDatabase(); err != nil {
-			return nil, err
+			return err
 		}
 	}
+	return nil
+}
 
+func applyMcpServerDefaults(cfg *Config) {
 	if cfg.McpServer.Interval == 0 {
 		cfg.McpServer.Interval = 60 * time.Second
 	}
-	if cfg.McpServer.BkApiUrlTmpl == "" {
-		cfg.McpServer.BkApiUrlTmpl = os.Getenv("BK_API_URL_TMPL")
+	if env := os.Getenv("BK_API_URL_TMPL"); env != "" {
+		cfg.McpServer.BkApiUrlTmpl = env
 	}
 	if cfg.McpServer.MessageUrlFormat == "" {
 		cfg.McpServer.MessageUrlFormat = "/api/bk-apigateway/prod/api/v2/mcp-servers/%s/sse/message"
@@ -229,28 +381,80 @@ func Load(v *viper.Viper) (*Config, error) {
 	if cfg.McpServer.InnerJwtExpireTime == 0 {
 		cfg.McpServer.InnerJwtExpireTime = time.Minute * 5
 	}
-	if cfg.McpServer.EncryptKey == "" {
-		cfg.McpServer.EncryptKey = os.Getenv("ENCRYPT_KEY")
+	if env := os.Getenv("ENCRYPT_KEY"); env != "" {
+		cfg.McpServer.EncryptKey = env
 	}
-	if cfg.McpServer.CryptoNonce == "" {
-		cfg.McpServer.CryptoNonce = os.Getenv("BK_APIGW_CRYPTO_NONCE")
+	if env := os.Getenv("BK_APIGW_CRYPTO_NONCE"); env != "" {
+		cfg.McpServer.CryptoNonce = env
 	}
+	// Transport defaults for upstream tool calls
+	if cfg.McpServer.Transport.MaxIdleConns == 0 {
+		cfg.McpServer.Transport.MaxIdleConns = 200
+	}
+	if cfg.McpServer.Transport.MaxIdleConnsPerHost == 0 {
+		cfg.McpServer.Transport.MaxIdleConnsPerHost = 20
+	}
+	if cfg.McpServer.Transport.IdleConnTimeoutSecond == 0 {
+		cfg.McpServer.Transport.IdleConnTimeoutSecond = 90
+	}
+	// MaxConcurrentPrefetch defaults to 20, capped at 100
+	if cfg.McpServer.MaxConcurrentPrefetch == 0 {
+		cfg.McpServer.MaxConcurrentPrefetch = 20
+	}
+	if cfg.McpServer.MaxConcurrentPrefetch > 100 {
+		cfg.McpServer.MaxConcurrentPrefetch = 100
+	}
+	// LogTruncate defaults
+	if cfg.McpServer.LogTruncate.AuditLogMaxBodySize == 0 {
+		cfg.McpServer.LogTruncate.AuditLogMaxBodySize = defaultAuditLogMaxBodySize
+	}
+	if cfg.McpServer.LogTruncate.AuditLogMaxResponseSize == 0 {
+		cfg.McpServer.LogTruncate.AuditLogMaxResponseSize = defaultAuditLogMaxResponseSize
+	}
+	if cfg.McpServer.LogTruncate.APILogRequestSize == 0 {
+		cfg.McpServer.LogTruncate.APILogRequestSize = defaultAPILogRequestSize
+	}
+	if cfg.McpServer.LogTruncate.APILogResponseSize == 0 {
+		cfg.McpServer.LogTruncate.APILogResponseSize = defaultAPILogResponseSize
+	}
+	if cfg.McpServer.LogTruncate.APILogErrorResponseSize == 0 {
+		cfg.McpServer.LogTruncate.APILogErrorResponseSize = defaultAPILogErrorRespSize
+	}
+}
 
-	if cfg.PProf.Username == "" {
-		cfg.PProf.Username = os.Getenv("PPROF_USERNAME")
-		if cfg.PProf.Username == "" {
-			cfg.PProf.Username = "bk-mcp" // 默认用户名
+func applyBkAIDevTraceDefaults(_ *viper.Viper, cfg *Config) {
+	if env := os.Getenv("BKAI_DEV_TRACE_ENABLE"); env != "" {
+		if enabled, err := strconv.ParseBool(env); err == nil {
+			cfg.BkAIDevTrace.Enable = enabled
 		}
 	}
-	if cfg.PProf.Password == "" {
-		cfg.PProf.Password = os.Getenv("PPROF_PASSWORD")
-		if cfg.PProf.Password == "" {
-			cfg.PProf.Password = "DebugModel@bk" // 默认密码，生产环境应该修改
-		}
+	if env := os.Getenv("BKAI_DEV_TRACE_ENDPOINT"); env != "" {
+		cfg.BkAIDevTrace.Endpoint = env
 	}
+	if env := os.Getenv("BKAI_DEV_TRACE_SERVICE_NAME"); env != "" {
+		cfg.BkAIDevTrace.ServiceName = env
+	}
+	if env := os.Getenv("BKAI_DEV_TRACE_TOKEN"); env != "" {
+		cfg.BkAIDevTrace.Token = env
+	}
+}
 
-	G = cfg
-	return cfg, nil
+func applyMetricDefaults(cfg *Config) {
+	if env := os.Getenv("PROMETHEUS_METRIC_NAME_PREFIX"); env != "" {
+		cfg.Metric.NamePrefix = env
+	}
+	if cfg.Metric.NamePrefix == "" {
+		cfg.Metric.NamePrefix = "bk_apigateway_"
+	}
+}
+
+func applyPProfDefaults(cfg *Config) {
+	if env := os.Getenv("PPROF_USERNAME"); env != "" {
+		cfg.PProf.Username = env
+	}
+	if env := os.Getenv("PPROF_PASSWORD"); env != "" {
+		cfg.PProf.Password = env
+	}
 }
 
 // GinAPIEnabled get gin api trace switch
@@ -261,6 +465,11 @@ func (t Tracing) GinAPIEnabled() bool {
 // DBAPIEnabled get db api trace switch
 func (t Tracing) DBAPIEnabled() bool {
 	return t.Enable && t.Instrument.DbAPI
+}
+
+// McpAPIEnabled get mcp api trace switch
+func (t Tracing) McpAPIEnabled() bool {
+	return t.Enable && t.Instrument.McpAPI
 }
 
 // ValidateTLS 验证TLS配置

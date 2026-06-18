@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,12 +17,13 @@
 #
 import os
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from apigateway.apps.support.constants import ProgrammingLanguageEnum
-from apigateway.biz.sdk.distributors.pypi import PypiSourceDistributor
+from apigateway.biz.sdk.distributors import PypiSourceDistributor
 
 
 @pytest.fixture
@@ -103,8 +104,8 @@ def sdk_context(sdk_context):
 def test_pypirc(
     tmpdir, faker, output_dir, python_setup_script, python_setup_history, sdist, distributor: PypiSourceDistributor
 ):
-    with patch("apigateway.biz.sdk.distributors.pypi.check_call") as mock_check_call:
-        mock_check_call.return_value = 0  # Simulate successful execution
+    with patch("apigateway.biz.sdk.distributors.pypi.subprocess.run") as mock_run:
+        mock_run.return_value = SimpleNamespace(stdout="", stderr="", check_returncode=lambda: None)
         distributor.distribute(output_dir, [sdist])
 
     pypirc_path = tmpdir.join(".pypirc")
@@ -118,9 +119,9 @@ def test_distribute(
     distributor: PypiSourceDistributor,
     package_searcher_result,
 ):
-    # Mock the check_call to prevent actual call to `twine upload`
-    with patch("apigateway.biz.sdk.distributors.pypi.check_call") as mock_check_call:
-        mock_check_call.return_value = 0  # Simulate successful execution
+    # Mock subprocess.run to prevent actual call to `twine upload`
+    with patch("apigateway.biz.sdk.distributors.pypi.subprocess.run") as mock_run:
+        mock_run.return_value = SimpleNamespace(stdout="", stderr="", check_returncode=lambda: None)
         result = distributor.distribute(output_dir, [sdist])
 
     assert sdk_context.config["python"]["is_uploaded_to_pypi"]

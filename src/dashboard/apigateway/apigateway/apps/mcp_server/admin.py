@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -75,6 +75,7 @@ class MCPServerAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
         "gateway",
         "stage",
         "is_public",
+        "oauth2_public_client_enabled",
         "status",
         "get_categories_display",
         "created_by",
@@ -82,12 +83,12 @@ class MCPServerAdmin(DjangoQLSearchMixin, admin.ModelAdmin):
         "updated_time",
     ]
     search_fields = ["id", "name", "title", "gateway__name", "_labels"]
-    list_filter = ["gateway", "is_public", "status", "categories"]
+    list_filter = ["gateway", "is_public", "status", "oauth2_public_client_enabled", "categories"]
     filter_horizontal = ["categories"]
 
     fieldsets = (
         (None, {"fields": ("name", "title", "description", "gateway", "stage")}),
-        ("状态和权限", {"fields": ("status", "is_public", "protocol_type")}),
+        ("状态和权限", {"fields": ("status", "is_public", "oauth2_public_client_enabled", "protocol_type")}),
         ("分类", {"fields": ("categories",)}),
         ("资源配置", {"fields": ("_labels", "_resource_names"), "classes": ("collapse",)}),
     )

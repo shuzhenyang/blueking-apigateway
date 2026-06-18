@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from apigateway.apps.monitor.constants import AlarmStatusEnum
 from apigateway.apps.monitor.models import AlarmRecord
 from apigateway.components.bkpaas import get_app_maintainers, get_tenant_id_for_app_developers
+from apigateway.core.models import Resource
 from apigateway.service.alert_flow.helpers import AlertHandler, MonitorEvent
 from apigateway.utils import time as time_utils
 
@@ -35,7 +36,7 @@ class AppRequestDimension(BaseModel):
     api_id: int
     resource_id: int
     stage: str
-    app_code: str
+    app_code: Optional[str] = None
 
 
 # NOTE: 这里是蓝鲸应用请求网关报错，告警给蓝鲸应用负责人，被动，无法配置/忽略
@@ -72,6 +73,9 @@ class AppRequestAlerter(Alerter):
     def get_message(self, event: MonitorEvent) -> str:
         log_records = event.extend["log_records"]
         record_source = log_records[0]["_source"]
+        dimension = AppRequestDimension.model_validate(event.event_dimensions)
+
+        resource_name = Resource.objects.filter(id=dimension.resource_id).values_list("name", flat=True).first() or ""
 
         template = """
         [蓝鲸 API Gateway 告警]
@@ -96,7 +100,7 @@ class AppRequestAlerter(Alerter):
             app_code=record_source["app_code"],
             api_name=record_source["api_name"],
             stage=record_source["stage"],
-            request_info=self._get_request_info(record_source),
+            request_info=self._get_request_info(record_source, resource_name),
             client_ip=record_source["client_ip"],
             error=record_source["error"],
             request_id=record_source["request_id"],
@@ -104,10 +108,17 @@ class AppRequestAlerter(Alerter):
             event_create_time=time_utils.format(event.event_create_time),
         )
 
-    def _get_request_info(self, record_source: Dict[str, Any]) -> str:
+    def _get_request_info(self, record_source: Dict[str, Any], resource_name: str = "") -> str:
         parsed_path = urlparse(record_source["http_path"])
         path_without_querystring = urlunparse((parsed_path.scheme, parsed_path.netloc, parsed_path.path, "", "", ""))
 
+        if resource_name:
+            return "{}, {}, {}, {}".format(
+                resource_name,
+                record_source["method"],
+                record_source["http_host"],
+                path_without_querystring,
+            )
         return "{}, {}, {}".format(
             record_source["method"],
             record_source["http_host"],

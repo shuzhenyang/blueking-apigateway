@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -37,14 +37,18 @@ from apigateway.apps.mcp_server.constants import (
     MCPServerPermissionStatusEnum,
     MCPServerStatusEnum,
 )
-from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermissionApply
-from apigateway.apps.permission.constants import GrantDimensionEnum, GrantTypeEnum, PermissionApplyExpireDaysEnum
-from apigateway.apps.permission.models import AppPermissionRecord, AppResourcePermission
+from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission, MCPServerAppPermissionApply
+from apigateway.apps.permission.constants import GrantDimensionEnum, PermissionApplyExpireDaysEnum
+from apigateway.apps.permission.models import AppPermissionRecord
 from apigateway.apps.permission.tasks import send_mail_for_perm_apply
 from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.mcp_server import MCPServerHandler, MCPServerPermissionHandler
-from apigateway.biz.permission import PermissionDimensionManager, ResourcePermissionHandler
-from apigateway.biz.release import ReleaseHandler
+from apigateway.biz.permission import (
+    AppPermissionBuilder,
+    PermissionDimensionManager,
+    ResourcePermissionBuilder,
+    ResourcePermissionHandler,
+)
 from apigateway.biz.resource import ResourceHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.error_codes import error_codes
@@ -54,15 +58,24 @@ from apigateway.components.bkauth import get_app_tenant_info
 from apigateway.controller.publisher.publish import trigger_gateway_publish
 from apigateway.core.constants import GatewayStatusEnum, PublishSourceEnum
 from apigateway.core.models import Gateway, Release
+from apigateway.service.bk_itsm import ItsmPermissionApplyHelper
 from apigateway.utils.responses import OKJsonResponse
 
 from . import serializers
-from .helpers import AppPermissionBuilder, ResourcePermissionBuilder
 
 logger = logging.getLogger(__name__)
 
 
 # 注意：请使用 OpenAPIV2Permission / OpenAPIV2GatewayNamePermission, 有特殊情况请在类注释中说明
+
+
+def _validate_resource_ids_in_released_resources(resource_ids: list[int], released_resources: list[dict]):
+    if not resource_ids:
+        return
+
+    released_resource_ids = {resource["id"] for resource in released_resources}
+    if set(resource_ids) - released_resource_ids:
+        raise ValidationError({"resource_ids": [_("指定的部分资源 ID 不属于当前网关已发布资源。")]})
 
 
 @method_decorator(
@@ -95,7 +108,7 @@ class GatewayListApi(generics.ListAPIView):
         name = slz.validated_data.get("name")
         fuzzy = slz.validated_data.get("fuzzy")
 
-        queryset = Gateway.objects.filter(status=GatewayStatusEnum.ACTIVE.value, is_public=True)
+        queryset = GatewayHandler.list_public_released_gateways()
 
         # 可以看到 全租户网关 + 本租户网关
         tenant_id = None
@@ -110,12 +123,6 @@ class GatewayListApi(generics.ListAPIView):
             # 模糊匹配，查询名称中包含 name 的网关 or 精确匹配，查询名称为 name 的网关
             queryset = queryset.filter(name__contains=name) if fuzzy else queryset.filter(name=name)
 
-        # 过滤出用户类型为指定类型的网关
-        all_gateway_ids = list(queryset.values_list("id", flat=True))
-        # 过滤出已发布的网关 ID
-        released_gateway_ids = ReleaseHandler.filter_released_gateway_ids(all_gateway_ids)
-
-        queryset = queryset.filter(id__in=released_gateway_ids)
         output_slz = self.get_serializer(queryset, many=True)
         output_data = sorted(output_slz.data, key=operator.itemgetter("name"))
 
@@ -294,6 +301,11 @@ class GatewayAppPermissionApplyCreateApi(generics.CreateAPIView):
                     replace=True,
                 )
 
+        resource_ids = data.get("resource_ids") or []
+        if resource_ids:
+            released_resources = ResourceVersionHandler.get_released_public_resources(request.gateway.id)
+            _validate_resource_ids_in_released_resources(resource_ids, released_resources)
+
         manager = PermissionDimensionManager.get_manager(data["grant_dimension"])
         record = manager.create_apply_record(
             app_code,
@@ -305,15 +317,19 @@ class GatewayAppPermissionApplyCreateApi(generics.CreateAPIView):
             request.user.username,
         )
 
-        try:
-            apply_async_on_commit(send_mail_for_perm_apply, args=[record.id])
-        except Exception:  # pylint: disable=broad-except
-            logger.exception("send mail to gateway manager fail. apply_record_id=%s", record.id)
+        # ITSM 单据创建成功后，不再发送邮件通知
+        if not record.itsm_ticket_id:
+            try:
+                apply_async_on_commit(send_mail_for_perm_apply, args=[record.id])
+            except Exception:  # pylint: disable=broad-except
+                logger.exception("send mail to gateway manager fail. apply_record_id=%s", record.id)
 
         return OKJsonResponse(
             status=status.HTTP_201_CREATED,
             data={
                 "record_id": record.id,
+                "itsm_ticket_id": record.itsm_ticket_id or "",
+                "itsm_ticket_url": ItsmPermissionApplyHelper.build_ticket_url(record.itsm_ticket_id),
             },
         )
 
@@ -345,21 +361,11 @@ class AppPermissionRenewApi(generics.CreateAPIView):
 
         data = slz.validated_data
 
-        for gateway_id, resource_ids in ResourceHandler.group_by_gateway_id(data["resource_ids"]).items():
-            gateway = Gateway.objects.get(id=gateway_id)
-            # 如果应用 - 资源权限不存在，则将按网关的权限同步到应用 - 资源权限
-            ResourcePermissionHandler.sync_from_gateway_permission(
-                gateway=gateway,
-                bk_app_code=data["target_app_code"],
-                resource_ids=resource_ids,
-            )
-            AppResourcePermission.objects.renew_by_resource_ids(
-                gateway=gateway,
-                bk_app_code=data["target_app_code"],
-                resource_ids=resource_ids,
-                grant_type=GrantTypeEnum.RENEW.value,
-                expire_days=data["expire_days"],
-            )
+        ResourcePermissionHandler.renew_resource_permissions_by_resource_ids(
+            bk_app_code=data["target_app_code"],
+            resource_ids=data["resource_ids"],
+            expire_days=data["expire_days"],
+        )
 
         return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
@@ -420,7 +426,7 @@ class AppPermissionRecordListApi(generics.ListAPIView):
 
         page = self.paginate_queryset(queryset)
         slz = serializers.AppPermissionRecordListOutputSLZ(page, many=True)
-        return OKJsonResponse(data=slz.data)
+        return self.get_paginated_response(slz.data)
 
 
 @method_decorator(
@@ -481,17 +487,31 @@ class MCPServerPermissionListApi(generics.ListAPIView):
 
         data = slz.validated_data
 
-        queryset = MCPServer.objects.filter(is_public=True, status=MCPServerStatusEnum.ACTIVE.value)
+        queryset = MCPServer.objects.filter(is_public=True, status=MCPServerStatusEnum.ACTIVE.value).select_related(
+            "gateway", "stage"
+        )
 
         keyword = data.get("keyword")
         if keyword:
             queryset = queryset.filter(Q(name__icontains=keyword) | Q(description__icontains=keyword))
 
+        mcp_server_ids = list(queryset.values_list("id", flat=True))
+        target_app_code = data["target_app_code"]
+
+        # 1. 查询 MCPServerAppPermission（实际权限表），覆盖主动授权（grant）和申请通过（apply）两种场景
+        granted_mcp_server_ids: set = set(
+            MCPServerAppPermission.objects.filter(
+                bk_app_code=target_app_code,
+                mcp_server_id__in=mcp_server_ids,
+            ).values_list("mcp_server_id", flat=True)
+        )
+
+        # 2. 查询 MCPServerAppPermissionApply（申请记录表），用于展示申请状态和处理人
         mcp_server_permission_status: Dict[int, str] = {}
         mcp_server_permission_apply_status = (
             MCPServerAppPermissionApply.objects.filter(
-                bk_app_code=data["target_app_code"],
-                mcp_server_id__in=list(queryset.values_list("id", flat=True)),
+                bk_app_code=target_app_code,
+                mcp_server_id__in=mcp_server_ids,
                 is_deleted=False,
             )
             .order_by("-applied_time")
@@ -504,7 +524,17 @@ class MCPServerPermissionListApi(generics.ListAPIView):
             if not mcp_server_permission_status.get(obj["mcp_server_id"]):
                 mcp_server_permission_status[obj["mcp_server_id"]] = obj["status"]
 
+        # 3. 已有实际权限的 mcp_server，状态覆盖为 OWNED
+        for mcp_server_id in granted_mcp_server_ids:
+            mcp_server_permission_status[mcp_server_id] = MCPServerPermissionStatusEnum.OWNED.value
+
         mcp_server_permissions = []
+        # Build categories map for queryset
+        categories_map = MCPServerHandler.build_categories_map([obj.id for obj in queryset])
+
+        # 计算最低权限级别，用于判断是否展示应用态 URL
+        least_privileges = MCPServerHandler.get_least_privileges(list(queryset))
+
         for obj in queryset:
             permission_status = mcp_server_permission_status.get(
                 obj.id, MCPServerPermissionStatusEnum.NEED_APPLY.value
@@ -521,15 +551,7 @@ class MCPServerPermissionListApi(generics.ListAPIView):
 
             mcp_server_permissions.append(
                 {
-                    "mcp_server": {
-                        "id": obj.id,
-                        "name": obj.name,
-                        "title": obj.title or obj.name,
-                        "description": obj.description,
-                        "tools_count": obj.tools_count,
-                        "tool_names": obj.resource_names,
-                        "protocol_type": obj.protocol_type,
-                    },
+                    "mcp_server": obj,
                     "permission": {
                         "status": permission_status,
                         "action": action,
@@ -541,7 +563,14 @@ class MCPServerPermissionListApi(generics.ListAPIView):
                 }
             )
 
-        slz = serializers.MCPServerPermissionListOutputSLZ(mcp_server_permissions, many=True)
+        slz = serializers.MCPServerPermissionListOutputSLZ(
+            mcp_server_permissions,
+            many=True,
+            context={
+                "categories": categories_map,
+                "least_privileges": least_privileges,
+            },
+        )
         return OKJsonResponse(data=slz.data)
 
 
@@ -598,35 +627,52 @@ class MCPServerAppPermissionListApi(generics.ListAPIView):
         slz = self.get_serializer(data=request.query_params)
         slz.is_valid(raise_exception=True)
 
-        queryset = MCPServerAppPermissionApply.objects.filter(
-            bk_app_code=slz.validated_data["target_app_code"],
+        target_app_code = slz.validated_data["target_app_code"]
+
+        # 1. 查询 MCPServerAppPermission 表，获取所有有实际权限的 mcp_server（包括主动授权和申请通过）
+        # unique_together = ("bk_app_code", "mcp_server") 保证不会重复
+        granted_permissions = MCPServerAppPermission.objects.filter(
+            bk_app_code=target_app_code,
+        ).select_related("mcp_server", "mcp_server__gateway", "mcp_server__stage")
+
+        # 2. 查询申请通过的记录，用于获取 handled_by 信息
+        approved_applies = MCPServerAppPermissionApply.objects.filter(
+            bk_app_code=target_app_code,
             status__in=[MCPServerAppPermissionApplyStatusEnum.APPROVED.value],
         ).order_by("-applied_time")
+        handled_by_map = {obj.mcp_server_id: obj.handled_by for obj in approved_applies}
+
+        mcp_servers = [perm.mcp_server for perm in granted_permissions]
+
+        # 计算最低权限级别，用于判断是否展示应用态 URL
+        least_privileges = MCPServerHandler.get_least_privileges(mcp_servers)
+
+        # Build categories map
+        categories_map = MCPServerHandler.build_categories_map([perm.mcp_server_id for perm in granted_permissions])
 
         mcp_server_permissions = [
             {
-                "mcp_server": {
-                    "id": obj.mcp_server_id,
-                    "name": obj.mcp_server.name,
-                    "title": obj.mcp_server.title or obj.mcp_server.name,
-                    "description": obj.mcp_server.description,
-                    "tools_count": obj.mcp_server.tools_count,
-                    "tool_names": obj.mcp_server.resource_names,
-                    "protocol_type": obj.mcp_server.protocol_type,
-                },
+                "mcp_server": perm.mcp_server,
                 "permission": {
                     "status": MCPServerPermissionStatusEnum.OWNED.value,
                     "action": "",
                     "expires_in": None,
-                    "handled_by": [obj.handled_by],
-                    "mcp_server_id": obj.mcp_server_id,
-                    "gateway_id": obj.mcp_server.gateway_id,
+                    "handled_by": [handled_by_map.get(perm.mcp_server_id, "")],
+                    "mcp_server_id": perm.mcp_server_id,
+                    "gateway_id": perm.mcp_server.gateway_id,
                 },
             }
-            for obj in queryset
+            for perm in granted_permissions
         ]
 
-        slz = serializers.MCPServerAppPermissionListOutputSLZ(mcp_server_permissions, many=True)
+        slz = serializers.MCPServerAppPermissionListOutputSLZ(
+            mcp_server_permissions,
+            many=True,
+            context={
+                "categories": categories_map,
+                "least_privileges": least_privileges,
+            },
+        )
         return OKJsonResponse(data=slz.data)
 
 
@@ -656,22 +702,14 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
             data.get("query"),
             data.get("applied_time_start"),
             data.get("applied_time_end"),
-        )
+        ).select_related("mcp_server", "mcp_server__gateway", "mcp_server__stage")
 
         mcp_server_permission_records = [
             {
-                "mcp_server": {
-                    "id": obj.mcp_server_id,
-                    "name": obj.mcp_server.name,
-                    "title": obj.mcp_server.title or obj.mcp_server.name,
-                    "description": obj.mcp_server.description,
-                    "tools_count": obj.mcp_server.tools_count,
-                    "tool_names": obj.mcp_server.resource_names,
-                    "protocol_type": obj.mcp_server.protocol_type,
-                    "gateway_id": obj.mcp_server.gateway_id,  # 添加 gateway_id 用于构建审批 URL
-                },
+                "mcp_server": obj.mcp_server,
                 "record": {
                     "id": obj.id,
+                    "bk_app_code": obj.bk_app_code,
                     "applied_by": obj.applied_by,
                     "applied_time": obj.applied_time,
                     "handled_by": [obj.handled_by] if obj.handled_by else obj.mcp_server.gateway.maintainers,
@@ -681,14 +719,31 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
                     "comment": obj.comment,
                     "reason": obj.reason,
                     "expire_days": obj.expire_days,
+                    "itsm_ticket_id": obj.itsm_ticket_id,
                     "mcp_server_id": obj.mcp_server_id,  # 添加 mcp_server_id 用于构建审批 URL
                     "gateway_id": obj.mcp_server.gateway_id,  # 在 record 中也添加 gateway_id
+                    "tenant_mode": obj.mcp_server.gateway.tenant_mode,
+                    "tenant_id": obj.mcp_server.gateway.tenant_id,
                 },
             }
             for obj in queryset
         ]
 
-        slz = serializers.MCPServerAppPermissionRecordListOutputSLZ(mcp_server_permission_records, many=True)
+        # Build categories map
+        categories_map = MCPServerHandler.build_categories_map([obj.mcp_server_id for obj in queryset])
+
+        # 计算最低权限级别，用于判断是否展示应用态 URL
+        mcp_servers = [obj.mcp_server for obj in queryset]
+        least_privileges = MCPServerHandler.get_least_privileges(mcp_servers)
+
+        slz = serializers.MCPServerAppPermissionRecordListOutputSLZ(
+            mcp_server_permission_records,
+            many=True,
+            context={
+                "categories": categories_map,
+                "least_privileges": least_privileges,
+            },
+        )
 
         return OKJsonResponse(data=slz.data)
 
@@ -716,7 +771,9 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
         data = slz.validated_data
 
         try:
-            return MCPServerAppPermissionApply.objects.get(bk_app_code=data["target_app_code"], id=record_id)
+            return MCPServerAppPermissionApply.objects.select_related(
+                "mcp_server", "mcp_server__gateway", "mcp_server__stage"
+            ).get(bk_app_code=data["target_app_code"], id=record_id)
         except MCPServerAppPermissionApply.DoesNotExist:
             raise error_codes.NOT_FOUND
 
@@ -724,16 +781,7 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
         instance = self.get_object()
 
         mcp_server_permission_record = {
-            "mcp_server": {
-                "id": instance.mcp_server_id,
-                "name": instance.mcp_server.name,
-                "title": instance.mcp_server.title or instance.mcp_server.name,
-                "description": instance.mcp_server.description,
-                "tools_count": instance.mcp_server.tools_count,
-                "tool_names": instance.mcp_server.resource_names,
-                "protocol_type": instance.mcp_server.protocol_type,
-                "gateway_id": instance.mcp_server.gateway_id,  # 添加 gateway_id 用于构建审批 URL
-            },
+            "mcp_server": instance.mcp_server,
             "record": {
                 "id": instance.id,
                 "applied_by": instance.applied_by,
@@ -747,13 +795,70 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
                 "comment": instance.comment,
                 "reason": instance.reason,
                 "expire_days": instance.expire_days,
+                "itsm_ticket_id": instance.itsm_ticket_id,
                 "mcp_server_id": instance.mcp_server_id,  # 添加 mcp_server_id 用于构建审批 URL
                 "gateway_id": instance.mcp_server.gateway_id,  # 在 record 中也添加 gateway_id
             },
         }
 
-        slz = self.get_serializer(mcp_server_permission_record)
+        # Build categories map
+        categories_map = MCPServerHandler.build_categories_map([instance.mcp_server_id])
+
+        # 计算最低权限级别，用于判断是否展示应用态 URL
+        least_privileges = MCPServerHandler.get_least_privileges([instance.mcp_server])
+
+        context = {
+            **self.get_serializer_context(),
+            "categories": categories_map,
+            "least_privileges": least_privileges,
+        }
+        slz = self.get_serializer(mcp_server_permission_record, context=context)
         return OKJsonResponse(data=slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="获取全量的 MCPServer 列表（应用态接口）",
+        query_serializer=serializers.MCPServerListInputSLZ,
+        responses={status.HTTP_200_OK: serializers.MCPServerListOutputSLZ(many=True)},
+        tags=["OpenAPI.V2.Inner"],
+    ),
+)
+class MCPServerListApi(generics.ListAPIView):
+    """
+    获取全量 MCP Server 列表
+    - 应用态接口，返回所有的 MCP Server（包括公开和非公开）
+    - 只返回活跃状态：status=ACTIVE, gateway.status=ACTIVE, stage.status=ACTIVE
+    - 返回格式参考 v2_open_list_mcp_server，新增 prompt 相关数据
+    """
+
+    permission_classes = [OpenAPIV2Permission]
+
+    def list(self, request, *args, **kwargs):
+        slz = serializers.MCPServerListInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+
+        queryset = MCPServerHandler.build_list_queryset(
+            keyword=slz.validated_data.get("keyword"),
+            order_by=slz.validated_data.get("order_by", "-updated_time"),
+            ids=slz.validated_data.get("mcp_server_ids") or None,
+        )
+
+        page = self.paginate_queryset(queryset)
+        context = MCPServerHandler.build_list_context(page)
+
+        mcp_server_ids = [mcp_server.id for mcp_server in page]
+        context["prompts_count_map"] = MCPServerHandler.get_prompts_count_map(mcp_server_ids)
+
+        # Add categories map
+        context["categories"] = MCPServerHandler.build_categories_map([mcp_server.id for mcp_server in page])
+
+        # 计算最低权限级别，用于判断是否展示应用态 URL
+        context["least_privileges"] = MCPServerHandler.get_least_privileges(page)
+
+        output_slz = serializers.MCPServerListOutputSLZ(page, many=True, context=context)
+        return self.get_paginated_response(output_slz.data)
 
 
 # ===================== 网关状态变更/删除 API =====================

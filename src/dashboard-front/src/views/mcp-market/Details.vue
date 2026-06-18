@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) 2026 Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -17,8 +17,8 @@
  */
 
 <template>
-  <div>
-    <div class="top-bar flex-row items-center">
+  <div class="mcp-market-detail-wrapper">
+    <div class="top-bar flex items-center">
       <AgIcon
         name="return-small"
         size="32"
@@ -43,12 +43,12 @@
 
     <div class="main">
       <div class="base-info">
-        <div class="pt-18px pb-12px flex items-center justify-between w-full header">
-          <div class="flex items-center flex-wrap gap-8px">
-            <div class="flex items-center max-w-[960px] min-w-0 title">
+        <div class="flex items-center justify-between header">
+          <div class="flex items-center max-w-[calc(100%-300px)] gap-8px">
+            <div class="flex items-center min-w-0 title">
               <BkOverflowTitle
                 type="tips"
-                class="truncate max-w-1/2"
+                class="truncate"
               >
                 {{ mcpDetails?.title }}
               </BkOverflowTitle>
@@ -59,17 +59,31 @@
                 ({{ mcpDetails?.name }})
               </BkOverflowTitle>
             </div>
-            <div class="flex items-center flex-shrink-0">
+            <div class="flex items-center gap-8px flex-shrink-0">
               <BkTag
-                v-if="mcpDetails?.gateway?.is_official"
+                v-if="mcpDetails?.is_official"
                 theme="success"
-                class="mr-8px"
+                class="h-18px"
               >
                 {{ t('官方') }}
               </BkTag>
-              <BkTag theme="info">
+              <BkTag
+                theme="info"
+                class="h-18px"
+              >
                 {{ mcpDetails?.stage?.name }}
               </BkTag>
+              <div
+                v-if="isEnabledOAuth"
+                v-bk-tooltips="t('已开启 OAuth2 公开客户端模式，用户通过浏览器授权即可使用')"
+                class="external-oauth-tag bg-#e1ecff cursor-pointer"
+              >
+                <AgIcon
+                  name="deqiu"
+                  size="14"
+                  color="#3a84ff"
+                />
+              </div>
             </div>
           </div>
 
@@ -78,27 +92,39 @@
               theme="primary"
               :href="envStore.env.DOC_LINKS.MCP_SERVER_PERMISSION_APPLY"
               target="_blank"
+              class="text-12px"
             >
               <AgIcon
                 name="jump"
-                size="16"
-                class="icon"
+                size="12"
+                class="mr-6px icon"
               />
               {{ t('权限申请指引') }}
             </BkLink>
           </div>
         </div>
-        <div class="content">
+        <div class="info-content">
           <div class="info-item">
             <div class="label">
               {{ t('访问地址') }}:
             </div>
-            <div class="value">
-              {{ mcpDetails?.url }}
+            <div class="w-full flex items-baseline value">
+              <div
+                v-bk-tooltips="{
+                  content: mcpDetails?.url ?? '',
+                  disabled: !mcpDetails?.isOverflow,
+                  extCls: 'max-w-[calc(100%-100px)]'
+                }"
+                class="max-w-[calc(100%-100px)] truncate"
+                @mouseenter="(e: MouseEvent) => handleMouseenter(e, mcpDetails)"
+                @mouseleave="(e: MouseEvent) => handleMouseleave(e, mcpDetails)"
+              >
+                {{ mcpDetails?.url }}
+              </div>
               <AgIcon
                 name="copy"
                 size="16"
-                class="icon"
+                class="shrink-0 ml-8px icon"
                 @click="() => handleCopy(mcpDetails?.url)"
               />
             </div>
@@ -107,7 +133,16 @@
             <div class="label">
               {{ t('描述') }}:
             </div>
-            <div class="value">
+            <div
+              v-bk-tooltips="{
+                content: mcpDetails?.description ?? '',
+                disabled: !mcpDetails?.isOverflow,
+                extCls: 'max-w-[calc(100%-100px)] break-all'
+              }"
+              class="truncate value"
+              @mouseenter="(e: MouseEvent) => handleMouseenter(e, mcpDetails)"
+              @mouseleave="(e: MouseEvent) => handleMouseleave(e, mcpDetails)"
+            >
               {{ mcpDetails?.description }}
             </div>
           </div>
@@ -115,14 +150,45 @@
             <div class="label">
               {{ t('标签') }}:
             </div>
-            <div class="value">
-              <BkTag
-                v-for="label in mcpDetails?.labels"
-                :key="label"
-                class="mr8"
+            <div class="value lh-22px">
+              <div
+                v-if="mcpDetails?.labels?.length"
+                class="flex flex-wrap gap-8px w-full"
               >
-                {{ label }}
-              </BkTag>
+                <template
+                  v-for="label of mcpDetails.labels"
+                  :key="label"
+                >
+                  <BkTag
+                    class="flex-shrink-0 max-w-full break-all"
+                    :title="label"
+                  >
+                    {{ label }}
+                  </BkTag>
+                </template>
+              </div>
+              <template v-else>
+                --
+              </template>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="label">
+              {{ t('分类') }}:
+            </div>
+            <div class="value lh-22px">
+              <template v-if="mcpDetails?.categories?.length">
+                <BkTag
+                  v-for="category of mcpDetails?.categories"
+                  :key="category"
+                  class="mr-8px"
+                >
+                  {{ category.display_name }}
+                </BkTag>
+              </template>
+              <template v-else>
+                --
+              </template>
             </div>
           </div>
           <div class="info-item">
@@ -149,90 +215,116 @@
         </div>
       </div>
 
-      <BkTab
-        v-model:active="active"
-        type="card-tab"
-        class="mcp-tab"
+      <section
+        :class="[
+          `tab-wrapper mcp-detail-${active}`,
+        ]"
       >
-        <BkTabPanel
-          name="tools"
+        <BkResizeLayout
+          placement="right"
+          :border="false"
+          :initial-divide="isShowConfig ? divideRatio : 0"
+          :class="isShowConfig ? 'gap-16px' : ''"
         >
-          <template #label>
-            <div class="flex-row items-center">
-              {{ t('工具') }}
-              <div
-                v-if="toolsCount > 0"
-                class="count"
-                :class="[active === 'tools' ? 'on' : 'off']"
-              >
-                {{ toolsCount }}
-              </div>
-            </div>
-          </template>
-          <div class="panel-content">
-            <ServerTools
-              :server="mcpDetails"
-              page="market"
+          <template
+            v-if="isShowConfig"
+            #aside
+          >
+            <!-- 配置 -->
+            <AgMcpAgentConfig
+              :list="mcpConfigList"
+              class="h-full bg-white mcp-detail-config"
             />
-          </div>
-        </BkTabPanel>
-        <BkTabPanel
-          v-if="isEnablePrompt && promptCount > 0"
-          name="prompts"
-        >
-          <template #label>
-            <div class="flex-row items-center">
-              Prompts
-              <div
-                v-if="promptCount"
-                class="count"
-                :class="[active === 'prompts' ? 'on' : 'off']"
-              >
-                {{ promptCount }}
-              </div>
-            </div>
           </template>
-          <div class="panel-content">
-            <ServerPrompts
-              :server="mcpDetails"
-              page="market"
-            />
-          </div>
-        </BkTabPanel>
-        <BkTabPanel
-          name="guide"
-        >
-          <template #label>
-            <div class="flex-row items-center">
-              {{ t('使用指引') }}
-            </div>
-          </template>
-          <div class="panel-content">
-            <div
-              v-if="isExistCustomGuide"
-              class="p-t-24px! p-r-24px! w-full text-align-right"
+          <template #main>
+            <BkTab
+              v-model:active="active"
+              type="card-tab"
+              class="mcp-tab"
             >
-              <BkButton
-                theme="primary"
-                text
-                @click="handleShowGuide"
+              <BkTabPanel
+                name="tools"
               >
-                <AgIcon
-                  name="wenjian"
-                  size="16"
-                  class="mr-8px"
-                />
-                {{ t('查看默认使用指引') }}
-              </BkButton>
-            </div>
-            <Guideline
-              :markdown-str="markdownStr"
-              :show-usage-guide="false"
-              page="market"
-            />
-          </div>
-        </BkTabPanel>
-      </BkTab>
+                <template #label>
+                  <div class="flex-row items-center">
+                    {{ t('工具') }}
+                    <div
+                      v-if="toolsCount > 0"
+                      class="count"
+                      :class="[active === 'tools' ? 'on' : 'off']"
+                    >
+                      {{ toolsCount }}
+                    </div>
+                  </div>
+                </template>
+                <div class="panel-content">
+                  <ServerTools
+                    :server="mcpDetails"
+                    page="market"
+                  />
+                </div>
+              </BkTabPanel>
+              <BkTabPanel
+                v-if="isEnablePrompt && promptCount > 0"
+                name="prompts"
+              >
+                <template #label>
+                  <div class="flex-row items-center">
+                    Prompts
+                    <div
+                      v-if="promptCount"
+                      class="count"
+                      :class="[active === 'prompts' ? 'on' : 'off']"
+                    >
+                      {{ promptCount }}
+                    </div>
+                  </div>
+                </template>
+                <div class="panel-content">
+                  <ServerPrompts
+                    :server="mcpDetails"
+                    page="market"
+                  />
+                </div>
+              </BkTabPanel>
+              <BkTabPanel
+                name="guide"
+              >
+                <template #label>
+                  <div class="flex-row items-center">
+                    {{ t('使用指引') }}
+                  </div>
+                </template>
+                <div class="panel-content">
+                  <div
+                    v-if="isExistCustomGuide"
+                    class="p-t-24px! p-r-24px! w-full text-align-right"
+                  >
+                    <BkButton
+                      theme="primary"
+                      text
+                      @click="handleShowGuide"
+                    >
+                      <AgIcon
+                        name="wenjian"
+                        size="16"
+                        class="mr-8px"
+                      />
+                      {{ t('查看默认使用指引') }}
+                    </BkButton>
+                  </div>
+                  <Guideline
+                    :markdown-str="markdownStr"
+                    :show-usage-guide="false"
+                    :config-list="mcpConfigList"
+                    page="market"
+                  />
+                </div>
+              </BkTabPanel>
+            </BkTab>
+          </template>
+        </BkResizeLayout>
+      </section>
     </div>
 
     <DefaultMdGuideSlider
@@ -243,42 +335,71 @@
 </template>
 
 <script lang="ts" setup>
+// @ts-nocheck
 import { copy } from '@/utils';
+import { useMcpConfigDivideRatio } from '@/hooks';
 import {
   useEnv,
   useFeatureFlag,
 } from '@/stores';
 import AgIcon from '@/components/ag-icon/Index.vue';
-// import { useGetGlobalProperties } from '@/hooks';
-import { type IMarketplaceDetails, getMcpServerDetails } from '@/services/source/mcp-market';
+import {
+  type IMarketplaceConfig,
+  type IMarketplaceDetails,
+  getMcpAIConfigList,
+  getMcpServerDetails,
+} from '@/services/source/mcp-market';
 import ServerTools from '@/views/mcp-server/components/ServerTools.vue';
 import ServerPrompts from '@/views/mcp-server/components/ServerPrompts.vue';
 import Guideline from './components/GuideLine.vue';
 import EditMember from '@/views/basic-info/components/EditMember.vue';
-import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
 import DefaultMdGuideSlider from '@/views/mcp-market/components/DefaultMdGuideSlider.vue';
+import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
+import AgMcpAgentConfig from '@/components/ag-mcp-agent-config/Index.vue';
+
+interface IMarketplaceDetailsWithOverflow extends IMarketplaceDetails {
+  isOverflow?: boolean
+}
 
 const { t } = useI18n();
 const router = useRouter();
 const route = useRoute();
 const featureFlagStore = useFeatureFlag();
 const envStore = useEnv();
-// const globalProperties = useGetGlobalProperties();
-// const { GLOBAL_CONFIG } = globalProperties;
+const { divideRatio } = useMcpConfigDivideRatio([
+  {
+    maxWidth: 1440,
+    divide: '40%',
+  },
+  {
+    minWidth: 1440,
+    maxWidth: 1919,
+    divide: '34%',
+  },
+  {
+    minWidth: 1920,
+    divide: '30%',
+  },
+]);
 
 const active = ref('tools');
-const toolsCount = ref<number>(0);
+const toolsCount = ref(0);
 const promptCount = ref(0);
-const mcpDetails = ref<IMarketplaceDetails>();
+const mcpDetails = ref<IMarketplaceDetailsWithOverflow>();
 const defaultMarkdownStr = ref('');
 const markdownStr = ref('');
 const isExistCustomGuide = ref(false);
 const isShowGuideSlider = ref(false);
+const mcpConfigList = ref<IMarketplaceConfig[]>([]);
 
 const mcpId = computed(() => {
   return route.params.id;
 });
 const isEnablePrompt = computed(() => featureFlagStore?.flags?.ENABLE_MCP_SERVER_PROMPT);
+const isEnabledOAuth = computed(() =>
+  featureFlagStore?.flags?.ENABLE_MCP_SERVER_OAUTH2_PUBLIC_CLIENT && mcpDetails.value?.oauth2_public_client_enabled,
+);
+const isShowConfig = computed(() => ['tools', 'guide'].includes(active.value) && mcpConfigList.value.length > 0);
 
 const handleCopy = (str: string) => {
   copy(str);
@@ -301,131 +422,201 @@ const getDetails = async () => {
   }
 };
 
+const fetchMcpAIConfigList = async () => {
+  const res = await getMcpAIConfigList(mcpId.value);
+  mcpConfigList.value = res?.configs ?? [];
+};
+
 const handleShowGuide = () => {
   isShowGuideSlider.value = true;
+};
+
+const handleMouseenter = (e: MouseEvent & { target: HTMLElement }, row: IMarketplaceDetailsWithOverflow) => {
+  const cell = e.target.closest('.truncate') as HTMLElement | null;
+  if (cell) {
+    row.isOverflow = cell.scrollWidth > cell.offsetWidth;
+  }
+};
+
+const handleMouseleave = (_: MouseEvent, row: IMarketplaceDetailsWithOverflow) => {
+  row.isOverflow = false;
 };
 
 watch(
   () => mcpId.value,
   () => {
-    getDetails();
+    Promise.allSettled([getDetails(), fetchMcpAIConfigList()]);
   },
   { immediate: true },
 );
-
 </script>
 
 <style lang="scss" scoped>
-.top-bar {
-  position: sticky;
-  top: 0;
-  height: 64px;
-  padding: 0 24px;
-  background: #ffffff;
-  z-index: 9;
-  box-shadow: 0 3px 4px 0 #0000000a;
-
-  .icon {
-    margin-right: 4px;
-    color: #3A84FF;
-    cursor: pointer;
-  }
-
-  .top-bar-title {
-    font-size: 16px;
-    color: #313238;
-  }
-}
-
-.main {
-  width: 1280px;
-  height: calc(100vh - 116px);
-  padding: 24px 0 42px;
-  margin: 0 auto;
-  background-color: #f5f7fa;
+.mcp-market-detail-wrapper {
   box-sizing: border-box;
 
-  .base-info {
+  .top-bar {
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    height: 52px;
     padding: 0 24px;
-    margin-bottom: 16px;
-    background: #FFF;
-    border-radius: 2px;
-    box-shadow: 0 2px 4px 0 #1919290d;
+    background-color: #fff;
+    box-shadow: 0 3px 4px 0 #0000000a;
 
-    .header {
-      border-bottom: 1px solid #EAEBF0;
+    .icon {
+      margin-right: 4px;
+      color: #3a84ff;
+      cursor: pointer;
+    }
 
-      .title {
-        margin-right: 16px;
-        font-size: 20px;
-        font-weight: bold;
-        color: #313238;
+    .top-bar-title {
+      font-size: 16px;
+      color: #313238;
+    }
+  }
+
+  .main {
+    max-width: 1920px;
+    padding: 0 80px;
+    margin: 24px auto;
+    background-color: #f5f7fa;
+    box-sizing: border-box;
+
+    .base-info {
+      margin-bottom: 16px;
+      background-color: #fff;
+      border-radius: 2px;
+      box-shadow: 0 2px 4px 0 #1919290d;
+
+      .header {
+        height: 52px;
+        padding: 0 24px;
+        border-bottom: 1px solid #eaebf0;
+
+        .title {
+          margin-right: 8px;
+          font-size: 20px;
+          font-weight: 700;
+          color: #313238;
+        }
       }
 
-      .permission-guide {
+      .info-content {
+        padding: 24px 24px 20px;
 
-        .icon {
-          margin-right: 6px;
+        .info-item {
+          display: flex;
+          align-items: baseline;
+          font-size: 14px;
+          line-height: 40px;
+
+          .label {
+            margin-right: 12px;
+            color: #4d4f56;
+            text-align: right;
+            flex-shrink: 0;
+          }
+
+          .value {
+            line-height: 22px;
+            color: #313238;
+            flex: 1;
+            min-width: 0;
+
+            .icon {
+              color: #3a84ff;
+              cursor: pointer;
+            }
+
+            .member-item {
+              line-height: 22px;
+            }
+          }
+
         }
       }
     }
 
-    .content {
-      padding: 12px 0 4px;
+    // 屏幕宽度小于1680px时，padding自动适配
+    @media (max-width: 1680px) {
+      padding: 0 calc(100vw / 24); // 小屏幕按比例缩放边距
+    }
 
-      .info-item {
-        display: flex;
-        align-items: center;
-        margin-bottom: 20px;
+    // 极小屏幕强制最小边距，避免挤压
+    @media (max-width: 768px) {
+      padding: 0 24px;
+    }
+  }
 
-        .label {
-          font-size: 14px;
-          color: #4D4F56;
-        }
+  .count {
+    padding: 2px 8px;
+    margin-left: 8px;
+    font-size: 12px;
+    line-height: 12px;
+    border-radius: 8px;
 
-        .value {
-          font-size: 14px;
-          color: #313238;
-          margin-left: 8px;
+    &.on {
+      color: #3a84ff;
+      background: #E1ECFF;
+    }
 
-          .icon {
-            color: #3A84FF;
-            cursor: pointer;
+    &.off {
+      color: #4d4f56;
+    }
+  }
+
+  .tab-wrapper {
+
+    :deep(.bk-tab-content) {
+      padding: 0;
+      background-color: #fff;
+    }
+
+    .bk-resize-layout-right {
+
+      :deep(>.bk-resize-layout-aside) {
+        display: none;
+      }
+    }
+
+    &.mcp-detail-tools,
+    &.mcp-detail-guide {
+      width: 100%;
+
+      .bk-resize-layout-right {
+
+        :deep(>.bk-resize-layout-aside) {
+          display: block;
+
+          .bk-resize-trigger {
+            background-color: #fff;
           }
         }
+
+        :deep(>.bk-resize-layout-main) {
+          width: 62.5% !important;
+        }
       }
     }
   }
-}
 
-.count {
-  padding: 2px 8px;
-  margin-left: 8px;
-  font-size: 12px;
-  line-height: 12px;
-  border-radius: 8px;
+  :deep(.external-oauth-tag) {
+    width: 18px;
+    height: 18px;
+    position: relative;
+    font-size: 0;
+    line-height: 1;
+    flex-shrink: 0;
+    border-radius: 2px;
+    box-sizing: border-box;
 
-  &.on {
-    color: #3A84FF;
-    background: #E1ECFF;
-  }
-
-  &.off {
-    color: #4D4F56;
-
-    // background: #C4C6CC;
-  }
-}
-
-.mcp-tab {
-
-  :deep(.bk-tab-content) {
-    padding: 0;
-    background-color: #ffffff;
-  }
-
-  .panel-content {
-    background: #FFF;
+    .apigateway-icon {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
   }
 }
 

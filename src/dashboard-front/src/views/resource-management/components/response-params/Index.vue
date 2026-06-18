@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -18,18 +18,19 @@
 
 <template>
   <div class="response-params-table-wrapper">
-    <template
+    <div
       v-for="response in responseList"
       :key="response.id"
+      class="mb-12px"
     >
       <ResponseParamsTable
         ref="responseParamsTableRefs"
         :readonly="readonly"
         :response="response"
         @delete="() => handleDelete(response)"
-        @change-code="(code) => response.code = code"
+        @change-code="(code: any) => response.code = code"
       />
-    </template>
+    </div>
     <div v-if="!readonly">
       <BkButton
         text
@@ -105,8 +106,8 @@ watch(() => detail, () => {
 const addResponse = () => {
   // 响应码查重，如果存在了，就递增
   let code = '200';
-  if (responseList.value.length && responseList.value.some(item => item.code === code)) {
-    code = Number(last(responseList.value)!.code) + 1 + '';
+  if (responseList.value.length && responseList.value.some((item: any) => item.code === code)) {
+    code = Number((last(responseList.value) as any)!.code) + 1 + '';
   }
 
   responseList.value.push({
@@ -127,17 +128,17 @@ const addResponse = () => {
                   type: 'string',
                   description: '',
                 },
-              },
+              } as any,
             },
           },
         },
       },
-    },
+    } as any,
   });
 };
 
 const handleDelete = (response: IResponse) => {
-  responseList.value = responseList.value.filter(item => item.id !== response.id);
+  responseList.value = responseList.value.filter((item: any) => item.id !== response.id);
 };
 
 defineExpose({

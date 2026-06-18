@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -31,13 +31,15 @@ from django.urls import resolve, reverse
 from rest_framework.test import APIRequestFactory as DRFAPIRequestFactory
 
 from apigateway.apps.api_debug.models import APIDebugHistory
+from apigateway.apps.data_plane.constants import DEFAULT_DATA_PLANE_NAME
+from apigateway.apps.data_plane.models import DataPlane
 from apigateway.apps.openapi.models import (
     OpenAPIFileResourceSchemaVersion,
     OpenAPIResourceSchema,
     OpenAPIResourceSchemaVersion,
 )
-from apigateway.apps.plugin.constants import PluginBindingScopeEnum, PluginStyleEnum, PluginTypeCodeEnum
-from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm, PluginType
+from apigateway.apps.plugin.constants import PluginBindingScopeEnum, PluginTypeCodeEnum
+from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginType
 from apigateway.apps.support.models import GatewaySDK, ReleasedResourceDoc, ResourceDoc, ResourceDocVersion
 from apigateway.biz.resource import ResourceHandler
 from apigateway.biz.resource.models import ResourceAuthConfig, ResourceBackendConfig, ResourceData
@@ -136,6 +138,11 @@ def fake_gateway(faker):
     GatewayAuthContext().save(gateway.pk, {})
 
     return gateway
+
+
+@pytest.fixture
+def default_data_plane():
+    return G(DataPlane, name=DEFAULT_DATA_PLANE_NAME)
 
 
 @pytest.fixture
@@ -788,28 +795,6 @@ def echo_plugin_type(echo_plugin_type_schema):
 
 
 @pytest.fixture()
-def echo_plugin_default_form(echo_plugin_type):
-    return G(
-        PluginForm,
-        language="",
-        type=echo_plugin_type,
-        config=None,
-        style=PluginStyleEnum.RAW.value,
-    )
-
-
-@pytest.fixture()
-def echo_plugin_en_form(echo_plugin_type):
-    return G(
-        PluginForm,
-        language="en",
-        type=echo_plugin_type,
-        config=None,
-        style=PluginStyleEnum.RAW.value,
-    )
-
-
-@pytest.fixture()
 def echo_plugin(echo_plugin_type, fake_gateway, faker):
     return G(
         PluginConfig,
@@ -1266,6 +1251,16 @@ def fake_resource_dict():
             "auth_verified_required": True,
         },
     }
+
+
+@pytest.fixture
+def fake_plugin_config(faker):
+    return PluginConfig(
+        pk=1,
+        name="cors",
+        type=PluginType(code="bk-cors"),
+        yaml="allow_origins:\n- '*'",
+    )
 
 
 @pytest.fixture

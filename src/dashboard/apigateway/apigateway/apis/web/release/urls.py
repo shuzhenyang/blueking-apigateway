@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -28,7 +28,6 @@ from .views import (
     ReleaseAvailableResourceSchemaRetrieveApi,
     ReleaseCreateApi,
     ReleaseHistoryListApi,
-    ReleaseHistoryRetrieveApi,
     RelishHistoryEventsRetrieveAPI,
 )
 
@@ -75,7 +74,8 @@ urlpatterns = [
         include(
             [
                 path("", ReleaseHistoryListApi.as_view(), name="gateway.release_histories.list"),
-                path("latest/", ReleaseHistoryRetrieveApi.as_view(), name="gateway.release_histories.retrieve_latest"),
+                # FIXME: not used? commented out in 2026-03-23, remove in the future
+                # path("latest/", ReleaseHistoryRetrieveApi.as_view(), name="gateway.release_histories.retrieve_latest"),
                 path(
                     "<int:history_id>/events/",
                     RelishHistoryEventsRetrieveAPI.as_view(),

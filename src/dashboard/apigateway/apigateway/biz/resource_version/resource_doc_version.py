@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -20,9 +20,8 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from apigateway.apps.support.constants import DocLanguageEnum
-from apigateway.apps.support.models import ReleasedResourceDoc, ResourceDoc, ResourceDocVersion
+from apigateway.apps.support.models import ResourceDoc, ResourceDocVersion
 from apigateway.biz.resource_doc import ResourceDocHandler
-from apigateway.core.models import Release
 
 
 class ResourceDocVersionHandler:
@@ -82,11 +81,3 @@ class ResourceDocVersionHandler:
 
         # 文档不可直接删除，资源删除导致的文档删除，在判断"是否需要创建资源版本"时校验
         return False
-
-    @staticmethod
-    def clear_unreleased_resource_doc(gateway_id: int) -> None:
-        """清理未发布的资源文档，如已发布版本被新版本替代的情况"""
-        resource_version_ids = Release.objects.get_released_resource_version_ids(gateway_id)
-        ReleasedResourceDoc.objects.filter(gateway_id=gateway_id).exclude(
-            resource_version_id__in=resource_version_ids
-        ).delete()

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -179,6 +179,17 @@ if settings.ENABLE_MULTI_TENANT_MODE:
 
 
 ES_OUTPUT_FIELDS = [field["field"] for field in ES_LOG_FIELDS]
+
+# 工具箱 access-log 字段映射（ES 字段 -> 接口返回字段）
+TOOLBOX_LOG_FIELD_MAPPINGS = [
+    {
+        "es_field": "api_name",
+        "output_field": "gateway_name",
+        "label": _("网关名称"),
+        "is_filter": True,
+        "insert_at": 5,
+    }
+]
 
 
 # 完全匹配的敏感 key，如 key access_token 仅匹配字段 access_token

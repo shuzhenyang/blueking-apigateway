@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -32,7 +32,7 @@ var _ = Describe("MCP", func() {
 		var mcpProxy *proxy.MCPProxy
 
 		BeforeEach(func() {
-			mcpProxy = proxy.NewMCPProxy()
+			mcpProxy = proxy.NewMCPProxy("", "")
 		})
 
 		Describe("Basic Operations", func() {
@@ -75,6 +75,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(mcpProxy.IsMCPServerExist("test-server")).To(BeTrue())
@@ -82,6 +83,41 @@ var _ = Describe("MCP", func() {
 				server := mcpProxy.GetMCPServer("test-server")
 				Expect(server).NotTo(BeNil())
 				Expect(server.GetResourceVersionID()).To(Equal(1))
+				Expect(server.RawResponseEnabled()).To(BeFalse())
+			})
+
+			It("should add server with raw_response_enabled enabled", func() {
+				openapiSpec := &openapi3.T{
+					OpenAPI: "3.0.0",
+					Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
+					Servers: []*openapi3.Server{{URL: "https://api.example.com"}},
+					Paths:   &openapi3.Paths{},
+				}
+
+				pathItem := &openapi3.PathItem{
+					Get: &openapi3.Operation{
+						OperationID: "getUsers",
+						Summary:     "Get users",
+						Responses:   &openapi3.Responses{},
+					},
+				}
+				openapiSpec.Paths.Set("/users", pathItem)
+
+				err := mcpProxy.AddMCPServerFromOpenAPISpec(
+					"raw-response-server",
+					1,
+					openapiSpec,
+					[]string{"getUsers"},
+					nil,
+					constant.MCPServerProtocolTypeSSE,
+					true,
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(mcpProxy.IsMCPServerExist("raw-response-server")).To(BeTrue())
+
+				server := mcpProxy.GetMCPServer("raw-response-server")
+				Expect(server).NotTo(BeNil())
+				Expect(server.RawResponseEnabled()).To(BeTrue())
 			})
 		})
 
@@ -101,6 +137,7 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(mcpProxy.IsMCPServerExist("test-server")).To(BeTrue())
@@ -117,6 +154,49 @@ var _ = Describe("MCP", func() {
 		})
 
 		Describe("UpdateMCPServerFromOpenApiSpec", func() {
+			It(
+				"should update raw_response_enabled and rebuild tool handlers when raw_response_enabled changes with same version",
+				func() {
+					openapiSpec := &openapi3.T{
+						OpenAPI: "3.0.0",
+						Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
+						Servers: []*openapi3.Server{{URL: "https://api.example.com"}},
+						Paths:   &openapi3.Paths{},
+					}
+
+					pathItem := &openapi3.PathItem{
+						Get: &openapi3.Operation{
+							OperationID: "getUsers",
+							Summary:     "Get users",
+							Responses:   &openapi3.Responses{},
+						},
+					}
+					openapiSpec.Paths.Set("/users", pathItem)
+
+					// 创建 server，raw_response_enabled=false
+					err := mcpProxy.AddMCPServerFromOpenAPISpec(
+						"raw-switch-server", 1, openapiSpec,
+						[]string{"getUsers"}, nil, constant.MCPServerProtocolTypeSSE, false,
+					)
+					Expect(err).NotTo(HaveOccurred())
+
+					server := mcpProxy.GetMCPServer("raw-switch-server")
+					Expect(server).NotTo(BeNil())
+					Expect(server.RawResponseEnabled()).To(BeFalse())
+					Expect(server.GetResourceVersionID()).To(Equal(1))
+
+					// 更新 server，仅切换 raw_response_enabled=true，resourceVersionID 不变
+					err = mcpProxy.UpdateMCPServerFromOpenApiSpec(
+						server, "raw-switch-server", 1, openapiSpec,
+						[]string{"getUsers"}, nil, true,
+					)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(server.RawResponseEnabled()).To(BeTrue())
+					// resourceVersionID 应保持不变
+					Expect(server.GetResourceVersionID()).To(Equal(1))
+				},
+			)
+
 			It("should update server with new version", func() {
 				openapiSpec := &openapi3.T{
 					OpenAPI: "3.0.0",
@@ -141,6 +221,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -170,7 +251,13 @@ var _ = Describe("MCP", func() {
 				newOpenapiSpec.Paths.Set("/users", newPathItem)
 
 				err = mcpProxy.UpdateMCPServerFromOpenApiSpec(
-					server, "test-server", 2, newOpenapiSpec, []string{"getUsers", "createUser"}, nil,
+					server,
+					"test-server",
+					2,
+					newOpenapiSpec,
+					[]string{"getUsers", "createUser"},
+					nil,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(server.GetResourceVersionID()).To(Equal(2))
@@ -193,6 +280,7 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -217,6 +305,7 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeStreamableHTTP,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -242,6 +331,7 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -260,12 +350,17 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeStreamableHTTP,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
 				newServer := mcpProxy.GetMCPServer("switch-server")
 				Expect(newServer).NotTo(BeNil())
-				Expect(newServer.GetProtocolType()).To(Equal(constant.MCPServerProtocolTypeStreamableHTTP))
+				Expect(
+					newServer.GetProtocolType(),
+				).To(
+					Equal(constant.MCPServerProtocolTypeStreamableHTTP),
+				)
 				Expect(newServer.IsStreamableHTTP()).To(BeTrue())
 				Expect(newServer.GetResourceVersionID()).To(Equal(2))
 			})
@@ -286,6 +381,7 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeStreamableHTTP,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -304,6 +400,7 @@ var _ = Describe("MCP", func() {
 					[]string{},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -340,6 +437,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -379,6 +477,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers", "createUser"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -431,6 +530,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -466,7 +566,7 @@ var _ = Describe("MCP", func() {
 
 				// 使用相同的 resourceVersionID 更新（模拟 resource_names 变化但版本不变的场景）
 				err = mcpProxy.UpdateMCPServerFromOpenApiSpec(
-					server, "test-server", 1, openapiSpec, newResourceNames, nil,
+					server, "test-server", 1, openapiSpec, newResourceNames, nil, false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -507,6 +607,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers", "createUser"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -565,6 +666,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -631,6 +733,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers", "createUser"},
 					toolNameMap,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -669,6 +772,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -710,6 +814,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers"},
 					nil,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -724,7 +829,13 @@ var _ = Describe("MCP", func() {
 				}
 
 				err = mcpProxy.UpdateMCPServerFromOpenApiSpec(
-					server, "test-server", 2, openapiSpec, []string{"getUsers", "createUser"}, toolNameMap,
+					server,
+					"test-server",
+					2,
+					openapiSpec,
+					[]string{"getUsers", "createUser"},
+					toolNameMap,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -769,6 +880,7 @@ var _ = Describe("MCP", func() {
 					[]string{"getUsers", "createUser"},
 					toolNameMap,
 					constant.MCPServerProtocolTypeSSE,
+					false,
 				)
 				Expect(err).NotTo(HaveOccurred())
 

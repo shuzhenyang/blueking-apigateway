@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -60,20 +60,16 @@ interface IProps {
   routeMode: string
 }
 
-interface IEmits { (e: 'update:modelValue', value: any): void }
-
 const formData = defineModel<IIPRestriction>('modelValue', {
   required: true,
   type: Object,
 });
 
 const {
-  schema = {},
-  componentMap = {},
+  schema = {} as ISchema,
+  componentMap = {} as Record<string, any>,
   disabled = false,
 } = defineProps<IProps>();
-
-const emit = defineEmits<IEmits>();
 
 const { t } = useI18n();
 
@@ -84,7 +80,7 @@ const schemaFieldRef = ref<InstanceType<typeof SchemaField> | null>(null);
 const selectedOptionIndex = ref(0);
 
 const selectedSchema = computed(() => {
-  return schema?.oneOf?.[selectedOptionIndex.value];
+  return schema?.oneOf?.[selectedOptionIndex.value] as ISchema | undefined;
 });
 
 const curSelectType = computed(() => {
@@ -128,12 +124,19 @@ const formRules = computed(() => {
 });
 
 const getValue = () => {
-  return cloneDeep(formData.value);
+  const data = cloneDeep(formData.value);
+  if (selectedOptionIndex.value === 0) {
+    delete data.blacklist;
+  }
+  else if (selectedOptionIndex.value === 1) {
+    delete data.whitelist;
+  }
+  return data;
 };
 
 const validate = async (): Promise<boolean> => {
   try {
-    const isValid = await formRef.value?.validate();
+    const isValid = await (formRef.value as any)?.validate();
     if (!isValid) {
       const schemaField = schemaFieldRef.value?.comRef?.schemaFieldRef?.[0];
       if (schemaField?.comRef?.focus) {
@@ -152,16 +155,14 @@ const clearValidate = () => {
   return formRef.value?.clearValidate();
 };
 
-// 切换类型时重置模型值
+// 切换类型时重置校验
 const handleOptionChange = () => {
   clearValidate();
-  formData.value = {};
-  emit('update:modelValue', {});
 };
 
 watch(
   () => formData.value,
-  (newVal) => {
+  (newVal: any) => {
     clearValidate();
     if (newVal?.whitelist) selectedOptionIndex.value = 0;
     if (newVal?.blacklist) selectedOptionIndex.value = 1;

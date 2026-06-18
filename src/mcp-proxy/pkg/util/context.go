@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,7 +21,7 @@ package util
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,12 +52,26 @@ func GetBkAppCode(c *gin.Context) string {
 	if !ok {
 		return ""
 	}
-	return appCode.(string)
+	s, ok := appCode.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 // GetAppCode is an alias for GetBkAppCode
 func GetAppCode(c *gin.Context) string {
 	return GetBkAppCode(c)
+}
+
+// GetBkUsername gets username from gin context.
+func GetBkUsername(c *gin.Context) string {
+	return c.GetString(string(constant.BkUsername))
+}
+
+// GetTraceID gets trace ID from gin context.
+func GetTraceID(c *gin.Context) string {
+	return c.GetString(string(constant.TraceID))
 }
 
 // GetAppCodeFromContext gets app code from context
@@ -89,7 +103,9 @@ func SetInnerJWTToken(c *gin.Context, jwtToken string) {
 func SetMCPServerID(c *gin.Context, mcpServerID int) {
 	c.Set(string(constant.MCPServerID), mcpServerID)
 	if c.Request != nil {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.MCPServerID, mcpServerID))
+		c.Request = c.Request.WithContext(
+			context.WithValue(c.Request.Context(), constant.MCPServerID, mcpServerID),
+		)
 	}
 }
 
@@ -97,7 +113,9 @@ func SetMCPServerID(c *gin.Context, mcpServerID int) {
 func SetMCPServerName(c *gin.Context, mcpServerName string) {
 	c.Set(string(constant.MCPServerName), mcpServerName)
 	if c.Request != nil {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.MCPServerName, mcpServerName))
+		c.Request = c.Request.WithContext(
+			context.WithValue(c.Request.Context(), constant.MCPServerName, mcpServerName),
+		)
 	}
 }
 
@@ -107,7 +125,11 @@ func GetMCPServerName(c *gin.Context) string {
 	if !ok {
 		return ""
 	}
-	return mcpServerName.(string)
+	s, ok := mcpServerName.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 // GetMCPServerID ...
@@ -116,7 +138,11 @@ func GetMCPServerID(c *gin.Context) int {
 	if !ok {
 		return 0
 	}
-	return mcpServerID.(int)
+	id, ok := mcpServerID.(int)
+	if !ok {
+		return 0
+	}
+	return id
 }
 
 // GetMCPServerIDFromContext gets MCP server ID from context
@@ -141,7 +167,50 @@ func GetGatewayID(c *gin.Context) int {
 	if !ok {
 		return 0
 	}
-	return mcpServerID.(int)
+	id, ok := mcpServerID.(int)
+	if !ok {
+		return 0
+	}
+	return id
+}
+
+// SetGatewayName sets the gateway name to both gin context and request context.
+func SetGatewayName(c *gin.Context, gatewayName string) {
+	c.Set(string(constant.GatewayName), gatewayName)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(
+			context.WithValue(c.Request.Context(), constant.GatewayName, gatewayName),
+		)
+	}
+}
+
+// GetGatewayName retrieves the gateway name from gin context.
+func GetGatewayName(c *gin.Context) string {
+	gatewayName, ok := c.Get(string(constant.GatewayName))
+	if !ok {
+		return ""
+	}
+	s, ok := gatewayName.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+// GetGatewayNameFromContext retrieves the gateway name from context.
+func GetGatewayNameFromContext(ctx context.Context) string {
+	if gatewayName, ok := ctx.Value(constant.GatewayName).(string); ok {
+		return gatewayName
+	}
+	return ""
+}
+
+// GetMCPServerNameFromContext gets MCP server name from context
+func GetMCPServerNameFromContext(ctx context.Context) string {
+	if mcpServerName, ok := ctx.Value(constant.MCPServerName).(string); ok {
+		return mcpServerName
+	}
+	return ""
 }
 
 // GetGatewayIDFromContext ...
@@ -167,6 +236,52 @@ func SetBkApiTimeout(c *gin.Context, timeout int) {
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.BkApiTimeout, timeout))
 }
 
+// SetTraceID stores the trace ID into both gin context and request context.
+func SetTraceID(c *gin.Context, traceID string) {
+	c.Set(string(constant.TraceID), traceID)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.TraceID, traceID))
+	}
+}
+
+// SetClientIP stores the client IP into both gin context and request context.
+func SetClientIP(c *gin.Context) {
+	clientIP := c.ClientIP()
+	c.Set(string(constant.ClientIP), clientIP)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.ClientIP, clientIP))
+	}
+}
+
+// GetClientIPFromContext gets client IP from context.
+func GetClientIPFromContext(ctx context.Context) string {
+	if clientIP, ok := ctx.Value(constant.ClientIP).(string); ok {
+		return clientIP
+	}
+	return ""
+}
+
+// GetClientID gets the client ID from gin context.
+func GetClientID(c *gin.Context) string {
+	return c.GetString(string(constant.ClientID))
+}
+
+// SetClientID stores the client ID into both gin context and request context.
+func SetClientID(c *gin.Context, clientID string) {
+	c.Set(string(constant.ClientID), clientID)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.ClientID, clientID))
+	}
+}
+
+// GetClientIDFromContext gets client ID from context.
+func GetClientIDFromContext(ctx context.Context) string {
+	if clientID, ok := ctx.Value(constant.ClientID).(string); ok {
+		return clientID
+	}
+	return ""
+}
+
 // GetBkApiTimeout returns the timeout duration for the BK API call
 func GetBkApiTimeout(ctx context.Context) time.Duration {
 	// Get the timeout value from the context
@@ -181,7 +296,7 @@ func GetBkApiTimeout(ctx context.Context) time.Duration {
 // SetBkApiAllowedHeaders ... 设置允许的请求头
 func SetBkApiAllowedHeaders(c *gin.Context, allowedHeaders string) {
 	allowedHeadersMap := make(map[string]string)
-	for _, header := range strings.Split(allowedHeaders, ",") {
+	for header := range strings.SplitSeq(allowedHeaders, ",") {
 		header = strings.TrimSpace(header)
 		if header == "" {
 			continue
@@ -189,7 +304,7 @@ func SetBkApiAllowedHeaders(c *gin.Context, allowedHeaders string) {
 		allowedHeadersMap[header] = c.Request.Header.Get(header)
 	}
 	// 默认添加 mcp-server 相关请求头
-	allowedHeadersMap[constant.BkApiMCPServerIDKey] = fmt.Sprintf("%d", GetMCPServerID(c))
+	allowedHeadersMap[constant.BkApiMCPServerIDKey] = strconv.Itoa(GetMCPServerID(c))
 	allowedHeadersMap[constant.BkApiMCPServerNameKey] = GetMCPServerName(c)
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), constant.BkApiAllowedHeaders,
 		allowedHeadersMap))
@@ -203,6 +318,34 @@ func GetBkApiAllowedHeaders(ctx context.Context) map[string]string {
 		return map[string]string{}
 	}
 	return allowedHeaders
+}
+
+// ItsmFlexData holds fields extracted from X-Bkapi-ItsmFlex header.
+type ItsmFlexData struct {
+	AgentCode        string `json:"agent.info.code"`
+	AgentName        string `json:"agent.info.name"`
+	ServiceCatalogue string `json:"agent.info.service_catalogue"`
+	CallerBizEnv     string `json:"agent.session.caller_bk_biz_env"`
+	CallerBizID      string `json:"agent.session.caller_bk_biz_id"`
+	CallerExecutor   string `json:"agent.session.caller_executor"`
+	Executor         string `json:"agent.session.executor"`
+}
+
+// SetBkApiItsmFlexData stores the parsed ItsmFlex data into context.
+func SetBkApiItsmFlexData(c *gin.Context, data *ItsmFlexData) {
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(
+			context.WithValue(c.Request.Context(), constant.BkApiItsmFlexData, data),
+		)
+	}
+}
+
+// GetBkApiItsmFlexData retrieves the parsed ItsmFlex data from context.
+func GetBkApiItsmFlexData(ctx context.Context) *ItsmFlexData {
+	if data, ok := ctx.Value(constant.BkApiItsmFlexData).(*ItsmFlexData); ok {
+		return data
+	}
+	return nil
 }
 
 // JWTClaimsForLazySigning 用于延迟签发 JWT 的 claims 信息

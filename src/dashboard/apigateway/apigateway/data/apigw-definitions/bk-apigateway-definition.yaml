@@ -1,9 +1,9 @@
-spec_version: 1
+spec_version: 2
 
 release:
-  version: 1.3.8
-  title: v2 inner api 新增网关停用和删除接口
-  comment:  v2 inner api 新增网关停用和删除接口
+  version: 1.4.1
+  title: 修复日志查询接口返回数据为空及接口文档字段错误
+  comment: 修复日志查询接口返回数据为空及接口文档字段错误
 
 apigateway:
   description: 蓝鲸 API 网关（BlueKing API Gateway）是一种高性能、高可用的 API 托管服务。网关提供了该服务的基础通用接口，包含网关、资源、环境、版本发布、权限等相关接口。(官方内置网关，请勿修改!)
@@ -11,55 +11,101 @@ apigateway:
   is_public: true
   api_type: 1
 
+stages:
+  - name: prod
+    backends:
+      - name: "default"
+        config:
+          timeout: 60
+          loadbalance: "roundrobin"
+          hosts:
+            - host: "{{ environ.DASHBOARD_INNER_URL }}"
+              weight: 100
+      - name: "core-api"
+        config:
+          timeout: 60
+          loadbalance: "roundrobin"
+          hosts:
+            - host: "{{ environ.CORE_API_INNER_URL }}"
+              weight: 100
+      - name: "mcp-proxy"
+        config:
+          timeout: 300
+          loadbalance: "roundrobin"
+          hosts:
+            - host: "{{ environ.MCP_PROXY_INNER_URL }}"
+              weight: 100
 
-stage:
-  name: prod
-  backends:
-    - name: "default"
-      config:
-        timeout: 60
-        loadbalance: "roundrobin"
-        hosts:
-          - host: "{{ environ.DASHBOARD_INNER_URL }}"
-            weight: 100
-    - name: "core-api"
-      config:
-        timeout: 60
-        loadbalance: "roundrobin"
-        hosts:
-          - host: "{{ environ.CORE_API_INNER_URL }}"
-            weight: 100
-    - name: "mcp-proxy"
-      config:
-        timeout: 300
-        loadbalance: "roundrobin"
-        hosts:
-          - host: "{{ environ.MCP_PROXY_INNER_URL }}"
-            weight: 100
+    mcp_servers:
+      - name: "context"
+        title: "蓝鲸 API 网关 Context"
+        description: "提供网关上下文相关的工具接口"
+        resource_names:
+          - v2_open_list_gateways
+          - v2_open_list_gateway_resources
+          - v2_open_retrieve_gateway_api_details
+        tool_names:
+          - list_gateways
+          - list_gateway_resources
+          - retrieve_gateway_api_details
+        is_public: true
+        status: 1
+        protocol_type: "streamable_http"
+        oauth2_public_client_enabled: true
+        category_names:
+          - "Official"
+          - "Featured"
+          - "DevOps"
+
+      - name: "debugger"
+        title: "蓝鲸 API 网关 Debugger"
+        description: "提供调试相关的工具接口"
+        resource_names:
+          - v2_open_tools_time_get_datetime
+          - v2_open_tools_time_get_current_unix_timestamp
+          - v2_open_tools_time_parse_datetime_str_to_timestamp
+          - v2_open_tools_log_query_by_request_id
+        tool_names:
+          - get_datetime
+          - get_current_unix_timestamp
+          - parse_datetime_str_to_timestamp
+          - log_query_by_request_id
+        is_public: true
+        status: 1
+        protocol_type: "streamable_http"
+        oauth2_public_client_enabled: true
+        category_names:
+          - "Official"
+          - "Featured"
+          - "Automation"
 
 grant_permissions:
   - bk_app_code: {{ settings.BK_APP_CODE }}
     grant_dimension: "gateway"
-  # paas v3: TODO: add all inner apis here
+  # paas v3
   - bk_app_code: bk_paas3
     grant_dimension: "resource"
     resource_names:
+      # gateway related
       - v2_inner_list_gateways
       - v2_inner_get_gateway
-      - v2_inner_get_gateway_resources
-      - v2_inner_allow_apply_by_gateway
-      - v2_inner_apply_resource_permission
+      - v2_inner_list_gateway_permission_resources
+      - v2_inner_check_is_allowed_apply_by_gateway
+      - v2_inner_apply_gateway_resource_permission
       - v2_inner_renew_resource_permission
       - v2_inner_list_app_resource_permissions
       - v2_inner_list_resource_permission_apply_records
       - v2_inner_retrieve_resource_permission_apply_record
-      - v2_inner_get_esb_systems
-      - v2_inner_get_system_permission_components
-      - v2_inner_apply_esb_component_permissions
+      # esb related
+      - v2_inner_list_esb_systems
+      - v2_inner_list_esb_system_permission_components
+      - v2_inner_apply_esb_system_component_permissions
       - v2_inner_renew_esb_component_permissions
-      - v2_inner_get_app_component_systems
-      - v2_inner_get_app_permission_apply_records
-      - v2_inner_get_app_permission_apply_record
+      - v2_inner_list_app_esb_component_permissions
+      - v2_inner_list_app_esb_component_permission_apply_records
+      - v2_inner_get_app_esb_component_permission_apply_record
+      # mcp server related
+      - v2_inner_list_mcp_server
       - v2_inner_list_mcp_server_permissions
       - v2_inner_apply_mcp_server_permission
       - v2_inner_list_mcp_server_app_permissions
@@ -70,15 +116,34 @@ grant_permissions:
     grant_dimension: "resource"
     resource_names:
       - get_apigw_public_key
-      - v2_open_get_gateway_public_key_legacy
       - v2_open_get_gateway_public_key
   # visual-layout
   - bk_app_code: visual-layout
     grant_dimension: "resource"
     resource_names:
       - get_apigw_public_key
-      - v2_open_get_gateway_public_key_legacy
       - v2_open_get_gateway_public_key
+  # bk_auth
+  - bk_app_code: bk_auth
+    grant_dimension: "resource"
+    resource_names:
+      - v2_open_batch_query_mcp_servers
+      - v2_open_batch_query_gateways
+      - v2_open_retrieve_gateway_resource_info
+      - v2_open_list_gateways
+      - v2_open_list_gateway_resources
+      - v2_open_list_mcp_server
+  # ITSM v4 工单回调（单租户默认 bk-itsm4，多租户默认 cw_aitsm）
+  - bk_app_code: {{ settings.BK_ITSM4_CALLBACK_APP_CODE }}
+    grant_dimension: "resource"
+    resource_names:
+      - v2_inner_itsm_callback
+      - get_apis
+      - get_stages
+      - get_released_resources
+      - get_released_resource
+      - v2_open_get_gateway
+      - v2_open_list_gateways
 
 resource_docs:
   basedir: "{{ settings.BASE_DIR }}/data/apidocs/"

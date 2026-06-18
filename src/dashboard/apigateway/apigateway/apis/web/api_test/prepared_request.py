@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,8 +23,8 @@ from typing import Any, Dict, Optional
 from django.utils.translation import gettext as _
 from requests.structures import CaseInsensitiveDict
 
-from apigateway.biz.resource import ResourceURLHandler
 from apigateway.common.constants import HEADER_BKAPI_AUTHORIZATION
+from apigateway.service.resource import get_resource_url_tmpl
 from apigateway.service.utils import get_resource_url
 from apigateway.utils.sensitive_cleaner import SensitiveCleaner
 
@@ -108,7 +108,7 @@ class PreparedRequestURL:
             resource_path = render_path(resource_path, self.path_params)
 
         return get_resource_url(
-            resource_url_tmpl=ResourceURLHandler.get_resource_url_tmpl(),
+            resource_url_tmpl=get_resource_url_tmpl(),
             gateway_name=self.gateway_name,
             stage_name=self.stage_name,
             resource_path=resource_path,

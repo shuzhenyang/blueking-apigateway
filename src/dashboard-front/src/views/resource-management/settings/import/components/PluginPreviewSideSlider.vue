@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -85,7 +85,7 @@ const emits = defineEmits<{ 'on-hidden': [] }>();
 
 const { t } = useI18n();
 
-const activeIndex = computed(() => plugins.map(plugin => plugin.type));
+const activeIndex = computed(() => plugins.map((plugin: any) => plugin.type));
 const renderShow = ref(isSliderShow);
 
 const handleHidden = () => {
@@ -102,7 +102,7 @@ const parseYaml = (yamlStr: string) => {
   }
 };
 
-watch(() => isSliderShow, (val) => {
+watch(() => isSliderShow, (val: any) => {
   renderShow.value = val;
 });
 

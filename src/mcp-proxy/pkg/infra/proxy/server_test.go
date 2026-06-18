@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -62,6 +62,53 @@ var _ = Describe("MCPServer", func() {
 			It("should set the resource version ID", func() {
 				server.SetResourceVersionID(42)
 				Expect(server.GetResourceVersionID()).To(Equal(42))
+			})
+		})
+
+		Describe("RawResponseEnabled", func() {
+			It("should return false by default", func() {
+				Expect(server.RawResponseEnabled()).To(BeFalse())
+			})
+
+			It("should return true when rawResponseEnabled is set", func() {
+				server.rawResponseEnabled = true
+				Expect(server.RawResponseEnabled()).To(BeTrue())
+			})
+		})
+
+		Describe("SetRawResponseEnabled", func() {
+			It("should set rawResponseEnabled to true", func() {
+				server.SetRawResponseEnabled(true)
+				Expect(server.RawResponseEnabled()).To(BeTrue())
+			})
+
+			It("should set rawResponseEnabled to false", func() {
+				server.rawResponseEnabled = true
+				server.SetRawResponseEnabled(false)
+				Expect(server.RawResponseEnabled()).To(BeFalse())
+			})
+
+			It("should dynamically update value for tool handler getter", func() {
+				// Simulate the scenario where tool handler uses RawResponseEnabled as a getter
+				// This tests the hot-reload scenario for raw_response_enabled
+
+				// Initial state: false
+				Expect(server.RawResponseEnabled()).To(BeFalse())
+
+				// Simulate getter function (like genToolHandler uses)
+				getter := server.RawResponseEnabled
+				Expect(getter()).To(BeFalse())
+
+				// Hot update: change raw_response_enabled to true
+				server.SetRawResponseEnabled(true)
+
+				// Getter should return new value without re-registering handler
+				Expect(getter()).To(BeTrue())
+				Expect(server.RawResponseEnabled()).To(BeTrue())
+
+				// Hot update: change back to false
+				server.SetRawResponseEnabled(false)
+				Expect(getter()).To(BeFalse())
 			})
 		})
 
@@ -220,6 +267,55 @@ var _ = Describe("MCPServer", func() {
 				}
 
 				wg.Wait()
+			})
+		})
+
+		Describe("AddPrompt and RemovePrompt", func() {
+			It("should add prompt to internal map", func() {
+				// Directly add to internal map (since we can't call AddPrompt without a real
+				// mcp.Server)
+				server.rwLock.Lock()
+				server.prompts["test-prompt"] = struct{}{}
+				server.rwLock.Unlock()
+
+				Expect(server.IsRegisteredPrompt("test-prompt")).To(BeTrue())
+				Expect(server.GetPromptNames()).To(ContainElement("test-prompt"))
+			})
+
+			It("should remove prompt from internal map", func() {
+				// Add first
+				server.rwLock.Lock()
+				server.prompts["prompt-to-remove"] = struct{}{}
+				server.rwLock.Unlock()
+
+				Expect(server.IsRegisteredPrompt("prompt-to-remove")).To(BeTrue())
+
+				// Remove
+				server.rwLock.Lock()
+				delete(server.prompts, "prompt-to-remove")
+				server.rwLock.Unlock()
+
+				Expect(server.IsRegisteredPrompt("prompt-to-remove")).To(BeFalse())
+			})
+
+			It("should handle multiple prompts", func() {
+				server.rwLock.Lock()
+				server.prompts["prompt-a"] = struct{}{}
+				server.prompts["prompt-b"] = struct{}{}
+				server.prompts["prompt-c"] = struct{}{}
+				server.rwLock.Unlock()
+
+				Expect(server.GetPromptNames()).To(HaveLen(3))
+
+				// Remove one
+				server.rwLock.Lock()
+				delete(server.prompts, "prompt-b")
+				server.rwLock.Unlock()
+
+				Expect(server.GetPromptNames()).To(HaveLen(2))
+				Expect(server.IsRegisteredPrompt("prompt-b")).To(BeFalse())
+				Expect(server.IsRegisteredPrompt("prompt-a")).To(BeTrue())
+				Expect(server.IsRegisteredPrompt("prompt-c")).To(BeTrue())
 			})
 		})
 	})

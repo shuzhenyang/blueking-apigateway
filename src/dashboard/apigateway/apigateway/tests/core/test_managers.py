@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,11 +16,9 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-import datetime
 import json
 
 import pytest
-from django.test import TestCase
 from django_dynamic_fixture import G
 
 from apigateway.biz.stage import StageHandler
@@ -33,12 +31,10 @@ from apigateway.core.models import (
     Gateway,
     Release,
     ReleasedResource,
-    ReleaseHistory,
     Resource,
     ResourceVersion,
     Stage,
 )
-from apigateway.tests.utils.testing import dummy_time
 
 pytestmark = pytest.mark.django_db
 
@@ -192,11 +188,13 @@ class TestReleaseManager:
         stage_prod = G(Stage, gateway=gateway, name="prod", status=1)
         stage_test = G(Stage, gateway=gateway, name="test", status=1)
         stage_dev = G(Stage, gateway=gateway, name="dev", status=1)
+        stage_offline = G(Stage, gateway=gateway, name="offline", status=StageStatusEnum.INACTIVE.value)
         resource_version_1 = G(ResourceVersion, gateway=gateway)
         resource_version_2 = G(ResourceVersion, gateway=gateway)
         G(Release, gateway=gateway, stage=stage_prod, resource_version=resource_version_1)
         G(Release, gateway=gateway, stage=stage_dev, resource_version=resource_version_2)
         G(Release, gateway=gateway, stage=stage_test, resource_version=resource_version_1)
+        G(Release, gateway=gateway, stage=stage_offline, resource_version=resource_version_1)
 
         data = [
             {
@@ -259,6 +257,27 @@ class TestReleaseManager:
         )
         result = Release.objects.get_resource_version_released_stage_names([1])
         assert result == {1: ["prod", "test"]}
+
+    def test_get_released_stage_names_by_resource_versions(self):
+        gateway = G(Gateway)
+        other_gateway = G(Gateway)
+        resource_version_1 = G(ResourceVersion, gateway=gateway)
+        resource_version_2 = G(ResourceVersion, gateway=gateway)
+
+        stage_test = G(Stage, gateway=gateway, name="test", status=StageStatusEnum.ACTIVE.value)
+        stage_prod = G(Stage, gateway=gateway, name="prod", status=StageStatusEnum.ACTIVE.value)
+        stage_offline = G(Stage, gateway=gateway, name="offline", status=StageStatusEnum.INACTIVE.value)
+        stage_other = G(Stage, gateway=other_gateway, name="other", status=StageStatusEnum.ACTIVE.value)
+
+        G(Release, gateway=gateway, stage=stage_test, resource_version=resource_version_1)
+        G(Release, gateway=gateway, stage=stage_prod, resource_version=resource_version_2)
+        G(Release, gateway=gateway, stage=stage_offline, resource_version=resource_version_1)
+        G(Release, gateway=other_gateway, stage=stage_other, resource_version=resource_version_1)
+
+        result = Release.objects.get_released_stage_names_by_resource_versions(
+            gateway.id, [resource_version_1.id, resource_version_2.id]
+        )
+        assert result == ["prod", "test"]
 
     def test_save_release(self):
         gateway = G(Gateway)
@@ -434,67 +453,3 @@ class TestReleasedResourceManager:
     def test_get_recommended_stage_name(self, stage_names, disabled_stages, expecged):
         result = ReleasedResource.objects.get_recommended_stage_name(stage_names, disabled_stages)
         assert result == expecged
-
-
-class TestReleaseHistoryManager(TestCase):
-    def test_filter_release_history(self):
-        gateway = G(Gateway)
-        stage_prod = G(Stage, gateway=gateway, name="prod")
-        stage_test = G(Stage, gateway=gateway, name="test")
-        resource_version_1 = G(ResourceVersion, gateway=gateway)
-        resource_version_2 = G(ResourceVersion, gateway=gateway)
-
-        # prod
-        G(ReleaseHistory, gateway=gateway, stage=stage_prod, resource_version=resource_version_1)
-        G(ReleaseHistory, gateway=gateway, stage=stage_prod, resource_version=resource_version_1, created_by="admin")
-        G(
-            ReleaseHistory,
-            gateway=gateway,
-            stage=stage_prod,
-            resource_version=resource_version_1,
-            created_time=dummy_time.time,
-        )
-        # test
-        G(ReleaseHistory, gateway=gateway, stage=stage_test, resource_version=resource_version_2)
-
-        data = [
-            # query, stage_name
-            {
-                "params": {
-                    "query": "prod",
-                },
-                "expected": {
-                    "count": 3,
-                },
-            },
-            # stage prod
-            {
-                "params": {
-                    "stage_id": stage_prod.id,
-                },
-                "expected": {
-                    "count": 3,
-                },
-            },
-            # created_by
-            {
-                "params": {
-                    "created_by": "adm",
-                },
-                "expected": {
-                    "count": 1,
-                },
-            },
-            {
-                "params": {
-                    "time_start": dummy_time.time - datetime.timedelta(hours=1),
-                    "time_end": dummy_time.time + datetime.timedelta(hours=1),
-                },
-                "expected": {
-                    "count": 1,
-                },
-            },
-        ]
-        for test in data:
-            result = ReleaseHistory.objects.filter_release_history(gateway, fuzzy=True, **test["params"])
-            self.assertEqual(result.count(), test["expected"]["count"])

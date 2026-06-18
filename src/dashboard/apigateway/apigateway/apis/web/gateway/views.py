@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -27,6 +27,7 @@ from rest_framework import generics, status
 
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.biz.audit import Auditor
+from apigateway.biz.data_plane import DataPlaneHandler
 from apigateway.biz.gateway import GatewayAppBindingHandler, GatewayHandler, GatewayRelatedAppHandler
 from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.biz.release import ReleaseHandler
@@ -42,7 +43,7 @@ from apigateway.common.tenant.constants import (
 from apigateway.common.tenant.request import get_user_tenant_id
 from apigateway.common.tenant.user_credentials import get_user_credentials_from_request
 from apigateway.components.bkauth import list_all_apps_of_tenant, list_available_apps_for_tenant
-from apigateway.components.bkpaas import create_paas_app, update_app_maintainers
+from apigateway.components.bkpaas import create_paas_app, get_paas_repo_authorization, update_app_maintainers
 from apigateway.components.bkuser import list_tenants
 from apigateway.controller.publisher.publish import trigger_gateway_publish
 from apigateway.core.constants import (
@@ -52,7 +53,7 @@ from apigateway.core.constants import (
     PublishSourceEnum,
     ReleaseHistoryStatusEnum,
 )
-from apigateway.core.models import Gateway, Stage
+from apigateway.core.models import Gateway, Release, Stage
 from apigateway.service.contexts import GatewayAuthContext
 from apigateway.utils.django import get_model_dict
 from apigateway.utils.git import check_git_credentials
@@ -66,6 +67,7 @@ from .serializers import (
     GatewayListInputSLZ,
     GatewayListOutputSLZ,
     GatewayReleasingStatusOutputSLZ,
+    GatewayRepoAuthorizationOutputSLZ,
     GatewayRetrieveOutputSLZ,
     GatewayTenantAppListOutputSLZ,
     GatewayUpdateInputSLZ,
@@ -186,12 +188,21 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
                 ):
                     raise error_codes.INVALID_ARGUMENT.format(_("Git 信息无效。"), replace=True)
 
+            user_credentials = get_user_credentials_from_request(request)
+            if settings.EDITION != "te" and not git_info:
+                repo_authorization = get_paas_repo_authorization(user_credentials=user_credentials)
+                if not repo_authorization["authorized"]:
+                    raise error_codes.NO_PERMISSION.format(
+                        repo_authorization["message"] or _("用户未关联仓库授权。"),
+                        replace=True,
+                    ).set_data(repo_authorization)
+
             app_code = slz.validated_data["name"]
             ok = create_paas_app(
                 app_code=app_code,
                 language=language,
                 git_info=git_info,
-                user_credentials=get_user_credentials_from_request(request),
+                user_credentials=user_credentials,
             )
             if not ok:
                 raise error_codes.INTERNAL.format(_("创建蓝鲸应用失败。"), replace=True)
@@ -199,7 +210,7 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
             update_app_maintainers(
                 app_code,
                 slz.validated_data["maintainers"],
-                user_credentials=get_user_credentials_from_request(request),
+                user_credentials=user_credentials,
             )
 
             # set the related app code, while the programmable gateway is created before the app syncing gateway
@@ -227,7 +238,16 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
             related_app_code=related_app_code,
         )
 
-        # 3. record audit log
+        # 3. bind to data plane(s)
+        # from web page, we don't need to specify the data plane ids, so use the default data plane(the default data_plane_id maybe changed in the future)
+        data_plane_ids = DataPlaneHandler.get_sync_data_plane_ids(gateway_name=slz.instance.name)
+        GatewayHandler.bind_to_data_planes(
+            gateway=slz.instance,
+            data_plane_ids=data_plane_ids,
+            username=request.user.username,
+        )
+
+        # 4. record audit log
         Auditor.record_gateway_op_success(
             op_type=OpTypeEnum.CREATE,
             username=request.user.username,
@@ -389,21 +409,39 @@ class GatewayUpdateStatusApi(generics.UpdateAPIView):
         slz = self.get_serializer(instance=instance, data=request.data)
         slz.is_valid(raise_exception=True)
 
-        is_need_publish = slz.validated_data["status"] is not instance.status
+        is_need_publish = slz.validated_data["status"] != instance.status
 
         slz.save(updated_by=request.user.username)
 
+        new_gateway_status = slz.validated_data["status"]
+
         # 网关停用时，将网关下所有 MCPServer 设置为停用
-        if slz.validated_data["status"] == GatewayStatusEnum.INACTIVE.value:
+        if new_gateway_status == GatewayStatusEnum.INACTIVE.value:
             MCPServerHandler.disable_servers(gateway_id=instance.id)
 
         # 触发网关发布
         if is_need_publish:
             # 由于没有办法知道停用状态 (网关停用会变更环境的发布状态) 之前的各环境发布状态，则启用会发布所有环境
             source = PublishSourceEnum.GATEWAY_ENABLE if instance.is_active else PublishSourceEnum.GATEWAY_DISABLE
+            release_list = list(Release.objects.filter(gateway_id=instance.id).select_related("stage"))
             trigger_gateway_publish(
                 source, request.user.username, instance.id, user_credentials=get_user_credentials_from_request(request)
             )
+
+            stage_audit_comment = "发布环境" if source == PublishSourceEnum.GATEWAY_ENABLE else "下架环境"
+            for release in release_list:
+                Auditor.record_stage_op_success(
+                    op_type=OpTypeEnum.MODIFY,
+                    username=request.user.username,
+                    gateway_id=instance.id,
+                    instance_id=release.stage_id,
+                    instance_name=release.stage.name,
+                    data_before={"status": release.stage.status},
+                    data_after={"source": source.value},
+                    comment=stage_audit_comment,
+                )
+
+        audit_comment = "启用网关" if new_gateway_status == GatewayStatusEnum.ACTIVE.value else "停用网关"
 
         Auditor.record_gateway_op_success(
             op_type=OpTypeEnum.MODIFY,
@@ -413,6 +451,7 @@ class GatewayUpdateStatusApi(generics.UpdateAPIView):
             instance_name=instance.name,
             data_before=data_before,
             data_after=get_model_dict(slz.instance),
+            comment=audit_comment,
         )
 
         return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
@@ -485,7 +524,7 @@ class GatewayDevGuidelineRetrieveApi(generics.RetrieveAPIView):
                     template_name,
                     context={
                         "edition": settings.EDITION,
-                        "bk_api_url_tmple": settings.BK_API_URL_TMPL,
+                        "bk_api_url_tmpl": GatewayHandler.get_bk_api_url_tmpl(instance.id),
                         "language": language,
                         "repo_url": repo_url,
                         "dev_guideline_url": dev_guideline_url,
@@ -549,4 +588,21 @@ class GatewayCheckNameAvailableApi(generics.RetrieveAPIView):
             is_available = False
 
         slz = self.get_serializer({"is_available": is_available})
+        return OKJsonResponse(data=slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="检查用户是否已授权代码仓库",
+        responses={status.HTTP_200_OK: GatewayRepoAuthorizationOutputSLZ()},
+        tags=["WebAPI.Gateway"],
+    ),
+)
+class GatewayRepoAuthorizationApi(generics.RetrieveAPIView):
+    serializer_class = GatewayRepoAuthorizationOutputSLZ
+
+    def retrieve(self, request, *args, **kwargs):
+        repo_authorization = get_paas_repo_authorization(user_credentials=get_user_credentials_from_request(request))
+        slz = self.get_serializer(repo_authorization)
         return OKJsonResponse(data=slz.data)

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,14 +18,46 @@
 #
 import json
 
+import pytest
 from django_dynamic_fixture import G
 
-from apigateway.apis.web.sdk.serializers import GatewaySDKListOutputSLZ
+from apigateway.apis.web.sdk.serializers import GatewaySDKGenerateInputSLZ, GatewaySDKListOutputSLZ
 from apigateway.apps.support.models import GatewaySDK
-from apigateway.biz.sdk.models import SDKFactory
+from apigateway.biz.sdk import SDKFactory
 from apigateway.common.factories import SchemaFactory
 from apigateway.core.models import ResourceVersion
 from apigateway.tests.utils.testing import dummy_time
+
+
+class TestGatewaySDKGenerateInputSLZ:
+    @pytest.mark.parametrize(
+        "version, is_valid",
+        [
+            ("", True),
+            ("1.2.3", True),
+            ("1.2.3-beta.1+build.1", True),
+            ("v1.2.3", False),
+            ("1.2", False),
+            ("1.0.0');__import__('os').system('touch /tmp/sdk-version-pwned')#", False),
+        ],
+    )
+    def test_validate_version(self, mocker, fake_gateway, version, is_valid):
+        mocker.patch(
+            "apigateway.apis.web.sdk.serializers.GatewaySDK.objects.get_latest_sdk",
+            return_value=None,
+        )
+        slz = GatewaySDKGenerateInputSLZ(
+            data={
+                "resource_version_id": 1,
+                "language": "python",
+                "version": version,
+            },
+            context={"gateway": fake_gateway},
+        )
+
+        assert slz.is_valid() is is_valid
+        if not is_valid:
+            assert "version" in slz.errors
 
 
 class TestSDKListOutputSLZ:

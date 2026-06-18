@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -38,8 +38,14 @@ func MCPServerPermissionMiddleware() func(c *gin.Context) {
 		appCode := util.GetBkAppCode(c)
 		permission, err := cacheimpls.GetMCPServerPermission(c, appCode, id)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			util.ForbiddenJSONResponse(c,
-				fmt.Sprintf("appCode[%s] has no permission  to call mcp server[%s]", appCode, c.Param("name")))
+			util.ForbiddenJSONResponse(
+				c,
+				fmt.Sprintf(
+					"appCode[%s] has no permission  to call mcp server[%s]",
+					appCode,
+					c.Param("name"),
+				),
+			)
 			c.Abort()
 			return
 		}
@@ -50,7 +56,7 @@ func MCPServerPermissionMiddleware() func(c *gin.Context) {
 		}
 
 		// 判断权限是否有效
-		if !permission.Expires.After(time.Now()) {
+		if permission.Expires.Before(time.Now()) {
 			util.ForbiddenJSONResponse(c,
 				fmt.Sprintf("appCode[%s] to call mcp server[%s] permission is expired", appCode,
 					c.Param("name")))

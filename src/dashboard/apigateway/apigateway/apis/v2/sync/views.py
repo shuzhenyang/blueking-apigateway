@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,7 +16,6 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-import json
 import logging
 
 from django.conf import settings
@@ -25,40 +24,34 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
 from drf_yasg.utils import swagger_auto_schema
-from pydantic import TypeAdapter
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 
 from apigateway.apis.v2.permissions import OpenAPIV2GatewayRelatedAppPermission
 from apigateway.apps.audit.constants import OpTypeEnum
-from apigateway.apps.mcp_server.models import MCPServer
-from apigateway.apps.openapi.models import OpenAPIFileResourceSchemaVersion
+from apigateway.apps.mcp_server.tasks import sync_mcp_server_after_release
 from apigateway.apps.permission.constants import FormattedGrantDimensionEnum, GrantTypeEnum
 from apigateway.apps.permission.models import (
     AppGatewayPermission,
     AppResourcePermission,
 )
-from apigateway.apps.support.constants import DocLanguageEnum
-from apigateway.apps.support.models import ResourceDoc, ResourceDocVersion
 from apigateway.biz.audit import Auditor
-from apigateway.biz.gateway import GatewayData, GatewayRelatedAppHandler, GatewaySaver, ReleaseError, release
+from apigateway.biz.data_plane import DataPlaneHandler
+from apigateway.biz.gateway import GatewayHandler, GatewayRelatedAppHandler
 from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.biz.permission import PermissionDimensionManager
-from apigateway.biz.resource.importer import ResourcesImporter
-from apigateway.biz.resource.importer.openapi import OpenAPIExportManager, OpenAPIImportManager
-from apigateway.biz.resource_doc.exceptions import NoResourceDocError, ResourceDocJinja2TemplateError
-from apigateway.biz.resource_doc.importer import DocImporter
-from apigateway.biz.resource_doc.importer.parsers import ArchiveParser, OpenAPIParser
-from apigateway.biz.resource_version import ResourceDocVersionHandler, ResourceVersionHandler
-from apigateway.biz.sdk import exceptions
-from apigateway.biz.sdk.helper import SDKHelper
+from apigateway.biz.release import ReleaseHandler
+from apigateway.biz.resource.importer import sync_openapi_resources_from_content
+from apigateway.biz.resource_doc import NoResourceDocError, ResourceDocJinja2TemplateError
+from apigateway.biz.resource_doc.importer import ArchiveParser, DocImporter
+from apigateway.biz.resource_version import ResourceVersionArtifactHandler, ResourceVersionHandler
+from apigateway.biz.sdk import generate_sdks_for_resource_version
 from apigateway.common.constants import CallSourceTypeEnum
 from apigateway.common.error_codes import error_codes
 from apigateway.components.bkauth import get_app_tenant_info
+from apigateway.core.constants import ReleaseHistoryStatusEnum, ReleaseStatusEnum
 from apigateway.core.models import Gateway, Release, Resource, ResourceVersion, Stage
 from apigateway.utils.django import get_model_dict, get_object_or_None
-from apigateway.utils.exception import LockTimeout
-from apigateway.utils.redis_utils import Lock
 from apigateway.utils.responses import FailJsonResponse, OKJsonResponse
 
 from . import serializers
@@ -66,7 +59,6 @@ from .serializers import (
     DocImportByArchiveInputSLZ,
     GatewayResourceVersionLatestRetrieveOutputSLZ,
     GatewaySyncOutputSLZ,
-    MCPServerSLZ,
     ReleaseInputSLZ,
     ReleaseOutputSLZ,
     ResourceImportInputSLZ,
@@ -113,15 +105,27 @@ class GatewaySyncApi(generics.CreateAPIView):
         slz = self.get_serializer(gateway, data=request.data)
         slz.is_valid(raise_exception=True)
 
+        # assign the tenant_mode and tenant_id based on the calling app
+        tenant_mode, tenant_id = get_app_tenant_info(request.app.app_code)
+        slz.validated_data["tenant_mode"] = tenant_mode
+        slz.validated_data["tenant_id"] = tenant_id
+
         # save gateway
         username = request.user.username or settings.GATEWAY_DEFAULT_CREATOR
-        saver = GatewaySaver(
-            id=gateway and gateway.id,
-            data=TypeAdapter(GatewayData).validate_python(slz.validated_data),
-            bk_app_code=request.app.app_code,
-            username=username,
+
+        data_plane_ids = DataPlaneHandler.get_sync_data_plane_ids(
+            gateway_name=gateway_name,
+            data_plane_names=slz.validated_data.get("data_planes"),
         )
-        gateway = saver.save()
+
+        gateway = GatewayHandler.sync_gateway(
+            gateway,
+            slz.validated_data,
+            request.app.app_code,
+            username,
+            None,
+            data_plane_ids,
+        )
 
         # record audit log
         Auditor.record_gateway_op_success(
@@ -208,63 +212,17 @@ class GatewayResourceSyncApi(generics.CreateAPIView):
         )
         slz.is_valid(raise_exception=True)
 
-        try:
-            openapi_manager = OpenAPIImportManager.load_from_content(
-                request.gateway,
-                slz.validated_data["content"],
-                need_delete_unspecified_resources=slz.validated_data["delete"],
-            )
-        except Exception as err:  # pylint: disable=broad-except
-            raise ValidationError({"content": _("导入内容为无效的 json/yaml 数据，{err}。").format(err=err)})
-
-        validate_err_list = openapi_manager.validate()
-        if len(validate_err_list) != 0:
-            error_dicts = [error.to_dict() for error in validate_err_list]
-            raise ValidationError(
-                {
-                    "content": _("validate err {err}。").format(
-                        err=json.dumps(error_dicts, ensure_ascii=False, indent=4)
-                    )
-                }
-            )
-
-        importer = ResourcesImporter.from_resources(
+        ok, message, data = sync_openapi_resources_from_content(
             gateway=request.gateway,
-            resources=openapi_manager.get_resource_list(),
             username=request.user.username,
-            selected_resources=None,
-            need_delete_unspecified_resources=slz.validated_data["delete"],
+            content=slz.validated_data["content"],
+            delete_missing_resources=slz.validated_data["delete"],
+            doc_language=slz.validated_data.get("doc_language", ""),
         )
-        importer.import_resources()
+        if not ok:
+            raise ValidationError({"content": _("{err}").format(err=message)})
 
-        # 如果生成文档还要再生成文档
-        if slz.validated_data.get("doc_language"):
-            parser = OpenAPIParser(gateway_id=request.gateway.id)
-            docs = parser.parse(
-                swagger=slz.validated_data["content"],
-                language=DocLanguageEnum(slz.validated_data["doc_language"]),
-            )
-            doc_importer = DocImporter(
-                gateway_id=request.gateway.id,
-            )
-            doc_importer.import_docs(docs=docs)
-
-        # 分析出已创建或更新的资源
-        added = []
-        updated = []
-        for resource_data in importer.get_selected_resource_data_list():
-            if resource_data.metadata.get("is_created"):
-                added.append({"id": resource_data.resource.id})
-            else:
-                updated.append({"id": resource_data.resource.id})
-
-        slz = ResourceSyncOutputSLZ(
-            {
-                "added": added,
-                "updated": updated,
-                "deleted": importer.get_deleted_resources(),
-            }
-        )
+        slz = ResourceSyncOutputSLZ(data)
         return OKJsonResponse(data=slz.data)
 
 
@@ -330,12 +288,10 @@ class GatewayRelatedAppAddApi(generics.CreateAPIView):
                         }
                     )
 
-        exist_related_app_codes = GatewayRelatedAppHandler.get_related_app_codes(request.gateway.id)
-        missing_app_codes = set(input_app_codes) - set(exist_related_app_codes)
-        for bk_app_code in missing_app_codes:
-            GatewayRelatedAppHandler.add_related_app(request.gateway.id, bk_app_code)
-
-        data_after = GatewayRelatedAppHandler.get_related_app_codes(request.gateway.id)
+        related_app_codes_before, related_app_codes_after = GatewayRelatedAppHandler.sync_related_apps(
+            gateway_id=request.gateway.id,
+            bk_app_codes=input_app_codes,
+        )
 
         # record audit log
         gateway = request.gateway
@@ -346,8 +302,8 @@ class GatewayRelatedAppAddApi(generics.CreateAPIView):
             gateway_id=gateway.id,
             instance_id=gateway.id,
             instance_name=gateway.name,
-            data_before={"related_app_codes": exist_related_app_codes},
-            data_after={"related_app_codes": data_after},
+            data_before={"related_app_codes": related_app_codes_before},
+            data_after={"related_app_codes": related_app_codes_after},
         )
 
         return OKJsonResponse(status=status.HTTP_201_CREATED)
@@ -456,12 +412,16 @@ class GatewayAppPermissionGrantApi(generics.CreateAPIView):
             )
         )
         permission_model = PermissionDimensionManager.get_permission_model(data["grant_dimension"])
+
+        username = settings.GATEWAY_DEFAULT_CREATOR
+
         permission_model.objects.save_permissions(
             gateway=request.gateway,
             resource_ids=resource_ids,
             bk_app_code=data["target_app_code"],
             expire_days=data.get("expire_days"),
             grant_type=GrantTypeEnum.INITIALIZE.value,
+            handled_by=username,
         )
 
         return OKJsonResponse(status=status.HTTP_201_CREATED)
@@ -506,24 +466,10 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
         slz = self.get_serializer(data=request.data, context={"request": request})
         slz.is_valid(raise_exception=True)
         data = slz.validated_data
-        instance = ResourceVersionHandler.create_resource_version(request.gateway, data, request.user.username)
-
-        # 创建文档版本
-        if ResourceDoc.objects.filter(gateway=request.gateway).exists():
-            ResourceDocVersion.objects.create(
-                gateway=request.gateway,
-                resource_version=instance,
-                data=ResourceDocVersionHandler().make_version(request.gateway.id),
-            )
-        exporter = OpenAPIExportManager(
-            api_version=instance.version,
-            title="the openapi of %s" % request.gateway.name,
-        )
-        # 创建openapi file版本
-        OpenAPIFileResourceSchemaVersion.objects.create(
+        ResourceVersionArtifactHandler.create_resource_version_with_artifacts(
             gateway=request.gateway,
-            resource_version=instance,
-            schema=exporter.export_resource_version_openapi(instance),
+            data=data,
+            username=request.user.username,
         )
         return OKJsonResponse(status=status.HTTP_201_CREATED)
 
@@ -568,29 +514,18 @@ class ResourceVersionReleaseApi(generics.CreateAPIView):
         slz.is_valid(raise_exception=True)
 
         data = slz.validated_data
-        gateway_id = data["gateway"].id
         stage_ids = data["stage_ids"]
         resource_version = ResourceVersion.objects.get_object_fields(data["resource_version_id"])
 
-        for stage_id in data["stage_ids"]:
-            try:
-                with Lock(
-                    f"{gateway_id}_{stage_id}",
-                    timeout=settings.REDIS_PUBLISH_LOCK_TIMEOUT,
-                    try_get_times=settings.REDIS_PUBLISH_LOCK_RETRY_GET_TIMES,
-                ):
-                    # do release, will record audit log
-                    release(
-                        gateway=request.gateway,
-                        stage_id=stage_id,
-                        resource_version_id=data["resource_version_id"],
-                        comment=data["comment"],
-                        username=request.user.username,
-                    )
-            except LockTimeout as err:
-                return FailJsonResponse(status=status.HTTP_500_INTERNAL_SERVER_ERROR, code="UNKNOWN", message=str(err))
-            except ReleaseError as err:
-                return FailJsonResponse(status=status.HTTP_500_INTERNAL_SERVER_ERROR, code="UNKNOWN", message=str(err))
+        ok, message = ReleaseHandler.release_to_stages(
+            gateway=request.gateway,
+            resource_version_id=data["resource_version_id"],
+            stage_ids=stage_ids,
+            username=request.user.username,
+            comment=data["comment"],
+        )
+        if not ok:
+            return FailJsonResponse(status=status.HTTP_500_INTERNAL_SERVER_ERROR, code="UNKNOWN", message=message)
         output_slz = ReleaseOutputSLZ(
             {
                 "version": resource_version["version"],
@@ -620,42 +555,15 @@ class SDKGenerateApi(generics.CreateAPIView):
         slz = self.get_serializer(data=request.data)
         slz.is_valid(raise_exception=True)
 
+        data = slz.data
         resource_version = get_object_or_404(
-            ResourceVersion, gateway=request.gateway, version=slz.data["resource_version"]
+            ResourceVersion, gateway=request.gateway, version=data["resource_version"]
         )
-        results = []
-        with SDKHelper(resource_version=resource_version) as helper:
-            for language in slz.data["languages"]:
-                try:
-                    info = helper.create(
-                        language=language,
-                        version=slz.data["version"] or resource_version.version,
-                        operator=None,
-                    )
-                    results.append(
-                        {
-                            "name": info.sdk.name,
-                            "version": info.sdk.version_number,
-                            "url": info.sdk.url,
-                        }
-                    )
-                except exceptions.ResourcesIsEmpty:
-                    raise error_codes.INTERNAL.format(_("网关下无资源，无法生成 SDK。"), replace=True)
-                except exceptions.GenerateError:
-                    raise error_codes.INTERNAL.format(_("网关 SDK 生成失败，请联系管理员。"), replace=True)
-                except exceptions.PackError:
-                    raise error_codes.INTERNAL.format(_("网关 SDK 打包失败，请联系管理员。"), replace=True)
-                except exceptions.DistributeError:
-                    raise error_codes.INTERNAL.format(_("网关 SDK 发布失败，请联系管理员。"), replace=True)
-                except exceptions.TooManySDKVersion as err:
-                    raise error_codes.INTERNAL.format(
-                        _("同一资源版本，最多只能生成 {count} 个 SDK。").format(count=err.max_count), replace=True
-                    )
-                except Exception:  # pylint: disable=broad-except
-                    logger.exception(
-                        "create sdk failed for gateway %s, release %s", gateway_name, resource_version.version
-                    )
-                    raise error_codes.INTERNAL.format(_("网关 SDK 创建失败，请联系管理员。"), replace=True)
+        results = generate_sdks_for_resource_version(
+            resource_version=resource_version,
+            languages=data["languages"],
+            version=data["version"],
+        )
 
         return OKJsonResponse(status=status.HTTP_201_CREATED, data={"results": results})
 
@@ -674,7 +582,6 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
     permission_classes = [OpenAPIV2GatewayRelatedAppPermission]
 
     def post(self, request, *args, **kwargs):
-        # 验证输入数据
         stage_name = kwargs.get("stage_name")
         if not stage_name:
             raise error_codes.INTERNAL.format(_("stage_name is required"), replace=True)
@@ -683,18 +590,29 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
             raise error_codes.NOT_FOUND.format(
                 _("stage: {stage_name} not found").format(stage_name=stage_name), replace=True
             )
-        # 查询stage发布的资源版本
+
         resource_version_id = Release.objects.get_released_resource_version_id(
             gateway_id=request.gateway.id, stage_name=stage_name
         )
-        if not resource_version_id:
+
+        # 检查当前环境是否正在发布
+        stage_release_status = ReleaseHandler.batch_get_stage_release_status([stage.id])
+        stage_status_info = stage_release_status.get(stage.id)
+        is_releasing = stage_status_info and stage_status_info.get("status") in (
+            ReleaseHistoryStatusEnum.DOING.value,
+            ReleaseStatusEnum.PENDING.value,
+        )
+
+        if is_releasing:
+            validate_resource_version_id = stage_status_info["resource_version_id"]
+        elif resource_version_id:
+            validate_resource_version_id = resource_version_id
+        else:
             raise error_codes.NOT_FOUND.format(
                 _("该环境：{stage_name} 未发布资源版本").format(stage_name=stage_name), replace=True
             )
-
-        # 查询资源 schema 数据
         resource_name_to_schema = ResourceVersionHandler().get_resource_name_to_schema_by_resource_version(
-            resource_version_id
+            validate_resource_version_id
         )
 
         context = {
@@ -706,22 +624,37 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
 
         serializer = self.get_serializer(data=request.data, context=context)
         serializer.is_valid(raise_exception=True)
-        results = []
-        for mcp_data in serializer.validated_data["mcp_servers"]:
-            mcp_data["stage_id"] = stage.id
-            name = mcp_data["name"]
-            mcp_data["name"] = MCPServerHandler().get_mcp_server_name(
-                gateway_name=request.gateway.name, stage_name=stage.name, name=name
+
+        mcp_servers_data = serializer.validated_data["mcp_servers"]
+
+        if is_releasing:
+            sync_mcp_server_after_release.delay(
+                gateway_id=request.gateway.id,
+                gateway_name=request.gateway.name,
+                stage_id=stage.id,
+                stage_name=stage.name,
+                release_history_id=stage_status_info["publish_id"],
+                mcp_servers_data=mcp_servers_data,
             )
-            # 查询是否存在
-            instance = MCPServer.objects.filter(
-                name=mcp_data["name"], stage__name=stage.name, gateway_id=request.gateway.id
-            ).first()
-            action = "updated" if instance else "created"
-            mcp_slz = MCPServerSLZ(instance=instance, data=mcp_data, context=context)
-            mcp_slz.is_valid(raise_exception=True)
-            instance = mcp_slz.save()
-            results.append({"name": instance.name, "action": action, "id": instance.id})
+
+            results = [
+                {
+                    "name": MCPServerHandler.get_mcp_server_name(
+                        gateway_name=request.gateway.name, stage_name=stage.name, name=mcp_data["name"]
+                    ),
+                    "action": "pending",
+                    "id": 0,
+                }
+                for mcp_data in mcp_servers_data
+            ]
+        else:
+            results = MCPServerHandler.save_mcp_servers(
+                gateway_id=request.gateway.id,
+                gateway_name=request.gateway.name,
+                stage_id=stage.id,
+                stage_name=stage.name,
+                mcp_servers_data=mcp_servers_data,
+            )
 
         output_slz = StageMcpServersSyncOutputSLZ(results, many=True)
         return OKJsonResponse(data=output_slz.data)

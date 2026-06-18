@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,8 +17,11 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
-from jinja2 import Template
+from jinja2.sandbox import SandboxedEnvironment
+
+_sandbox_env = SandboxedEnvironment()
 
 
 def render_to_string(source: str, *args, **kwargs) -> str:
-    return Template(source).render(*args, **kwargs)
+    template = _sandbox_env.from_string(source)
+    return template.render(*args, **kwargs)

@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -43,7 +43,10 @@ func (k AppResourcePermissionKey) Key() string {
 }
 
 func retrieveAppResourcePermission(ctx context.Context, k cache.Key) (any, error) {
-	key := k.(AppResourcePermissionKey)
+	key, ok := k.(AppResourcePermissionKey)
+	if !ok {
+		return nil, errors.New("invalid key type, expected AppResourcePermissionKey")
+	}
 
 	manager := dao.NewAppResourcePermissionManager()
 
@@ -65,6 +68,11 @@ func retrieveAppResourcePermission(ctx context.Context, k cache.Key) (any, error
 			err,
 		)
 		return nil, nil
+	}
+
+	if err != nil {
+		logging.GetLogger().Errorw("retrieveAppResourcePermission",
+			"appCode", key.AppCode, "gatewayID", key.GatewayID, "resourceID", key.ResourceID, "err", err)
 	}
 
 	return perm, err

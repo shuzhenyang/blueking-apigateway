@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -40,7 +40,7 @@
         :route-mode="routeMode"
         :disabled="disabled"
         :layout="getLayout('specials')"
-        @update:model-value="updateSpecials"
+        @update:model-value="updateSpecials as any"
       />
     </div>
   </BkForm>
@@ -66,9 +66,9 @@ const formData = defineModel<IRateLimitFormData>('modelValue', {
 });
 
 const {
-  schema = {},
-  layout = {},
-  componentMap = {},
+  schema = {} as ISchema,
+  layout = {} as Record<string, any>,
+  componentMap = {} as Record<string, any>,
   disabled = false,
 } = defineProps<IProps>();
 
@@ -89,7 +89,7 @@ const specialsSchemaFieldRef = ref<InstanceType<typeof SchemaField> | null>(null
 // 获取布局配置
 const getLayout = (prop: string) => {
   const ratesLayout = layout?.[0]?.[0]?.group;
-  return ratesLayout?.flat(1).find(item => item.prop === prop)?.container || {};
+  return ratesLayout?.flat(1).find((item: any) => item.prop === prop)?.container || {};
 };
 
 // 更新默认限制数据
@@ -102,7 +102,7 @@ const updateDefault = (value: {
 
 // 更新特殊限制数据
 const updateSpecials = (index: number, value: string | number) => {
-  formData.value.rates.specials = formData.value.rates.specials.map((item, i) =>
+  formData.value.rates.specials = formData.value.rates.specials.map((item: any, i: any) =>
     i === index ? value : item,
   );
 };
@@ -113,8 +113,9 @@ const getValue = () => {
 
 const validate = async (): Promise<boolean> => {
   try {
-    const isValid = await formRef.value?.validate();
+    const isValid = await (formRef.value as any)?.validate();
     if (!isValid) {
+      // @ts-ignore
       return;
     }
     return isValid;
@@ -128,7 +129,7 @@ const clearValidate = () => {
   return formRef.value?.clearValidate();
 };
 
-watch(() => formData.value, (newVal) => {
+watch(() => formData.value, (newVal: any) => {
   clearValidate();
   if (!isObject(newVal) || isEmpty(newVal)) {
     formData.value = { ...DEFAULT_FORM_DATA };

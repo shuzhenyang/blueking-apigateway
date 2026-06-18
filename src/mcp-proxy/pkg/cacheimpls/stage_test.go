@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -44,7 +44,7 @@ var _ = Describe("Stage", func() {
 		expiration := 5 * time.Minute
 
 		It("should return stage successfully", func() {
-			retrieveFunc := func(ctx context.Context, key cache.Key) (interface{}, error) {
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
 				return &model.Stage{}, nil
 			}
 			mockCache := memory.NewCache("mockCache", retrieveFunc, expiration, nil)
@@ -55,7 +55,7 @@ var _ = Describe("Stage", func() {
 		})
 
 		It("should return error when retrieval fails", func() {
-			retrieveFunc := func(ctx context.Context, key cache.Key) (interface{}, error) {
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
 				return false, errors.New("error here")
 			}
 			mockCache := memory.NewCache("mockCache", retrieveFunc, expiration, nil)

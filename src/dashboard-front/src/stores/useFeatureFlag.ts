@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -33,6 +33,7 @@ export const useFeatureFlag = defineStore('useFeatureFlag', {
       ALLOW_CREATE_APPCHAT: false,
       ALLOW_UPLOAD_SDK_TO_REPOSITORY: false,
       ENABLE_AI_COMPLETION: false,
+      ENABLE_BK_CLI: false,
       ENABLE_BK_NOTICE: false,
       ENABLE_DISPLAY_NAME_RENDER: false,
       ENABLE_GATEWAY_OPERATION_STATUS: false,
@@ -43,6 +44,9 @@ export const useFeatureFlag = defineStore('useFeatureFlag', {
       ENABLE_RUN_DATA: false,
       ENABLE_RUN_DATA_METRICS: false,
       ENABLE_SDK: false,
+      ENABLE_MCP_SERVER_OAUTH2_PUBLIC_CLIENT: false,
+      ENABLE_ITSM4_PERMISSION_APPLY: false,
+      ENABLE_MCP_SERVER_OBSERVABILITY: false,
       GATEWAY_APP_BINDING_ENABLED: false,
       MENU_ITEM_ESB_API: false,
       MENU_ITEM_ESB_API_DOC: false,

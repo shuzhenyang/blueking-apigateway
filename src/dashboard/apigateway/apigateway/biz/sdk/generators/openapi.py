@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -25,9 +25,9 @@ from typing import Any, ClassVar, Dict, List
 from bkapi_client_generator import GenerateFailed, generate_client
 
 from apigateway.apps.support.constants import OpenAPIFormatEnum
-from apigateway.biz.resource.importer.openapi import OpenAPIExportManager
-from apigateway.biz.sdk import exceptions
+from apigateway.biz.sdk.exceptions import GenerateError
 from apigateway.biz.sdk.models import Generator
+from apigateway.service.resource_version import OpenAPIExportManager
 from apigateway.utils.file import write_to_file
 
 logger = logging.getLogger(__name__)
@@ -47,17 +47,15 @@ class OpenAPITemplateGenerator(Generator):
                 output=output_dir,
             )
         except GenerateFailed as err:
-            raise exceptions.GenerateError(
-                f"failed to generate client package {self.context.name}, code: {err.code}"
-            ) from err
+            raise GenerateError(f"failed to generate client package {self.context.name}, code: {err.code}") from err
         except Exception as err:  # pylint: disable=broad-except
-            raise exceptions.GenerateError(f"failed to generate client package {self.context.name}") from err
+            raise GenerateError(f"failed to generate client package {self.context.name}") from err
 
     def generate(self, output_dir: str, resources: List[Dict[str, Any]]):
         exporter = OpenAPIExportManager(
             api_version=self.context.version,
             title=self.context.resource_version.gateway.name,
-            description=self.context.resource_version.gateway.description,
+            description=f"an sdk for {self.context.resource_version.gateway.name} on bk-apigateway",
             include_bk_apigateway_resource=False,
         )
 

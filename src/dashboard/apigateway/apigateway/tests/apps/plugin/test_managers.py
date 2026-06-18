@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,10 +18,9 @@
 #
 import pytest
 from ddf import G
-from django.utils.translation import override
 
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
-from apigateway.apps.plugin.models import PluginBinding, PluginConfig, PluginForm
+from apigateway.apps.plugin.models import PluginBinding, PluginConfig
 from apigateway.core.models import Resource
 
 pytestmark = pytest.mark.django_db
@@ -63,13 +62,3 @@ class TestPluginBindingManager:
             fake_gateway.id, scope_type=PluginBindingScopeEnum.RESOURCE, scope_ids=[1]
         )
         assert result == {1: [binding1]}
-
-
-class TestPluginFormManager:
-    def test_with_language_found(self, echo_plugin_default_form, echo_plugin_en_form):
-        with override(echo_plugin_en_form.language):
-            assert echo_plugin_en_form == PluginForm.objects.with_language().first()
-
-    def test_with_language_not_found(self, echo_plugin_default_form, echo_plugin_en_form):
-        with override("cantonese"):
-            assert echo_plugin_default_form == PluginForm.objects.with_language().first()

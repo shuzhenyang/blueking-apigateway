@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -30,6 +30,7 @@ export function getUserInfo() {
     display_name: string
     tenant_id: string | null
     username: string
+    time_zone: string
   }>(`${path}/accounts/userinfo/`);
 }
 
@@ -44,6 +45,7 @@ export function getFeatureFlags(params: {
     ALLOW_CREATE_APPCHAT: boolean
     ALLOW_UPLOAD_SDK_TO_REPOSITORY: boolean
     ENABLE_AI_COMPLETION: boolean
+    ENABLE_BK_CLI: boolean
     ENABLE_BK_NOTICE: boolean
     ENABLE_DISPLAY_NAME_RENDER: boolean
     ENABLE_GATEWAY_OPERATION_STATUS: boolean
@@ -54,6 +56,9 @@ export function getFeatureFlags(params: {
     ENABLE_RUN_DATA: boolean
     ENABLE_RUN_DATA_METRICS: boolean
     ENABLE_SDK: boolean
+    ENABLE_MCP_SERVER_OAUTH2_PUBLIC_CLIENT: boolean
+    ENABLE_ITSM4_PERMISSION_APPLY: boolean
+    ENABLE_MCP_SERVER_OBSERVABILITY: boolean
     GATEWAY_APP_BINDING_ENABLED: boolean
     MENU_ITEM_ESB_API: boolean
     MENU_ITEM_ESB_API_DOC: boolean
@@ -82,11 +87,22 @@ export function getEnv() {
     BK_DOCS_URL_PREFIX: string
     BK_LOGIN_URL: string
     BK_PAAS_APP_REPO_URL_TMPL: string
+    BK_SDK_LANGUAGES: string[]
     BK_SHARED_RES_URL: string
     BK_USER_WEB_API_URL: string
     CREATE_CHAT_API: string
     EDITION: string
     SEND_CHAT_API: string
+    CLI: {
+      DETAIL_URL: string
+      USER_KEY: string
+      USER_KEY_EXPIRE_DAYS: number
+      ACCESS_TOKEN_EXPIRE_DAYS: number
+      BK_API_URL_TMPL: string
+      GIT_REPO_URL: string
+      NPM_INSTALL_CMD: string
+      SKILL_NPM_INSTALL_CMD: string
+    }
     HELPER: {
       name: string
       href: string
@@ -129,6 +145,9 @@ export function getEnv() {
       PLUGIN_REQUEST_VALIDATION: string
       PLUGIN_RESPONSE_REWRITE: string
       PLUGIN_URI_BLOCKER: string
+      PLUGIN_BK_OAUTH2_PROTECTED_RESOURCE: string
+      PLUGIN_BK_OAUTH2_VERIFY: string
+      PLUGIN_BK_OAUTH2_AUDIENCE_VALIDATE: string
     }
   }>(`${path}/settings/env-vars/`);
 }
@@ -141,19 +160,32 @@ export function getTenantUsers(
   tenant_id: string,
 ) {
   const envStore = useEnv();
-  return http.get(
+  return http.get<{
+    bk_username: string
+    display_name: string
+  }[]>(
     `${envStore.env.BK_USER_WEB_API_URL}/api/v3/open-web/tenant/users/-/search/`,
     params,
-    { headers: { 'X-Bk-Tenant-Id': tenant_id || '' } },
+    { headers: { 'X-Bk-Tenant-Id': tenant_id || 'default' } },
   );
 }
 
 /**
  * 获取版本日志
  */
-export const getVersionLog = () => http.get('/version-log/');
+export const getVersionLog = () =>
+  http.get<Array<{
+    content: string
+    date: string
+    version: string
+  }>>('/version-log/');
 
 /**
  * 将国际化语言设置保存到用户管理中
  */
-export const saveUserLanguage = (url: string, params: { language: string }) => http.put(url, params);
+export const saveUserLanguage = (
+  url: string,
+  params: { language: string },
+  tenant_id: string | null,
+) =>
+  http.put(url, params, tenant_id ? { headers: { 'X-Bk-Tenant-Id': tenant_id || '' } } : {});

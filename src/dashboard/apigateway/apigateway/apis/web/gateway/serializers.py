@@ -2,7 +2,7 @@
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -309,7 +309,7 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
         }
 
     def get_api_domain(self, obj):
-        return GatewayHandler.get_api_domain(obj)
+        return GatewayHandler.get_gateway_domain(obj)
 
     def get_docs_url(self, obj):
         return GatewayHandler.get_docs_url(obj)
@@ -479,3 +479,13 @@ class GatewayCheckNameAvailableOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.gateway.serializers.GatewayCheckNameAvailableOutputSLZ"
+
+
+class GatewayRepoAuthorizationOutputSLZ(serializers.Serializer):
+    authorized = serializers.BooleanField(read_only=True, help_text="用户是否已授权代码仓库")
+    message = serializers.CharField(allow_blank=True, read_only=True, help_text="未授权提示信息")
+    address = serializers.CharField(allow_blank=True, read_only=True, help_text="仓库授权链接")
+    auth_docs = serializers.CharField(allow_blank=True, read_only=True, help_text="仓库授权文档链接")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.gateway.serializers.GatewayRepoAuthorizationOutputSLZ"

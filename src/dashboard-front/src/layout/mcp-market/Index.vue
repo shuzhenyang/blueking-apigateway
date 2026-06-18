@@ -19,9 +19,12 @@
 <template>
   <div class="mcp-market-wrapper">
     <img
+      ref="bannerRef"
       :src="bannerImg"
       alt="banner"
       class="banner"
+      loading="lazy"
+      @error="bannerLoaded = true"
     >
     <div class="flex gap-16px main">
       <div
@@ -36,7 +39,7 @@
           @click.stop="handleCategoryChange('all')"
         >
           <div class="mcp-categorize-content">
-            <svg class="icon svg-icon w-14px">
+            <svg class="icon svg-icon w-16px">
               <use xlink:href="#icon-ag-quanbu" />
             </svg>
             <div class="categorize-text">
@@ -64,9 +67,8 @@
             <div
               v-bk-tooltips="{
                 placement:'top',
-                content: categorize.display_name ,
+                content: categorize.display_name,
                 disabled: !categorize.isOverflow,
-                extCls: 'max-w-120px',
               }"
               class="truncate categorize-text"
               @mouseenter="(e: MouseEvent) => handleMouseenter(e, categorize)"
@@ -85,11 +87,10 @@
         :style="{ width: `calc(100% - ${mcpCategorizeWidth}px)` }"
       >
         <AgMcpTopBar
-          v-model:search-value="searchValue"
           v-model:publish-time="filterData.order_by"
           class="mb-16px"
-          :placeholder="t('搜索 MCP 名称、展示名、描述')"
-          :search-data="searchData"
+          :selections="selections"
+          @batch-copy="handleBatchCopy"
           @sort-change="handleSortChange"
         >
           <template #mcpServerTab>
@@ -109,12 +110,23 @@
               </div>
             </div>
           </template>
+          <template #customSearch>
+            <BkInput
+              v-model="filterData.keyword"
+              :placeholder="t('搜索 MCP 名称、展示名、描述')"
+              clearable
+            />
+          </template>
         </AgMcpTopBar>
         <!-- 卡片区域内容 -->
         <BkLoading
           :loading="isLoading"
           :z-index="99"
           color="#f5f7fb"
+          :class="[
+            { 'mt-100px': mcpMarketList.length < 1 && !isFirstLoad },
+            { 'min-h-200px': isLoading }
+          ]"
         >
           <div class="mcp-market-list">
             <template v-if="mcpMarketList.length < 1 && !isLoading">
@@ -131,15 +143,17 @@
                 :key="server.id"
                 :server="server"
                 :show-actions="false"
-                @click="() => handleCardClick(server.id)"
+                :show-public="false"
+                :oauth2-tooltip="t('已开启 OAuth2 公开客户端模式，用户通过浏览器授权即可使用')"
+                @selection-change="handleSelectionChange"
+                @checked="(isChecked: boolean) => handleChecked(isChecked, server)"
+                @click.stop="() => handleView(server.id)"
               >
-                <template
-                  v-if="server?.is_official"
-                  #officialTag
-                >
+                <template #externalTag>
                   <BkTag
+                    v-if="server?.is_official"
                     theme="success"
-                    class="ml-8px"
+                    class="h-18px"
                   >
                     {{ t("官方") }}
                   </BkTag>
@@ -148,14 +162,34 @@
                   v-if="server?.is_featured"
                   #mcpStatus
                 >
-                  <div class="bg-# card-header-status">
+                  <div class="bg-#f8b64f featured card-header-status">
                     {{ t('精选') }}
                   </div>
+                </template>
+                <template #mcpCopyConfig>
+                  <BkButton
+                    text
+                    class="mr-24px color-#979ba5!"
+                    @click.stop="handleCopyConfig(server)"
+                  >
+                    <AgIcon
+                      name="copy"
+                      class="mr-8px"
+                      size="16"
+                    />
+                    {{ t("复制配置") }}
+                  </BkButton>
                 </template>
               </AgMcpCard>
             </template>
           </div>
         </BkLoading>
+        <!-- 复制 MCP 配置 -->
+        <AgMcpCopyConfigDialog
+          v-model:is-show="isShowConfig"
+          :loading="copyConfigLoading"
+          :list="mcpConfigList"
+        />
         <!-- 触底翻页触发器 -->
         <div
           v-intersection-observer="onIntersectionObserver"
@@ -167,26 +201,92 @@
 </template>
 
 <script lang="ts" setup>
+// @ts-nocheck
 import { debounce } from 'lodash-es';
 import {
   type IMCPMarketCategory,
-  type IMarketplaceItem,
+  type IMarketplaceItemWithUIState,
+  getMcpBatchCopyConfigList,
   getMcpMarketplace,
   getMcpMarketplaceCategories,
 } from '@/services/source/mcp-market';
+import { type IPagination } from '@/types/common';
 import { vIntersectionObserver } from '@vueuse/components';
 import { useFeatureFlag } from '@/stores';
+import { useMcpBatchCopyConfig } from '@/hooks';
+import { filterSimpleEmpty } from '@/utils/filterEmptyValues';
 import mcpBanner from '@/images/mcp-banner.jpg';
 import mcpBannerEn from '@/images/mcp-banner-en.jpg';
 import TableEmpty from '@/components/table-empty/Index.vue';
 import AgMcpCard from '@/components/ag-mcp-card/Index.vue';
 import AgMcpTopBar from '@/components/ag-mcp-search-bar/Index.vue';
+import AgMcpCopyConfigDialog from '@/components/ag-mcp-card/components/CopyConfigDialog.vue';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const featureFlagStore = useFeatureFlag();
+// 批量复制配置hooks
+const {
+  copyConfigLoading,
+  mcpConfigList,
+  fetchMcpBatchCopyConfigList,
+} = useMcpBatchCopyConfig({
+  fetchApi: getMcpBatchCopyConfigList,
+});
 
-const mcpTabList = shallowRef([
+const bannerRef = ref<HTMLImageElement>(null);
+const mcpCategorizeRef = ref<HTMLDivElement>(null);
+const isLoading = ref(false);
+const bannerLoaded = ref(false);
+// 标记首次数据加载是否完成
+const isFirstLoad = ref(true);
+// 标记Banner加载完成后是否已初始化过分页
+const isBannerLoadedInit = ref(false);
+// 标记是否正在切换分类（用于冻结计数显示）
+const isSwitchingCategory = ref(false);
+// 显示复制 MCP Server 接入配置
+const isShowConfig = ref(false);
+const mcpCategorizeWidth = ref(0);
+const cachedViewportHeight = ref(0);
+const activeStatusTab = ref('all');
+const activeCategoryName = ref('all');
+const cardEmptyType = ref<'empty' | 'searchEmpty' | 'error'>('');
+const filterData = ref({
+  order_by: '-updated_time',
+  keyword: '',
+});
+const mcpMarketList = ref<IMarketplaceItemWithUIState[]>([]);
+const categoriesList = ref<IMCPMarketCategory[]>([]);
+const pagination = ref<Omit<IPagination, 'hasNoMore'>>({
+  current: 1,
+  limit: 0,
+  count: 0,
+  hasNoMore: false,
+});
+// 批量复制内容
+const selections = ref<Map<number, IMarketplaceItemWithUIState>>(new Map());
+
+const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
+const bannerImg = computed(() => {
+  if (locale.value === 'zh-cn') {
+    return mcpBanner;
+  }
+  return mcpBannerEn;
+});
+const categoriesCount = computed(() => {
+  if (activeCategoryName.value.includes('all')) {
+    // 正在切换分类时，返回空/加载占位（避免显示旧值）
+    if (isSwitchingCategory.value) {
+      return '...';
+    }
+    return pagination.value.count ?? 0;
+  }
+
+  return categoriesList.value?.reduce((accumulator: number, current: IMCPMarketCategory) => {
+    return accumulator + current.mcp_server_count;
+  }, 0) ?? 0;
+});
+const mcpTabList = computed(() => [
   {
     name: t('全部'),
     id: 'all',
@@ -200,73 +300,55 @@ const mcpTabList = shallowRef([
     id: 'Featured',
   },
 ]);
-const mcpCategorizeRef = ref<HTMLDivElement>(null);
-const isLoading = ref(false);
-const bannerLoaded = ref(false);
-// 标记首次数据加载是否完成
-const isFirstLoad = ref(true);
-// 标记Banner加载完成后是否已初始化过分页
-const isBannerLoadedInit = ref(false);
-const mcpCategorizeWidth = ref(0);
-const activeStatusTab = ref('all');
-const activeCategoryName = ref('all');
-const cardEmptyType = ref<'empty' | 'searchEmpty' | 'error'>('');
-const filterData = ref({ order_by: '-updated_time' });
-const searchValue = ref([]);
-const mcpMarketList = ref<IMarketplaceItem[]>([]);
-const categoriesList = ref<IMCPMarketCategory>([]);
+// 获取筛选条件
+const getFilterParams = computed(() => {
+  const categorySegments = [
+    activeCategoryName.value === 'all' ? undefined : activeCategoryName.value,
+    activeStatusTab.value === 'all' ? undefined : activeStatusTab.value,
+  ].filter(Boolean);
 
-const pagination = ref({
-  current: 1,
-  limit: 0,
-  count: 0,
-  hasNoMore: false,
+  const categoryParam = categorySegments.length > 0 ? categorySegments.join(',') : undefined;
+  const params = {
+    ...filterSimpleEmpty(filterData.value),
+    ...(categoryParam ? { categories: categoryParam } : {}),
+  };
+
+  return params;
 });
 
-const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
-const bannerImg = computed(() => {
-  if (locale.value === 'zh-cn') {
-    return mcpBanner;
+const handleBannerLoad = () => {
+  bannerLoaded.value = true;
+  // 图片加载完成后重新计算分页limit
+  if (!isBannerLoadedInit.value) {
+    isBannerLoadedInit.value = true;
+    resetPagination();
   }
-  return mcpBannerEn;
-});
-const searchData = computed(() => [
-  {
-    name: t('模糊搜索'),
-    id: 'keyword',
-    placeholder: t('请输入MCP 名称，展示名，描述'),
-  },
-]);
-const categoriesCount = computed(() => {
-  return categoriesList.value?.reduce((accumulator: number, current: IMCPMarketCategory) => {
-    return accumulator + current.mcp_server_count;
-  }, 0);
-});
+};
 
 // 获取banner高度的方法，增加图片加载监听
-const getBannerHeight = (): number => {
-  const bannerEl = document.querySelector('.mcp-market-wrapper .banner') as HTMLImageElement;
-  if (!bannerEl) return 0;
+const getBannerHeight = () => {
+  if (!bannerRef.value) return 0;
 
   // 若图片已加载，直接返回高度
   if (bannerLoaded.value) {
-    return bannerEl.offsetHeight;
+    return bannerRef.value.offsetHeight;
   }
 
   // 监听图片加载事件
-  bannerEl.addEventListener('load', () => {
-    bannerLoaded.value = true;
-    // 图片加载完成后重新计算分页limit
-    if (!isBannerLoadedInit.value) {
-      isBannerLoadedInit.value = true;
-      resetPagination();
-    }
-  });
+  bannerRef.value.addEventListener('load', handleBannerLoad, { once: true });
+
   // 加载中先返回默认高度（或图片的固有高度）
-  return bannerEl.naturalHeight || 0;
+  return bannerRef.value.naturalHeight || 0;
 };
 
-const calculateMaxVisibleCards = (): number => {
+/**
+ * 计算可视区域可展示的最大卡片数量
+ * @returns {number} 最大卡片数（预留一行用于加载更多）
+ * @description 计算逻辑：页面可用高度 = 视口高度 - 页面边距 - 导航栏高度 - banner高度 - 通知栏高度
+ *              最大行数 = 页面可用高度 / 单卡片高度（含间距）
+ *              最大卡片数 = 行数 * 每行卡片数 + 预留行卡片数
+ */
+const calculateMaxVisibleCards = () => {
   // 通知栏高度40px
   const noticeH = isShowNoticeAlert.value ? 40 : 0;
   // banner图高度
@@ -291,6 +373,7 @@ const calculateMaxVisibleCards = (): number => {
 const getList = async () => {
   const { hasNoMore, current, limit } = pagination.value;
   isLoading.value = true;
+  cardEmptyType.value = Object.keys(filterSimpleEmpty(filterData.value)).length > 0 ? 'searchEmpty' : 'empty';
 
   if (hasNoMore) {
     isLoading.value = false;
@@ -298,16 +381,10 @@ const getList = async () => {
   };
 
   try {
-    const categorySegments = [
-      activeCategoryName.value === 'all' ? undefined : activeCategoryName.value,
-      activeStatusTab.value === 'all' ? undefined : activeStatusTab.value,
-    ].filter(Boolean); // 过滤 undefined/null/空字符串
-    const categoryParam = categorySegments.length > 0 ? categorySegments.join(',') : undefined;
     const params = {
       limit,
       offset: limit * (current - 1),
-      ...filterData.value,
-      ...(categoryParam ? { categories: categoryParam } : {}),
+      ...getFilterParams.value,
     };
     const res = await getMcpMarketplace(params);
     const { results = [], count = 0 } = res ?? {};
@@ -318,6 +395,13 @@ const getList = async () => {
       hasNoMore: mcpMarketList.value.length >= count,
       current: current + 1,
     };
+    // 处理每个分类下官方/精选筛选结果
+    if (activeCategoryName.value && !activeStatusTab.value.includes('all')) {
+      const curCate = categoriesList.value.find((cat: IMCPMarketCategory) => cat.name === activeCategoryName.value);
+      if (curCate) {
+        curCate.mcp_server_count = count;
+      }
+    }
   }
   catch {
     cardEmptyType.value = 'error';
@@ -331,15 +415,24 @@ const getList = async () => {
 };
 
 const fetchCategoryList = async () => {
-  const res = await getMcpMarketplaceCategories();
+  const extraCategories = ['Official', 'Featured'] as const;
+  // 如果右侧选择了全部，分类接口的categories不需要传
+  const params = { ...getFilterParams.value };
+  if (extraCategories.includes(activeStatusTab.value)) {
+    params.categories = activeStatusTab.value;
+  }
+  else {
+    delete params.categories;
+  }
+  const res = await getMcpMarketplaceCategories(params);
   categoriesList.value = (res ?? []).filter(cg => !['Official', 'Featured'].includes(cg.name));
   mcpCategorizeWidth.value = mcpCategorizeRef.value?.offsetWidth;
 };
 
-const resetPagination = () => {
+const resetPagination = async () => {
   // 重置分页后，滚动距离重置
-  const mcpEl = document.querySelector('.McpMarket-navigation-content .container-content');
-  if (mcpEl?.scrollTop > 0) {
+  const mcpEl = document.querySelector('.McpMarket-navigation-content .container-content') as HTMLElement | null;
+  if (mcpEl && mcpEl.scrollTop > 0) {
     mcpEl.scrollTop = 0;
   }
   pagination.value = Object.assign(pagination.value, {
@@ -347,49 +440,54 @@ const resetPagination = () => {
     limit: calculateMaxVisibleCards(),
     hasNoMore: false,
   });
-  getList();
+  selections.value.clear();
+  await getList();
 };
 
-const handleCategoryChange = (value: string) => {
+const fetchInitData = () => {
+  Promise.allSettled([fetchCategoryList(), resetPagination()]);
+};
+
+const handleCategoryChange = async (value: string) => {
   if (value === activeCategoryName.value) return;
+
+  isSwitchingCategory.value = true;
   activeCategoryName.value = value;
-  resetPagination();
+
+  try {
+    await resetPagination();
+  }
+  finally {
+    isSwitchingCategory.value = false;
+  }
 };
 
 const handleTopTabChange = (value: string) => {
   if (value === activeStatusTab.value) return;
   activeStatusTab.value = value;
-  resetPagination();
+  fetchInitData();
 };
 
 const handleSortChange = (sort: string) => {
   filterData.value.order_by = sort;
   resetPagination();
 };
-const handleSearch = () => {
-  const params = { order_by: filterData.value.order_by || '-updated_time' };
-  searchValue.value.forEach((option) => {
-    if (option.values) {
-      params[option.id] = option.values?.[0]?.id;
-    };
-  });
-  filterData.value = params;
-  cardEmptyType.value = Object.keys(params).length > 0 ? 'searchEmpty' : 'empty';
-  resetPagination();
-};
 
-const handleMouseenter = (e: MouseEvent, row: IMCPMarketCategory) => {
-  const cell = (e.target as HTMLElement).closest('.truncate');
+const handleMouseenter = (
+  e: MouseEvent & { target: HTMLElement },
+  row: IMarketplaceItem & { isOverflow?: boolean },
+) => {
+  const cell = e.target.closest('.truncate') as HTMLElement | null;
   if (cell) {
     row.isOverflow = cell.scrollWidth > cell.offsetWidth;
   }
 };
 
-const handleMouseleave = (_: MouseEvent, row: IMCPMarketCategory) => {
+const handleMouseleave = (_: MouseEvent, row: IMarketplaceItem & { isOverflow?: boolean }) => {
   row.isOverflow = false;
 };
 
-const handleCardClick = (id: number) => {
+const handleView = (id: number) => {
   router.push({
     name: 'McpMarketDetails',
     params: { id },
@@ -397,13 +495,14 @@ const handleCardClick = (id: number) => {
 };
 
 const handleClearFilter = () => {
-  filterData.value = { order_by: '-updated_time' };
-  searchValue.value = [];
-  resetPagination();
+  filterData.value = {
+    order_by: '-updated_time',
+    keyword: '',
+  };
 };
 
 const handleRefresh = () => {
-  resetPagination();
+  fetchInitData();
 };
 
 const onIntersectionObserver = ([entry]: IntersectionObserverEntry[]) => {
@@ -413,16 +512,48 @@ const onIntersectionObserver = ([entry]: IntersectionObserverEntry[]) => {
   }
 };
 
-const handleResize = debounce(() => {
-  const newLimit = calculateMaxVisibleCards();
-  if (pagination.value.limit !== newLimit) {
-    pagination.value.limit = newLimit || 3;
-    resetPagination();
+const handleChecked = (isChecked: boolean, row: IMarketplaceItemWithUIState) => {
+  row.is_checked = isChecked;
+  if (isChecked) {
+    selections.value.set(row.id, row);
   }
-}, 300);
+  else {
+    selections.value.delete(row.id);
+  }
+};
+
+const handleCopyConfig = (row: IMarketplaceItemWithUIState) => {
+  isShowConfig.value = true;
+  fetchMcpBatchCopyConfigList({ row });
+};
+
+const handleBatchCopy = () => {
+  isShowConfig.value = true;
+  fetchMcpBatchCopyConfigList({ selections: selections.value });
+};
+
+const handleSelectionChange = (selection: IMarketplaceItemWithUIState) => {
+  selections.value.clear();
+  selection.forEach(item => selections.value.set(item.id, item));
+};
+
+const handleResize = debounce(() => {
+  const newViewportHeight = window.innerHeight;
+  // 仅当视口高度变化超过 30px 时才重新计算
+  if (Math.abs(newViewportHeight - (cachedViewportHeight.value || 0)) > 30) {
+    cachedViewportHeight.value = newViewportHeight;
+    const newLimit = calculateMaxVisibleCards();
+    if (pagination.value.limit !== newLimit) {
+      pagination.value.limit = newLimit || 3;
+      resetPagination();
+    }
+  }
+}, 500);
+
+const handleSearch = debounce(() => fetchInitData(), 300);
 
 watch(
-  () => searchValue.value,
+  () => filterData.value.keyword,
   () => {
     handleSearch();
   },
@@ -430,15 +561,14 @@ watch(
 
 onMounted(() => {
   window.addEventListener('resize', handleResize);
-  Promise.allSettled([
-    fetchCategoryList(),
-    calculateMaxVisibleCards(),
-  ]);
+  fetchInitData();
 });
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize);
   handleResize?.cancel();
+  bannerRef.value?.removeEventListener('load', handleBannerLoad);
+  bannerRef.value = null;
 });
 </script>
 
@@ -455,23 +585,25 @@ onUnmounted(() => {
     padding: 24px;
 
     .mcp-categorize {
+      position: sticky;
+      top: 24px;
 
       .mcp-categorize-item {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
         height: 36px;
         padding: 0 12px;
-        transition: background-color 0.2s;
-        box-sizing: border-box;
         cursor: pointer;
+        box-sizing: border-box;
+        transition: background-color 0.2s;
+        align-items: center;
+        justify-content: space-between;
 
         .mcp-categorize-content {
-          flex: 1;
           display: flex;
-          align-items: center;
-          font-size: 12px;
           height: 36px;
+          font-size: 14px;
+          flex: 1;
+          align-items: center;
 
           .icon-circle {
             width: 4px;
@@ -487,20 +619,20 @@ onUnmounted(() => {
 
         .categorize-count {
           display: flex;
-          align-items: center;
-          gap: 0 4px;
           height: 16px;
+          min-width: fit-content;
           padding: 0 6px;
-          border-radius: 8px;
           font-size: 10px;
           color: #4d4f56;
           background-color: #f0f1f5;
-          min-width: fit-content;
+          border-radius: 8px;
+          align-items: center;
+          gap: 0 4px;
         }
 
         &.active {
-          background-color: #e1ecff;
           color: #3a84Ff;
+          background-color: #e1ecff;
         }
 
         &:hover:not(.active) {

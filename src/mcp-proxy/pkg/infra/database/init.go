@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -30,11 +30,14 @@ import (
 	"time"
 
 	ms "github.com/go-sql-driver/mysql"
+	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"gorm.io/plugin/opentelemetry/tracing"
 
 	"mcp_proxy/pkg/config"
+	"mcp_proxy/pkg/infra/logging"
 )
 
 var db *gorm.DB
@@ -146,6 +149,29 @@ func newClient(cfg *config.Database) (*gorm.DB, error) {
 		DefaultStringSize:         defaultStringSize,
 		SkipInitializeWithVersion: false,
 	}
+
+	// SQL 日志配置：默认 Silent（关闭 SQL 日志），仅记录慢查询(>200ms) 和错误
+	// debug 模式下开启全量 SQL 日志
+	// NOTE: config.G is guaranteed to be non-nil here because the startup sequence is:
+	//   cmd.initConfig() -> config.Load() (sets config.G) -> cmd.initDatabase() -> newClient()
+	// If this ordering changes in the future, the nil check below will gracefully fall back to Silent.
+	gormLogLevel := logger.Silent
+	if config.G != nil && config.G.Debug {
+		gormLogLevel = logger.Info
+	}
+	// 使用项目统一的 database logger 作为 GORM 的日志输出
+	dbLogger := logging.GetDatabaseLogger()
+	stdLog := zap.NewStdLog(dbLogger)
+	gormLogger := logger.New(
+		stdLog,
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond, // 慢查询阈值
+			LogLevel:                  gormLogLevel,
+			IgnoreRecordNotFoundError: true, // 忽略 record not found 错误
+			Colorful:                  false,
+		},
+	)
+
 	gormCfg := &gorm.Config{
 		ConnPool: sqlDB,
 		// 禁用默认事务（需要手动管理）
@@ -158,6 +184,8 @@ func newClient(cfg *config.Database) (*gorm.DB, error) {
 		CreateBatchSize: defaultBatchSize,
 		// 数据库迁移时，忽略外键约束
 		DisableForeignKeyConstraintWhenMigrating: true,
+		// SQL 日志
+		Logger: gormLogger,
 	}
 	client, err := gorm.Open(mysql.New(mysqlCfg), gormCfg)
 	if err != nil {

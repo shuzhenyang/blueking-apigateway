@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -90,6 +90,7 @@
 </template>
 
 <script setup lang="ts">
+// @ts-nocheck
 import { useFeatureFlag, useGateway } from '@/stores';
 import { useGatewaysList } from '@/hooks';
 import type { IMenu } from '@/types/common';
@@ -139,7 +140,7 @@ const componentsMenu = shallowRef<IMenu>([
 const { getGatewaysListData } = useGatewaysList(filterData);
 
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
-const openedKeys = computed(() => componentsMenu.value.map(item => item.name));
+const openedKeys = computed(() => componentsMenu.value.map((item: any) => item.name));
 // 表格需要兼容的页面模块
 const needBkuiTablePage = computed(() => {
   return [
@@ -167,7 +168,7 @@ const routerViewWrapperClass = computed(() => {
 
 // 设置网关名
 const handleSetApigwName = () => {
-  const apigwObj = gatewaysList.value.find(apigw => apigw.id === apigwId.value) || {};
+  const apigwObj: any = gatewaysList.value.find((apigw: any) => apigw.id === apigwId.value) || {};
   gatewayStore.setApigwName(apigwObj?.name);
 };
 

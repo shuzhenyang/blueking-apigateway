@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -100,6 +100,16 @@ class MCPServer(TimestampedModelMixin, OperatorModelMixin):
         choices=MCPServerProtocolTypeEnum.get_choices(),
         default=MCPServerProtocolTypeEnum.SSE.value,
         help_text="MCP 协议类型",
+    )
+
+    oauth2_public_client_enabled = models.BooleanField(
+        default=False,
+        help_text=_("是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权"),
+    )
+
+    raw_response_enabled = models.BooleanField(
+        default=False,
+        help_text=_("是否返回原始响应，开启后 mcp-proxy 将直接返回 API 响应结果，不添加 request_id 等额外信息"),
     )
 
     # 分类关联（多对多关系）
@@ -279,6 +289,8 @@ class MCPServerAppPermissionApply(TimestampedModelMixin, OperatorModelMixin):
     comment = models.CharField(max_length=512, blank=True, default="")
     status = models.CharField(max_length=16, choices=MCPServerAppPermissionApplyStatusEnum.get_choices())
     is_deleted = models.BooleanField(default=False)
+    itsm_ticket_id = models.CharField(max_length=64, blank=True, default="", help_text=_("关联的 ITSM 工单 ID"))
+    itsm_callback_token = models.CharField(max_length=128, blank=True, default="", help_text=_("ITSM 回调校验 token"))
     objects: ClassVar[managers.MCPServerAppPermissionApplyManager] = managers.MCPServerAppPermissionApplyManager()
 
     def __str__(self):

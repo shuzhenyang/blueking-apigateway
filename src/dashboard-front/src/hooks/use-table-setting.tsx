@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -17,11 +17,11 @@
  */
 
 // TDesign表格设置隐藏列
-import type { ShallowRef } from 'vue';
 import type { ITableSettings } from '@/types/common';
 import { isEqual } from 'lodash-es';
 import i18n from '@/locales';
 import router from '@/router';
+import type { ShallowRef } from 'vue';
 
 export function useTableSetting(setting: ShallowRef<ITableSettings>, name?: string) {
   const lang = i18n.global.locale;

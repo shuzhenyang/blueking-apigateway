@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -70,18 +70,7 @@
           required
           property="language"
         >
-          <BkRadioGroup
-            v-model="formData.language"
-            type="card"
-          >
-            <BkRadioButton
-              v-for="option in languageOptions"
-              :key="option.label"
-              :label="option.label"
-            >
-              {{ option.text }}
-            </BkRadioButton>
-          </BkRadioGroup>
+          <SdkLanguageSelector v-model="formData.language" />
         </BkFormItem>
       </BkForm>
     </BkDialog>
@@ -96,6 +85,7 @@ import {
   getVersionList,
 } from '@/services/source/resource';
 import { Message } from 'bkui-vue';
+import SdkLanguageSelector from '@/components/sdk-language-selector/Index.vue';
 
 interface CreateDialog {
   resource_version_id: string
@@ -124,20 +114,6 @@ const apigwId = computed(() => +route.params.id);
 const baseInfoRef = ref();
 // 版本列表
 const versionOpts = ref<IVersionItem[]>([]);
-const languageOptions = ref([
-  {
-    label: 'python',
-    text: 'Python',
-  },
-  {
-    label: 'golang',
-    text: 'Golang',
-  },
-  {
-    label: 'java',
-    text: 'Java',
-  },
-]);
 
 // 导出dialog
 const dialogConfig: IDialog = reactive({
@@ -185,7 +161,7 @@ const getResourceVersions = async () => {
     limit: 1000,
   };
   const res = await getVersionList(apigwId.value, query);
-  versionOpts.value = res.results;
+  versionOpts.value = res.results as unknown as IVersionItem[];
 };
 
 watch(
@@ -210,7 +186,7 @@ watch(
         formData.resource_version_id = '';
         formData.version = '';
         formData.language = 'python';
-      }, 1000);
+      }, 500);
     }
   },
   { immediate: true },
@@ -222,7 +198,7 @@ const handleCreate = async () => {
     await baseInfoRef.value?.validate();
     dialogConfig.loading = true;
 
-    await createSDK(apigwId.value, formData);
+    await createSDK(apigwId.value, formData as any);
 
     Message({
       message: t('创建成功'),
@@ -245,3 +221,11 @@ const showCreateSdk = () => {
 
 defineExpose({ showCreateSdk });
 </script>
+
+<style lang="scss" scoped>
+
+:deep(.bk-button-group) {
+  display: flex;
+}
+
+</style>

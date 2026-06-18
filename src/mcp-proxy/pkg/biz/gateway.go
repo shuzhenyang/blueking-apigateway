@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -28,13 +28,13 @@ import (
 )
 
 // GetRelease ...
-func GetRelease(ctx context.Context, gatewayID int, stageID int) (*model.Release, error) {
+func GetRelease(ctx context.Context, gatewayID, stageID int) (*model.Release, error) {
 	r := repo.Release
 	return repo.Release.WithContext(ctx).Where(r.GatewayID.Eq(gatewayID), r.StageID.Eq(stageID)).First()
 }
 
 // GetOpenapiGatewayResourceVersionSpec ...
-func GetOpenapiGatewayResourceVersionSpec(ctx context.Context, gatewayID int, resourceVersionID int) (
+func GetOpenapiGatewayResourceVersionSpec(ctx context.Context, gatewayID, resourceVersionID int) (
 	*model.OpenapiGatewayResourceVersionSpec, error,
 ) {
 	r := repo.OpenapiGatewayResourceVersionSpec

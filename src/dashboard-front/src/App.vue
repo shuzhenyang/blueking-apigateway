@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,6 +19,7 @@
   <BkConfigProvider :locale="bkuiLocale">
     <div
       id="app"
+      class="app"
       :class="[
         systemCls,
         { 'show-notice-wrapper': enableShowNotice && showNoticeAlert}
@@ -31,7 +32,7 @@
       />
       <BkNavigation
         class="navigation-content"
-        :class="[`${route.name}-navigation-content`]"
+        :class="[`${String(route.name)}-navigation-content`]"
         navigation-type="top-bottom"
         :need-menu="false"
         default-open
@@ -71,7 +72,7 @@
             <div class="header-aside-wrap">
               <LanguageToggle />
               <ProductInfo />
-              <UserInfo />
+              <UserInfoV2 v-if="isBkUserNameConfigured" />
             </div>
           </div>
         </template>
@@ -86,15 +87,11 @@
 <script lang="ts" setup>
 import LanguageToggle from '@/components/language-toggle/Index.vue';
 import ProductInfo from '@/components/product-info/Index.vue';
-import UserInfo from '@/components/user-info/Index.vue';
+import UserInfoV2 from '@/components/user-info-v2/Index.vue';
 import LogoWithoutTitle from '@/images/APIgateway-logo.png';
-// @ts-expect-error missing module type
 import En from '../node_modules/bkui-vue/dist/locale/en.esm.js';
-// @ts-expect-error missing module type
 import ZhCn from '../node_modules/bkui-vue/dist/locale/zh-cn.esm.js';
-// @ts-expect-error missing module type
 import NoticeComponent from '@blueking/notice-component';
-
 import {
   useEnv,
   useFeatureFlag,
@@ -144,6 +141,8 @@ const userLoaded = ref(false);
 const showNoticeAlert = ref(false);
 const enableShowNotice = ref(false);
 const curLeavePageData = ref({});
+// 是否配置了bk用户名配置，配置了才能渲染 bk-user-name 组件
+const isBkUserNameConfigured = ref(false);
 
 const bkuiLocale = computed(() => {
   if (locale.value === 'zh-cn') {
@@ -195,8 +194,15 @@ const menuList: IHeaderNav[] = [
     link: '',
   },
   {
-    name: t('微网关'),
+    name: t('个人工作台'),
     id: 6,
+    url: 'PersonalWorkbench',
+    enabled: true,
+    link: '',
+  },
+  {
+    name: t('微网关'),
+    id: 7,
     url: envStore.env.BK_APISIX_URL,
     enabled: envStore.env.EDITION === 'te',
     link: envStore.env.BK_APISIX_URL,
@@ -223,7 +229,7 @@ watch(
     if (platform.indexOf('win') === 0) {
       systemCls.value = 'win';
     }
-    gateway.setApigwId(apigwId.value);
+    gateway.setApigwId(Number(apigwId.value));
     // 需要在不同页面实时查询以下接口最新状态
     fetchInitData();
   },
@@ -265,17 +271,18 @@ async function getUserInfo() {
     const userData = await userInfoStore.fetchUserInfo();
     const envData = await envStore.fetchEnv();
     const tenantId = userData?.tenant_id ?? '';
-    const apiBaseUrl = envData?.env?.BK_USER_WEB_API_URL ?? '';
+    const apiBaseUrl = envData?.BK_USER_WEB_API_URL ?? '';
 
     configureDisplayName({
       tenantId,
       apiBaseUrl,
     });
+    isBkUserNameConfigured.value = true;
   }
   catch (error) {
     console.error('getUserInfo 执行失败：', error);
   }
-};
+}
 
 const goPage = (routeName: string): void => {
   const id = ['Home', 'ApiDocs'].includes(routeName) ? '' : apigwId.value;
@@ -331,6 +338,11 @@ const handleShowAlertChange = (isShowNotice: boolean) => {
   background: #f5f7fb;
 
   .navigation-content {
+
+    :deep(.bk-navigation-header) {
+      z-index: 999;
+      overflow: visible;
+    }
 
     :deep(.bk-navigation-wrapper) {
 
@@ -414,7 +426,8 @@ const handleShowAlertChange = (isShowNotice: boolean) => {
 
   &.show-notice-wrapper {
 
-    .Home-navigation-content {
+    .Home-navigation-content,
+    .McpMarketDetails-navigation-content {
 
       :deep(.bk-navigation-wrapper) {
 

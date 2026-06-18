@@ -4,6 +4,7 @@
       v-model="enabled"
       :name="t('主动检查')"
       :desc="t('通过预设的探针类型，主动探测上游节点的存活性')"
+      :disabled="disabled"
     >
       <BkForm
         :model="active"
@@ -94,6 +95,7 @@
             :create-tag-validator="tagValidator"
             :placeholder="t('HTTP 状态码')"
             allow-create
+            :copyable="false"
             has-delete-icon
           />
         </BkFormItem>
@@ -139,6 +141,7 @@
             :create-tag-validator="tagValidator"
             :placeholder="t('HTTP 状态码')"
             allow-create
+            :copyable="false"
             has-delete-icon
           />
         </BkFormItem>
@@ -200,11 +203,17 @@ import {
   isPlainObject,
 } from 'lodash-es';
 
-interface IProps { checks?: IHealthCheck['active'] }
+interface IProps {
+  checks?: IHealthCheck['active']
+  disabled?: boolean
+}
 
 const enabled = defineModel<boolean>('enabled', { default: false });
 
-const { checks = undefined } = defineProps<IProps>();
+const {
+  checks = undefined,
+  disabled = false,
+} = defineProps<IProps>();
 
 const { t } = useI18n();
 

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -46,6 +46,44 @@ def test_http_request_get(mock_session):
 
     assert success is True
     assert response == {"key": "value"}
+
+
+def test_http_request_error_with_status_code_and_json_response(mock_session):
+    mock_response = requests.Response()
+    mock_response.status_code = 403
+    mock_response._content = b'{"message": "forbidden", "address": "http://example.com/auth"}'
+    mock_session.get.return_value = mock_response
+
+    success, response = _http_request(
+        method="GET",
+        url="http://example.com",
+        headers={"X-Request-Id": "test-request-id"},
+        data={"param": "value"},
+        timeout=5,
+    )
+
+    assert success is False
+    assert response["status_code"] == 403
+    assert response["response_data"] == {"message": "forbidden", "address": "http://example.com/auth"}
+
+
+def test_http_request_error_with_html_response(mock_session):
+    mock_response = requests.Response()
+    mock_response.status_code = 403
+    mock_response._content = b"<html>forbidden</html>"
+    mock_session.get.return_value = mock_response
+
+    success, response = _http_request(
+        method="GET",
+        url="http://example.com",
+        headers={"X-Request-Id": "test-request-id"},
+        data={"param": "value"},
+        timeout=5,
+    )
+
+    assert success is False
+    assert response["status_code"] == 403
+    assert response["response_data"] == {}
 
 
 def test_http_request_post(mock_session):

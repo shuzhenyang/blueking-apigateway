@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,10 +16,13 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import pytest
+from ddf import G
 from pydantic import TypeAdapter
 
+from apigateway.apps.data_plane.models import DataPlane, GatewayDataPlaneBinding
 from apigateway.biz.gateway import GatewayData, GatewayHandler, GatewaySaver
-from apigateway.core.constants import GatewayTypeEnum
+from apigateway.common.constants import CallSourceTypeEnum
+from apigateway.core.constants import GatewayStatusEnum, GatewayTypeEnum
 from apigateway.core.models import Gateway, GatewayRelatedApp
 from apigateway.service.contexts import GatewayAuthContext
 
@@ -87,7 +90,7 @@ class TestGatewayData:
 
 
 class TestGatewaySaver:
-    def test_save(self, unique_gateway_name):
+    def test_save(self, unique_gateway_name, default_data_plane):
         # create
         saver = GatewaySaver(
             None, GatewayData(name=unique_gateway_name, status=0, tenant_mode="single", tenant_id="default")
@@ -106,7 +109,7 @@ class TestGatewaySaver:
         assert gateway.id == Gateway.objects.get(name=unique_gateway_name).id
         assert gateway.status == 0
 
-    def test_create(self, settings, unique_gateway_name):
+    def test_create(self, settings, unique_gateway_name, default_data_plane):
         settings.DEFAULT_USER_AUTH_TYPE = "default"
         settings.SPECIAL_GATEWAY_AUTH_CONFIGS = {unique_gateway_name: {"unfiltered_sensitive_keys": ["bar"]}}
 
@@ -198,3 +201,119 @@ class TestGatewaySaver:
 
         assert saver._get_gateway_unfiltered_sensitive_keys("foo") == ["bar"]
         assert saver._get_gateway_unfiltered_sensitive_keys("bar") is None
+
+    def test_sync_gateway_uses_gateway_saver(self, fake_gateway, mocker):
+        mocked_saver = mocker.patch("apigateway.biz.gateway.gateway.GatewaySaver")
+        mocked_saver.return_value.save.return_value = fake_gateway
+
+        result = GatewayHandler.sync_gateway(
+            fake_gateway,
+            {
+                "name": fake_gateway.name,
+                "status": GatewayStatusEnum.ACTIVE.value,
+                "is_public": True,
+            },
+            "app",
+            "admin",
+            CallSourceTypeEnum.OpenAPI,
+            [1],
+        )
+
+        assert result == fake_gateway
+        mocked_saver.assert_called_once()
+        assert mocked_saver.call_args.kwargs["id"] == fake_gateway.id
+        assert mocked_saver.call_args.kwargs["bk_app_code"] == "app"
+        assert mocked_saver.call_args.kwargs["source"] == CallSourceTypeEnum.OpenAPI
+        assert mocked_saver.call_args.kwargs["data_plane_ids"] == [1]
+
+    def test_save_with_data_plane_ids_creates_bindings(self, unique_gateway_name):
+        """Test save with data_plane_ids creates gateway-dataplane bindings on new gateway"""
+        # Create data planes
+        data_plane1 = G(DataPlane, name="plane-1")
+        data_plane2 = G(DataPlane, name="plane-2")
+
+        # Create gateway with data_plane_ids
+        saver = GatewaySaver(
+            None,
+            GatewayData(name=unique_gateway_name, status=0, tenant_mode="single", tenant_id="default"),
+            data_plane_ids=[data_plane1.id, data_plane2.id],
+        )
+        gateway = saver.save()
+
+        # Verify bindings were created
+        bindings = GatewayDataPlaneBinding.objects.filter(gateway=gateway)
+        assert bindings.count() == 2
+
+        bound_plane_ids = {b.data_plane_id for b in bindings}
+        assert data_plane1.id in bound_plane_ids
+        assert data_plane2.id in bound_plane_ids
+
+    def test_save_without_data_plane_ids_binds_to_default(self, unique_gateway_name, default_data_plane):
+        """Test save without data_plane_ids binds to default data plane on new gateway"""
+        # Create gateway without data_plane_ids
+        saver = GatewaySaver(
+            None,
+            GatewayData(name=unique_gateway_name, status=0, tenant_mode="single", tenant_id="default"),
+        )
+        gateway = saver.save()
+
+        # Verify binding to default was created
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=default_data_plane).exists()
+
+    def test_save_with_empty_data_plane_ids_binds_to_default(self, unique_gateway_name, default_data_plane):
+        """Test save with empty data_plane_ids list binds to default data plane"""
+
+        # Create gateway with empty data_plane_ids
+        saver = GatewaySaver(
+            None,
+            GatewayData(name=unique_gateway_name, status=0, tenant_mode="single", tenant_id="default"),
+            data_plane_ids=[],
+        )
+        gateway = saver.save()
+
+        # Verify binding to default was created (fallback behavior)
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=default_data_plane).exists()
+
+    def test_save_with_invalid_data_plane_id_raises_error(self, unique_gateway_name):
+        """Test save with invalid data_plane_id raises error"""
+        invalid_id = 99999
+
+        saver = GatewaySaver(
+            None,
+            GatewayData(name=unique_gateway_name, status=0, tenant_mode="single", tenant_id="default"),
+            data_plane_ids=[invalid_id],
+        )
+        with pytest.raises(ValueError, match="invalid data_plane_ids"):
+            saver.save()
+
+    def test_save_with_partial_invalid_data_plane_ids_raises_error(self, unique_gateway_name):
+        """Test save with mix of valid and invalid data_plane_ids raises error"""
+        data_plane = G(DataPlane, name="plane-1")
+        invalid_id = 99999
+
+        saver = GatewaySaver(
+            None,
+            GatewayData(name=unique_gateway_name, status=0, tenant_mode="single", tenant_id="default"),
+            data_plane_ids=[data_plane.id, invalid_id],
+        )
+        with pytest.raises(ValueError, match="invalid data_plane_ids"):
+            saver.save()
+
+    def test_update_gateway_preserves_data_plane_bindings(self, fake_gateway):
+        """Test updating gateway does not modify existing data plane bindings"""
+        # Create initial binding
+        data_plane = G(DataPlane, name="plane-1")
+        G(GatewayDataPlaneBinding, gateway=fake_gateway, data_plane=data_plane)
+
+        # Update gateway (without specifying data_plane_ids)
+        saver = GatewaySaver(
+            fake_gateway.id,
+            GatewayData(
+                name=fake_gateway.name, description="updated", status=0, tenant_mode="single", tenant_id="default"
+            ),
+        )
+        gateway = saver.save()
+
+        # Verify binding still exists and wasn't modified
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=data_plane).exists()
+        assert GatewayDataPlaneBinding.objects.filter(gateway=gateway).count() == 1

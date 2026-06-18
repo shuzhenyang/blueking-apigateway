@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -35,6 +35,12 @@ urlpatterns = [
             [
                 # GET /api/v2/open/gateways/
                 path("", views.GatewayListApi.as_view(), name="openapi.v2.open.gateway.list"),
+                # POST /api/v2/open/gateways/batch-query/
+                path(
+                    "batch-query/",
+                    views.GatewayBatchQueryApi.as_view(),
+                    name="openapi.v2.open.gateway.batch_query",
+                ),
                 path(
                     "<slug:gateway_name>/",
                     include(
@@ -49,11 +55,19 @@ urlpatterns = [
                                 views.GatewayResourceListApi.as_view(),
                                 name="openapi.v2.open.gateway.resources.list",
                             ),
-                            # GET /api/v2/open/gateways/{gateway_name}/resources/{resource_name}/
+                            # GET .../resources/{resource_name}/ — env-specific: requires stage_name query param,
+                            # returns full detail (doc/schema) from a specific released stage
                             path(
                                 "resources/<str:resource_name>/",
                                 views.GatewayResourceDetailApi.as_view(),
                                 name="openapi.v2.open.gateway.resources.detail",
+                            ),
+                            # GET .../resources/{resource_name}/info/ — NOT env-specific: returns basic info
+                            # (id, name, method, path) from resource definition, no stage required
+                            path(
+                                "resources/<str:resource_name>/info/",
+                                views.GatewayResourceRetrieveByNameApi.as_view(),
+                                name="openapi.v2.open.gateway.resources.info",
                             ),
                             # POST /api/v2/open/gateways/{gateway_name}/permissions/apply/
                             path(
@@ -76,6 +90,24 @@ urlpatterns = [
                     "",
                     views.MCPServerListApi.as_view(),
                     name="openapi.v2.open.mcp_server.list",
+                ),
+                # GET /api/v2/open/mcp-servers/categories/
+                path(
+                    "categories/",
+                    views.MCPServerCategoryListApi.as_view(),
+                    name="openapi.v2.open.mcp_server.categories.list",
+                ),
+                # POST /api/v2/open/mcp-servers/batch-query/
+                path(
+                    "batch-query/",
+                    views.MCPServerBatchQueryApi.as_view(),
+                    name="openapi.v2.open.mcp_server.batch_query",
+                ),
+                # GET /api/v2/open/mcp-servers/{mcp_server_id}/
+                path(
+                    "<int:mcp_server_id>/",
+                    views.MCPServerRetrieveApi.as_view(),
+                    name="openapi.v2.open.mcp_server.retrieve",
                 ),
                 # GET /api/v2/open/mcp-servers/{mcp_server_id}/permissions/
                 path(
@@ -155,6 +187,20 @@ urlpatterns = [
                             ),
                         ]
                     ),
+                ),
+            ]
+        ),
+    ),
+    # .well-known endpoints
+    path(
+        ".well-known/",
+        include(
+            [
+                # GET /api/v2/open/.well-known/oauth-protected-resource
+                path(
+                    "oauth-protected-resource",
+                    views.OAuthProtectedResourceApi.as_view(),
+                    name="openapi.v2.open.well_known.oauth_protected_resource",
                 ),
             ]
         ),

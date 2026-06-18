@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -65,7 +65,7 @@ func NewMockRowsWithoutData(mock sqlmock.Sqlmock, arg any) *sqlmock.Rows {
 		objType = objType.Elem()
 	}
 	var columns []string
-	for i := 0; i < objType.NumField(); i++ {
+	for i := range objType.NumField() {
 		dbTagName := objType.Field(i).Tag.Get("db")
 		if dbTagName != "" {
 			columns = append(columns, dbTagName)
@@ -90,7 +90,7 @@ func NewMockRows(mock sqlmock.Sqlmock, args ...any) *sqlmock.Rows {
 			objValue = objValue.Elem()
 		}
 		values := []driver.Value{}
-		for i := 0; i < objType.NumField(); i++ {
+		for i := range objType.NumField() {
 			dbTagName := objType.Field(i).Tag.Get("db")
 			if dbTagName != "" {
 				values = append(values, objValue.Field(i).Interface())

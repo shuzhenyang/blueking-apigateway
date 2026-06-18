@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -17,6 +17,19 @@
  */
 
 import http from '../http';
+import type {
+  IMetricInstantOutput,
+  IMetricRangeOutput,
+  IResourceListPageOutput,
+  IStageListOutput,
+} from '@/services/types/responses/gateways.ts';
+import type { ICountAndResults } from '@/services/types/utils.ts';
+import type {
+  IGatewaysMetricsQueryInstantListQuery,
+  IGatewaysMetricsQueryRangeListQuery,
+  IGatewaysResourcesListQuery,
+  IGatewaysStagesListQuery,
+} from '@/services/types/query/gateways.ts';
 
 const path = '/gateways';
 
@@ -46,6 +59,7 @@ export interface IStatisticsType {
 export interface ISeriesItemType {
   alias: string // 别名
   datapoints: Array<Array<number>> // 数据点数组
+  dimensions_translation?: Record<string, any>
   dimensions: object // 维度
   metric_field: string // 指标字段
   target: string // 目标
@@ -96,29 +110,29 @@ export interface IChartDataLoading {
  * @param apigwId 网关id
  * @param params
  */
-export const getApigwMetrics = (apigwId: number, params: any) =>
-  http.get(`${path}/${apigwId}/metrics/query-range/`, params, { catchError: true });
+export const getApigwMetrics = (apigwId: number, params: IGatewaysMetricsQueryRangeListQuery) =>
+  http.get<IMetricRangeOutput>(`${path}/${apigwId}/metrics/query-range/`, params, { catchError: true });
 
 /**
  *  请求总数健康率
  * @param apigwId 网关id
  * @param params
  */
-export const getApigwMetricsInstant = (apigwId: number, params: ISearchParamsType) =>
-  http.get(`${path}/${apigwId}/metrics/query-instant/`, params);
+export const getApigwMetricsInstant = (apigwId: number, params: IGatewaysMetricsQueryInstantListQuery) =>
+  http.get<IMetricInstantOutput>(`${path}/${apigwId}/metrics/query-instant/`, params);
 
 /**
  *  获取流程日志列表
  * @param apigwId 网关id
  * @param params
  */
-export const getApigwResources = (apigwId: number, params: any) =>
-  http.get(`${path}/${apigwId}/resources/`, params);
+export const getApigwResources = (apigwId: number, params: IGatewaysResourcesListQuery = {}) =>
+  http.get<ICountAndResults<IResourceListPageOutput>>(`${path}/${apigwId}/resources/`, params);
 
 /**
  *  获取流程日志列表
  * @param apigwId 网关id
  * @param params
  */
-export const getApigwStages = (apigwId: number, params: any) =>
-  http.get(`${path}/${apigwId}/stages/`, params);
+export const getApigwStages = (apigwId: number, params: IGatewaysStagesListQuery = {}) =>
+  http.get<IStageListOutput[]>(`${path}/${apigwId}/stages/`, params);

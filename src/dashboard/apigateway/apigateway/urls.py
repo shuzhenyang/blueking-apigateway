@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -37,7 +37,11 @@ from django.urls import include, path, re_path
 from django.views.i18n import set_language
 
 from apigateway.apis.web.access_log.views import LogDetailInfoApi
-from apigateway.apis.web.monitor.views import AlarmRecordSummaryListApi
+from apigateway.apis.web.mcp_server_log.views import (
+    MCPServerLogQueryApi,
+    MCPServerLogQueryChainApi,
+    MCPServerLogQuerySummaryApi,
+)
 from apigateway.common.swagger import schema_view
 
 urlpatterns = [
@@ -77,15 +81,41 @@ urlpatterns = [
     path("backend/gateways/<int:gateway_id>/audits/", include("apigateway.apis.web.audit.urls")),
     path("backend/gateways/<int:gateway_id>/ai/", include("apigateway.apis.web.ai_completion.urls")),
     path("backend/gateways/<int:gateway_id>/mcp-servers/", include("apigateway.apis.web.mcp_server.urls")),
+    path(
+        "backend/gateways/<int:gateway_id>/mcp-servers/-/metrics/",
+        include("apigateway.apis.web.mcp_server_metrics.urls"),
+    ),
+    path(
+        "backend/gateways/<int:gateway_id>/mcp-servers/-/logs/",
+        include("apigateway.apis.web.mcp_server_log.urls"),
+    ),
     # mcp server marketplace
     path("backend/mcp-marketplace/", include("apigateway.apis.web.mcp_marketplace.urls")),
+    # personal workbench: /me/workbench/
+    path("backend/me/workbench/", include("apigateway.apis.web.personal_workbench.urls")),
     # todo 不应该放在顶层，后续要想办法挪到下层
-    path(
-        "backend/gateways/monitors/alarm/records/summary/",
-        AlarmRecordSummaryListApi.as_view(),
-        name="monitors.alarm_records.summary",
-    ),
+    # FIXME: not used? commented out in 2026-03-23, remove in the future
+    # path(
+    #     "backend/gateways/monitors/alarm/records/summary/",
+    #     AlarmRecordSummaryListApi.as_view(),
+    #     name="monitors.alarm_records.summary",
+    # ),
     path("backend/gateways/logs/query/<slug:request_id>/", LogDetailInfoApi.as_view(), name="access_log.logs.query"),
+    path(
+        "backend/gateways/mcp-server-logs/query/<slug:request_id>/",
+        MCPServerLogQueryApi.as_view(),
+        name="mcp_server_log.logs.query",
+    ),
+    path(
+        "backend/gateways/mcp-server-logs/query/<slug:request_id>/summary/",
+        MCPServerLogQuerySummaryApi.as_view(),
+        name="mcp_server_log.logs.query.summary",
+    ),
+    path(
+        "backend/gateways/mcp-server-logs/query/<slug:request_id>/chain/",
+        MCPServerLogQueryChainApi.as_view(),
+        name="mcp_server_log.logs.query.chain",
+    ),
     # notice
     path("backend/notice/", include(("bk_notice_sdk.urls", "notice"), namespace="notice")),
 ]
@@ -97,16 +127,17 @@ if not settings.ENABLE_MULTI_TENANT_MODE:
         path("backend/esb/", include("apigateway.apps.esb.urls")),
     ]
 
-# backend/docs/
-urlpatterns += [
-    # drf-yasg automatically generated documents
-    re_path(
-        r"^backend/docs/auto/swagger(?P<format>\.json|\.yaml)$",
-        schema_view.without_ui(cache_timeout=0),
-        name="schema-json",
-    ),
-    re_path(
-        r"^backend/docs/auto/swagger/$", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"
-    ),
-    re_path(r"^backend/docs/auto/redoc/$", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
-]
+if settings.DEBUG:
+    # backend/docs/
+    urlpatterns += [
+        # drf-yasg automatically generated documents
+        re_path(
+            r"^backend/docs/auto/swagger\.(?P<format>json|yaml)$",
+            schema_view.without_ui(cache_timeout=0),
+            name="schema-json",
+        ),
+        re_path(
+            r"^backend/docs/auto/swagger/$", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"
+        ),
+        re_path(r"^backend/docs/auto/redoc/$", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
+    ]

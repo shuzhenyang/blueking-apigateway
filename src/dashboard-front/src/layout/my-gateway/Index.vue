@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -206,21 +206,13 @@ import {
   useStage,
 } from '@/stores';
 import { getGatewayList } from '@/services/source/gateway';
+import type { IExtractListApiResults } from '@/services/types/utils';
+import type { IMenu } from '@/types/common';
 import { getStageList } from '@/services/source/stage';
 import { getPermissionApplyList } from '@/services/source/permission';
 import Version113UpdateNotice from '@/components/version-113-update-notice/Index.vue';
 
-interface IMenu {
-  name: string
-  title: string
-  icon?: string
-  enabled?: boolean
-  children?: IMenu[]
-  // 是否在可编程网关中隐藏，默认 false
-  hideInProgrammable?: boolean
-}
-
-type GatewayItemType = Awaited<ReturnType<typeof getGatewayList>>['results'][number];
+type GatewayItemType = IExtractListApiResults<typeof getGatewayList>;
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -370,8 +362,13 @@ const menuList = computed<IMenu[]>(() => [
       },
       {
         name: 'MCPServerPermission',
-        title: t('MCP 权限审批'),
+        title: t('MCP 权限管理'),
         enabled: true,
+      },
+      {
+        name: 'MCPServerObservability',
+        title: t('可观测'),
+        enabled: featureFlagStore.flags.ENABLE_MCP_SERVER_OBSERVABILITY,
       },
     ],
   },
@@ -404,7 +401,7 @@ const needBkuiTablePage = computed(() => {
 
 const routerViewWrapperClass = computed(() => {
   const initClass = 'default-header-view';
-  const displayBkuiTable = needBkuiTablePage.value.includes(route.name) ? 'need-bkui-table-wrapper' : '';
+  const displayBkuiTable = needBkuiTablePage.value.includes(route.name as string) ? 'need-bkui-table-wrapper' : '';
   if (route.meta.customHeader) {
     return `custom-header-view ${displayBkuiTable}`;
   }
@@ -479,7 +476,7 @@ async function checkStageVersion() {
   }
 }
 // 根据网关不同状态展示文案最大宽度
-const getOptionTextWidth = (gateway) => {
+const getOptionTextWidth = (gateway: GatewayItemType) => {
   // 如果当前网关既是编辑网关且已停用
   if (gateway.kind === 1) {
     if (!gateway.status) {
@@ -503,7 +500,7 @@ const handleCollapse = (collapsed: boolean) => {
 const handleGoPage = (routeName: string) => {
   gatewayStore.setApigwId(gatewayId.value);
   // 如果是可编辑网关不存在资源配置，需要跳转到环境概览
-  const isEditGateway = gatewayList.value.find(item => item.id === gatewayId.value)?.kind === 1;
+  const isEditGateway = gatewayList.value.find((item: GatewayItemType) => item.id === gatewayId.value)?.kind === 1;
   router.push({
     name: ['ResourceSetting'].includes(routeName) && isEditGateway ? 'StageOverview' : routeName,
     params: { id: gatewayId.value },

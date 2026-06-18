@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -40,8 +40,11 @@ func (k MCPServerExtendKey) Key() string {
 	return strconv.Itoa(k.McpServerID)
 }
 
-func retrieveMCPServerExtendByMcpServerID(ctx context.Context, k cache.Key) (interface{}, error) {
-	key := k.(MCPServerExtendKey)
+func retrieveMCPServerExtendByMcpServerID(ctx context.Context, k cache.Key) (any, error) {
+	key, ok := k.(MCPServerExtendKey)
+	if !ok {
+		return nil, errors.New("invalid cache key type for MCPServerExtendKey")
+	}
 	r := repo.MCPServerExtend
 	return repo.MCPServerExtend.WithContext(ctx).
 		Where(r.McpServerID.Eq(key.McpServerID)).
@@ -56,17 +59,17 @@ func GetMCPServerExtendByMcpServerID(ctx context.Context, mcpServerID int, exten
 		McpServerID: mcpServerID,
 		Type:        extendType,
 	}
-	var value interface{}
+	var value any
 	value, err = cacheGet(ctx, mcpServerExtendCache, key)
 	if err != nil {
-		return
+		return extend, err
 	}
 
 	var ok bool
 	extend, ok = value.(*model.MCPServerExtend)
 	if !ok {
 		err = errors.New("not model.MCPServerExtend in cache")
-		return
+		return extend, err
 	}
-	return
+	return extend, err
 }

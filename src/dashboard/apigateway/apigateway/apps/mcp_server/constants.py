@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -16,7 +16,10 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
+from typing import List, Optional
+
 from blue_krill.data_types.enum import EnumField, StructuredEnum
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 
@@ -43,6 +46,18 @@ class MCPServerAppPermissionApplyStatusEnum(StructuredEnum):
 class MCPServerAppPermissionApplyProcessedStateEnum(StructuredEnum):
     PROCESSED = EnumField("processed", label=_("已处理"))
     UNPROCESSED = EnumField("unprocessed", label=_("未处理"))
+
+    @classmethod
+    def get_status_list(cls, state: Optional[str] = None) -> List[str]:
+        state_status_map = {
+            cls.PROCESSED.value: [
+                MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
+                MCPServerAppPermissionApplyStatusEnum.REJECTED.value,
+            ],
+            cls.UNPROCESSED.value: [MCPServerAppPermissionApplyStatusEnum.PENDING.value],
+        }
+
+        return state_status_map.get(state, [MCPServerAppPermissionApplyStatusEnum.PENDING.value])
 
 
 class MCPServerPermissionStatusEnum(StructuredEnum):
@@ -75,6 +90,56 @@ class MCPServerProtocolTypeEnum(StructuredEnum):
 
     SSE = EnumField("sse", label=_("SSE"))
     STREAMABLE_HTTP = EnumField("streamable_http", label=_("Streamable HTTP"))
+
+
+class MCPTransportTypeEnum(StructuredEnum):
+    """MCP 传输协议类型（客户端配置中使用）"""
+
+    SSE = EnumField("sse", label="SSE")
+    HTTP = EnumField("http", label="HTTP")
+    STREAMABLE_HTTP = EnumField("streamable-http", label="Streamable HTTP")
+
+
+class MCPAgentClientTypeEnum(StructuredEnum):
+    """MCP Agent 客户端类型"""
+
+    CODEBUDDY = EnumField("codebuddy", label="CodeBuddy")
+    CURSOR = EnumField("cursor", label="Cursor")
+    CLAUDE = EnumField("claude", label="Claude")
+    VSCODE = EnumField("vscode", label="VSCode")
+    AIDEV = EnumField("aidev", label="AIDev")
+
+
+# MCP Agent 客户端 choices（不含 AIDev），供批量配置序列化器校验使用
+MCP_AGENT_CLIENT_CHOICES_WITHOUT_AIDEV = [
+    choice for choice in MCPAgentClientTypeEnum.get_choices() if choice[0] != MCPAgentClientTypeEnum.AIDEV.value
+]
+
+# MCP Server 配置工具的默认客户端类型列表（不含 AIDev）
+_MCP_CONFIG_DEFAULT_CLIENT_TYPES = [
+    MCPAgentClientTypeEnum.CODEBUDDY,
+    MCPAgentClientTypeEnum.CURSOR,
+    MCPAgentClientTypeEnum.CLAUDE,
+    MCPAgentClientTypeEnum.VSCODE,
+]
+
+
+def get_mcp_config_agent_clients() -> list:
+    """获取 MCP Server 配置工具的客户端列表，根据 AIDEV_AGENT_CREATE_URL 动态决定是否包含 AIDev"""
+    clients = [
+        {"name": member.value, "display_name": MCPAgentClientTypeEnum.get_choice_label(member)}
+        for member in _MCP_CONFIG_DEFAULT_CLIENT_TYPES
+    ]
+
+    if getattr(settings, "AIDEV_AGENT_CREATE_URL", ""):
+        clients.append(
+            {
+                "name": MCPAgentClientTypeEnum.AIDEV.value,
+                "display_name": MCPAgentClientTypeEnum.get_choice_label(MCPAgentClientTypeEnum.AIDEV),
+            }
+        )
+
+    return clients
 
 
 # MCPServer 分类名称常量 - 用于判断特殊分类

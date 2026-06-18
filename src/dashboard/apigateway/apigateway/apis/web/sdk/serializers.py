@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -21,6 +21,7 @@ from rest_framework import serializers
 
 from apigateway.apps.support.constants import ProgrammingLanguageEnum
 from apigateway.apps.support.models import GatewaySDK
+from apigateway.biz.constants import SEMVER_PATTERN
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.utils.time import now_datetime
 
@@ -29,7 +30,14 @@ class GatewaySDKGenerateInputSLZ(serializers.Serializer):
     gateway = serializers.HiddenField(default=CurrentGatewayDefault())
     resource_version_id = serializers.IntegerField(required=True, help_text="资源版本号id")
     language = serializers.ChoiceField(choices=ProgrammingLanguageEnum.get_choices(), help_text="sdk语言")
-    version = serializers.CharField(label="版本", default="", allow_null=True, allow_blank=True, help_text="sdk版本号")
+    version = serializers.RegexField(
+        SEMVER_PATTERN,
+        label="版本",
+        default="",
+        allow_null=True,
+        allow_blank=True,
+        help_text="sdk版本号",
+    )
 
     class Meta:
         ref_name = "apigateway.apis.web.sdk.serializers.GatewaySDKGenerateInputSLZ"

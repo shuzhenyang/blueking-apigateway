@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -18,7 +18,7 @@
 from typing import Optional, Union
 
 from apigateway.apps.audit.constants import OpObjectTypeEnum, OpStatusEnum, OpTypeEnum
-from apigateway.service.audit.shortcuts import record_audit_log
+from apigateway.service.audit import record_audit_log
 
 # TODO:
 # 1. FIXME: 导入 带来的变更目前没有记录审计 (很多事批量操作)
@@ -289,6 +289,7 @@ class Auditor:
         if comment is None:
             comment = {
                 OpTypeEnum.CREATE: "生成版本",
+                OpTypeEnum.DELETE: "删除版本",
             }.get(op_type, "-")
 
         record_audit_log(

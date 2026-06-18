@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -20,6 +20,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -42,7 +43,7 @@ const (
 // RollBackWithLog will rollback and log if error
 func RollBackWithLog(tx *sqlx.Tx) {
 	err := tx.Rollback()
-	if err != sql.ErrTxDone && err != nil {
+	if !errors.Is(err, sql.ErrTxDone) && err != nil {
 		logging.GetLogger().Error(err)
 	}
 }

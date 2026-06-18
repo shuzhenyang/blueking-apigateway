@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,10 +19,15 @@
 <template>
   <div class="resource-container page-wrapper-padding">
     <BkAlert
-      v-if="!tableData?.length && !gatewayStore.isProgrammableGateway"
+      v-if="!versionCount && !gatewayStore.isProgrammableGateway"
       theme="warning"
       :title="t(`如需生成新版本，请前往'资源配置'页面操作`)"
       class="mb-20px"
+    />
+    <BkAlert
+      :theme="versionCountAlert.theme"
+      :title="versionCountAlert.title"
+      class="mb-16px"
     />
     <div class="flex justify-between mb-15px">
       <div class="flex grow-1 items-center">
@@ -33,6 +38,14 @@
             @click="handleShowDiff"
           >
             {{ t('版本对比') }}
+          </BkButton>
+          <BkButton
+            v-bk-tooltips="{ content: t('无法批量删除，因为勾选了无法删除的版本'), disabled: !batchDeleteDisabled }"
+            class="ml-12px"
+            :disabled="batchDeleteDisabled || selections.length < 2"
+            @click="handleBatchDelete"
+          >
+            {{ t('批量删除') }}
           </BkButton>
         </div>
       </div>
@@ -58,6 +71,7 @@
           :columns="columns"
           @clear-filter="handleClearFilterKey"
           @selection-change="handleSelectionChange"
+          @request-done="handleRequestDone"
         />
       </div>
     </div>
@@ -115,9 +129,15 @@
 </template>
 
 <script setup lang="tsx">
-import { Message } from 'bkui-vue';
+import { InfoBox, Message } from 'bkui-vue';
 import { getStageStatus } from '@/utils';
-import { exportVersion, getVersionList } from '@/services/source/resource.ts';
+import {
+  batchDeleteResourceVersions,
+  deleteResourceVersion,
+  exportVersion,
+  exportVersionDocs,
+  getVersionList,
+} from '@/services/source/resource.ts';
 import { getStageList } from '@/services/source/stage';
 import CreateSDK from './CreateSDK.vue';
 import ResourceDetail from './ResourceDetail.vue';
@@ -153,20 +173,20 @@ const filterData = ref({ keyword: version });
 const diffDisabled = ref(true);
 const tableData = ref<any[]>([]);
 const selections = ref<any[]>([]);
+const versionCount = ref(0);
+const isFirstRequest = ref(true);
 
 // 导出配置
-const exportDialogConfig = reactive<IExportDialog>({
+const exportDialogConfig = ref<IExportDialog>({
   isShow: false,
   title: t('请选择导出的格式'),
   loading: false,
   exportFileDocType: 'resource',
-  hiddenExportContent: true,
   hiddenResourceTip: true,
-  hiddenExportTypeLabel: true,
 });
 
 // 导出参数
-const exportParams = reactive<IExportParams & { id?: number }>({
+const exportParams = ref<IExportParams & { id?: number }>({
   export_type: 'all',
   file_type: 'yaml',
   id: 0,
@@ -198,11 +218,35 @@ const resourceDetailShow = ref(false);
 
 const apigwId = computed(() => gatewayStore.apigwId);
 
+const versionCountAlert = computed(() => {
+  if (versionCount.value >= 100) {
+    return {
+      theme: 'error' as const,
+      title: t('当前已创建 {n} 个资源版本，已达到上限 100 个。请删除不再使用的旧版本以释放配额。', { n: versionCount.value }),
+    };
+  }
+  if (versionCount.value > 80) {
+    return {
+      theme: 'warning' as const,
+      title: t('当前已创建 {n} 个资源版本，接近上限 100 个。建议删除不再使用的旧版本以释放配额。', { n: versionCount.value }),
+    };
+  }
+  return {
+    theme: 'info' as const,
+    title: t('每个网关最多可创建 100 个资源版本，当前已创建 {n} 个。', { n: versionCount.value }),
+  };
+});
+
+// 批量删除按钮禁用状态：当选中项中有 deletable 为 false 的成员时禁用
+const batchDeleteDisabled = computed(() => selections.value.some((item: any) => item.deletable === false));
+
 const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'version',
     title: t('版本号'),
-    cell: (h, { row }) => (
+    width: 120,
+    ellipsis: true,
+    cell: (h: any, { row }: any) => (
       <bk-button
         text
         theme="primary"
@@ -216,17 +260,19 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     colKey: 'released_stages',
     title: t('生效环境'),
     ellipsis: true,
-    cell: (h, { row }) =>
+    cell: (h: any, { row }: any) =>
       <span>{ row.released_stages?.map((item: any) => item.name).join(', ') || '--' }</span>,
   },
   {
     colKey: 'created_time',
     title: t('生成时间'),
+    width: 180,
+    ellipsis: true,
   },
   {
     colKey: 'sdk',
     title: 'SDK',
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: any) => (
       <div>
         {
           row.sdk_count > 0
@@ -247,7 +293,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'created_by',
     title: t('创建者'),
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: any) => (
       <div>
         {
           !featureFlagStore.isEnableDisplayName
@@ -275,7 +321,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     colKey: 'actions',
     title: t('操作'),
     width: 200,
-    cell: (h, { row }) => (
+    cell: (h: any, { row }: any) => (
       <div class="flex gap-10px">
         {
           featureFlagStore.flags.ALLOW_UPLOAD_SDK_TO_REPOSITORY
@@ -339,27 +385,46 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
         >
           {t('导出')}
         </bk-button>
+        <bk-button
+          disabled={row.deletable === false}
+          text
+          theme="primary"
+          v-bk-tooltips={{
+            content: t(
+              '已发布到环境【{stage}】或生成了 SDK，无法删除',
+              { stage: row.released_stages?.map((item: any) => item.name).join(', ') || '--' },
+            ),
+            disabled: row.deletable,
+          }}
+          onClick={() => handleDelete(row as any)}
+        >
+          {t('删除')}
+        </bk-button>
       </div>
     ),
   },
 ]);
 
 watch(
-  selections,
+  () => selections.value,
   () => {
     diffDisabled.value = ![1, 2].includes(selections.value.length);
   },
   { deep: true },
 );
 
-watch(filterData, () => {
-  nextTick(() => {
-    tableRef.value!.fetchData(filterData.value);
-  });
-}, {
-  deep: true,
-  immediate: true,
-});
+watch(
+  filterData,
+  () => {
+    nextTick(() => {
+      tableRef.value!.fetchData(filterData.value);
+    });
+  },
+  {
+    deep: true,
+    immediate: true,
+  },
+);
 
 watch(
   () => route.query,
@@ -372,6 +437,20 @@ watch(
     immediate: true,
     deep: true,
   },
+);
+
+// 监听导出弹窗
+watch(
+  exportDialogConfig,
+  () => {
+    if (exportDialogConfig.value.exportFileDocType === 'docs') {
+      exportParams.value.file_type = 'zip';
+    }
+    else {
+      exportParams.value.file_type = 'yaml';
+    }
+  },
+  { deep: true },
 );
 
 const getTableData = async (params: Record<string, any> = {}) => getVersionList(apigwId.value, params);
@@ -398,28 +477,36 @@ const handleShowDiff = () => {
   diffTargetId.value = diffTarget?.id || '';
 
   diffSliderConf.isShow = true;
-  selections.value = [];
 };
 
 // 版本导出
 const handleShowExport = ({ id }: { id: number }) => {
-  exportDialogConfig.isShow = true;
-  exportParams.id = id;
+  exportDialogConfig.value.isShow = true;
+  exportParams.value.id = id;
 };
 
 // 版本导出下载
 const handleExportDownload = async () => {
-  const params = { ...exportParams };
+  const params = { ...exportParams.value };
   delete params.export_type;
-  exportDialogConfig.loading = true;
+  exportDialogConfig.value.loading = true;
   try {
-    await exportVersion(apigwId.value, params);
+    // 导出为文档的情况
+    if (exportDialogConfig.value.exportFileDocType === 'docs') {
+      await exportVersionDocs(apigwId.value, params as {
+        id?: number
+        file_type: string
+      });
+    }
+    else {
+      await exportVersion(apigwId.value, params as any);
+    }
     Message({
       message: t('导出成功'),
       theme: 'success',
       width: 'auto',
     });
-    exportDialogConfig.isShow = false;
+    exportDialogConfig.value.isShow = false;
   }
   catch (e) {
     const fileReader = new FileReader();
@@ -434,8 +521,8 @@ const handleExportDownload = async () => {
     };
   }
   finally {
-    exportDialogConfig.loading = false;
-    exportDialogConfig.isShow = false;
+    exportDialogConfig.value.loading = false;
+    exportDialogConfig.value.isShow = false;
   }
 };
 
@@ -497,6 +584,86 @@ const handleClickStage = (stage: any, row: any) => {
   row.isReleaseMenuShow = false;
 };
 
+// 删除资源版本
+const handleDelete = (
+  { id, version }: {
+    id: number
+    version: string
+  },
+) => {
+  InfoBox({
+    title: t('是否删除该版本？'),
+    subTitle: (
+      <div>
+        <div class="pb-16px text-align-left">{t('版本：{v}', { v: version })}</div>
+        <div class="py-12px px-16px text-align-left bg-#f5f7fa">{t('删除该版本后将无法恢复，请谨慎操作')}</div>
+      </div>
+    ),
+    confirmText: t('删除'),
+    cancelText: t('取消'),
+    confirmButtonTheme: 'danger',
+    onConfirm: async () => {
+      await deleteResourceVersion(apigwId.value, id);
+      Message({
+        message: t('删除成功'),
+        theme: 'success',
+      });
+      selections.value = [];
+      tableRef.value!.handleResetSelection();
+      refresh();
+    },
+  });
+};
+
+const handleBatchDelete = () => {
+  InfoBox({
+    width: 480,
+    class: 'version-remove-info',
+    title: t('确定删除选中版本？'),
+    confirmText: t('删除'),
+    cancelText: t('取消'),
+    confirmButtonTheme: 'danger',
+    content: () => (
+      <div class="info-content">
+        <div class="remove-tip">
+          {t('删除选中版本后将无法恢复，请谨慎操作')}
+        </div>
+        <div class="remove-version-list-wrapper">
+          <div class="remove-version-counter">
+            <span innerHTML={t('已选择以下 {0} 个版本', [`<strong>${selections.value.length}</strong>`])}></span>
+          </div>
+          <div class="detail-list">
+            {
+              selections.value.map((row: any) => (
+                <div class="detail-item">{row.version}</div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    ),
+    onConfirm: async () => {
+      const ids = selections.value.map((item: any) => item.id);
+      await batchDeleteResourceVersions(apigwId.value, { ids });
+      Message({
+        message: t('删除成功'),
+        theme: 'success',
+      });
+      selections.value = [];
+      tableRef.value!.handleResetSelection();
+      refresh();
+    },
+  });
+};
+
+const handleRequestDone = () => {
+  if (isFirstRequest.value) {
+    const pagination = tableRef.value?.getPagination();
+    versionCount.value = pagination?.total ?? 0;
+    isFirstRequest.value = false;
+  }
+};
+
 const handleClearFilterKey = () => {
   filterData.value.keyword = '';
 };
@@ -504,9 +671,11 @@ const handleClearFilterKey = () => {
 const refresh = () => {
   tableRef.value!.refresh();
 };
+
 </script>
 
 <style lang="scss" scoped>
+
 :deep(.menu-item-disabled) {
   color: #fff;
   cursor: not-allowed;
@@ -518,6 +687,7 @@ const refresh = () => {
     background-color: #dcdee5;
   }
 }
+
 </style>
 
 <style lang="scss">
@@ -530,4 +700,52 @@ const refresh = () => {
     }
   }
 }
+
+.version-remove-info {
+
+  .info-content {
+    font-size: 14px;
+    text-align: left;
+
+    .remove-tip {
+      padding: 12px 16px;
+      margin-top: 16px;
+      background: #f5f6fa;
+      border-radius: 2px;
+    }
+
+    .remove-version-list-wrapper {
+      margin-top: 16px;
+
+      .remove-version-counter {
+        display: flex;
+        align-items: center;
+        height: 32px;
+        padding-left: 16px;
+        color: #313238;
+        background: #f0f1f5;
+        border-bottom: 1px solid #dcdee5;
+      }
+
+      .detail-list {
+        max-height: 160px;
+        overflow-y: auto;
+
+        .detail-item {
+          display: flex;
+          height: 32px;
+          padding-left: 16px;
+          font-size: 12px;
+          align-items: center;
+          border-bottom: 1px solid #dcdee5;
+
+          &:nth-child(even) {
+            background-color: #fafbfd;
+          }
+        }
+      }
+    }
+  }
+}
+
 </style>

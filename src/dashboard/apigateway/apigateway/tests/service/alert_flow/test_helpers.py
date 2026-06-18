@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -19,7 +19,7 @@
 import datetime
 
 from apigateway.apps.monitor.constants import AlarmTypeEnum
-from apigateway.service.alert_flow.helpers import MonitorEvent
+from apigateway.service.alert_flow import MonitorEvent
 
 
 class TestMonitorEvent:
@@ -65,6 +65,13 @@ class TestMonitorEvent:
             raw={"event": {"dimensions": {"code_name": "ERROR_REQUESTING_RESOURCE"}}},
         )
         assert event.alarm_subtype == "bad_gateway"
+
+    def test_alarm_subtype_with_string_status(self):
+        event = MonitorEvent(
+            alarm_type=AlarmTypeEnum.RESOURCE_BACKEND,
+            raw={"event": {"dimensions": {"status": "500"}}},
+        )
+        assert event.alarm_subtype == "status_code_5xx"
 
     def test_update_extend_fields(self):
         event = MonitorEvent(alarm_type=AlarmTypeEnum.APP_REQUEST, raw={})

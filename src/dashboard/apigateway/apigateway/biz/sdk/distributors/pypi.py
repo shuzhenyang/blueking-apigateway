@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,8 +17,8 @@
 #
 import logging
 import os
+import subprocess
 from dataclasses import dataclass, field
-from subprocess import CalledProcessError, check_call
 from typing import ClassVar, List, Optional
 
 from apigateway.biz.sdk.constants import PYPIRC_TMPL
@@ -29,6 +29,7 @@ from apigateway.utils.file import write_to_file
 from apigateway.utils.pypi import RepositoryConfig
 
 logger = logging.getLogger(__name__)
+default_logger = logging.getLogger()
 
 
 @dataclass
@@ -90,13 +91,21 @@ class PypiSourceDistributor(Distributor):
         try:
             logger.info("start uploading package to pypi repository [%s]", self.repository)
 
-            check_call(
+            completed_process = subprocess.run(
                 ["twine", "upload", "dist/*", "-r", self.repository],
                 env=env,
                 cwd=source_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
             )
-        except CalledProcessError:
+            logger.info("twine upload stdout: %s", completed_process.stdout)
+            logger.info("twine upload stderr: %s", completed_process.stderr)
+            completed_process.check_returncode()
+        except subprocess.CalledProcessError:
             logger.exception("upload to pypi repository [%s] failed", self.repository)
+            default_logger.exception("upload to pypi repository [%s] failed", self.repository)
             raise DistributeError(f"can not distribute to pypi repository [{self.repository}]")
 
         result.url = self.get_download_url()

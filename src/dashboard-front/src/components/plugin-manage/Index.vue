@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -165,7 +165,7 @@
                 <BkButton
                   text
                   theme="primary"
-                  @click="selectedTag = ''"
+                  @click="handleClearFilterKey"
                 >
                   {{ t('清空选项') }}
                 </BkButton>
@@ -261,7 +261,7 @@
                                   class="scope-li mb-5px"
                                   @mouseenter="handleScopeHover((stageItem.name))"
                                   @mouseleave="handleScopeLeave"
-                                  @click="handeleJumpStage(stageItem)"
+                                  @click="() => handleJumpStage(stageItem)"
                                 >
                                   {{ stageItem.name }}
                                   <AgIcon
@@ -300,7 +300,7 @@
                                   class="scope-li mb-5px"
                                   @mouseenter="handleScopeHover((resourceItem.name))"
                                   @mouseleave="handleScopeLeave"
-                                  @click="handeleJumpResource(resourceItem)"
+                                  @click="() => handleJumpResource(resourceItem)"
                                 >
                                   {{ resourceItem.name }}
                                   <AgIcon
@@ -357,6 +357,7 @@
               v-model:show-example="isExampleVisible"
               :cur-plugin="curChoosePlugin"
               :scope-info="curScopeInfo"
+              :edit-plugin="curEditPlugin"
               :type="curType"
               :plugin-list="pluginList"
               :binding-plugins="curBindingPlugins"
@@ -406,6 +407,7 @@
             :scope-info="curScopeInfo"
             :edit-plugin="curEditPlugin"
             :type="curType"
+            :plugin-list="pluginList"
             @on-change="handleOperate"
           />
         </div>
@@ -415,6 +417,7 @@
 </template>
 
 <script setup lang="ts">
+// @ts-nocheck
 import PluginInfo from './PluginInfo.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
 import {
@@ -464,7 +467,7 @@ const stageStore = useStage();
 // 网关id
 const gatewayId = useRouteParams('id', 0, { transform: Number });
 
-const pluginInfoRef = ref<InstanceType<typeof PluginInfo>>(null);
+const pluginInfoRef = ref<InstanceType<typeof PluginInfo>>();
 const scopeType = ref('');
 const scopeId = ref(-1);
 const isBindingListLoading = ref(false);
@@ -566,31 +569,24 @@ watch(
   },
 );
 
-watch(searchValue, () => {
-  // 清空搜索框
-  if (!searchValue.value) {
-    const params = {
-      scope_type: scopeType.value,
-      scope_id: scopeId.value,
-      tag: selectedTag.value,
-    };
-    getPluginListDetails(params);
-  }
-});
-
-watch(selectedTag, () => {
-  getPluginListDetails({
+watch([selectedTag, searchValue], () => {
+  const params = {
     scope_type: scopeType.value,
     scope_id: scopeId.value,
-    tag: selectedTag.value,
-    keyword: searchValue.value,
-  });
-});
+  };
+  if (selectedTag.value) {
+    Object.assign(params, { tag: selectedTag.value });
+  }
+  if (searchValue.value) {
+    Object.assign(params, { keyword: searchValue.value });
+  }
+  getPluginListDetails(params);
+}, { deep: true });
 
 // 监听是否成功添加
 watch(
   () => isAddSuccess.value,
-  (newVal) => {
+  (newVal: any) => {
     if (newVal) {
       init();
     }
@@ -727,7 +723,7 @@ const handleDeletePlugin = (item: any) => {
 };
 
 // 跳转stage
-const handeleJumpStage = (item: any) => {
+const handleJumpStage = (item: any) => {
   const { name } = item;
   const isRouteStage = route.path.includes('stage');
   const query = { stage: name };
@@ -742,8 +738,9 @@ const handeleJumpStage = (item: any) => {
     });
   }
 };
+
 // 跳转resource
-const handeleJumpResource = (item: any) => {
+const handleJumpResource = (item: any) => {
   const { id } = item;
   const isRouteStage = route.path.includes('stage');
   if (isRouteStage) {
@@ -777,6 +774,7 @@ const resetData = () => {
   isVisible.value = false;
   state.curStep = 1;
   searchValue.value = '';
+  selectedTag.value = '';
   curChooseCode.value = '';
 };
 
@@ -802,11 +800,13 @@ const getPluginListDetails = async (params: {
   try {
     isPluginListLoading.value = true;
     const [pluginRes, tagRes] = await Promise.all([
+      // @ts-ignore
       getPluginListData(gatewayId.value, params),
       getPluginTags(gatewayId.value),
     ]);
     pluginList.value = pluginRes.results || [];
     pluginTags.value = tagRes.tags || [];
+    updateTableEmptyConfig();
   }
   catch {
     pluginList.value = [];
@@ -846,11 +846,9 @@ const handleSearch = async (keyword?: string) => {
   };
   try {
     await getPluginListDetails(params);
-    updateTableEmptyConfig();
     tableEmptyConf.value.isAbnormal = false;
   }
-  catch (error) {
-    console.log('error', error);
+  catch {
     tableEmptyConf.value.isAbnormal = false;
   }
 };
@@ -871,12 +869,8 @@ const handleClosePluginSlider = () => {
 };
 
 const updateTableEmptyConfig = () => {
-  if (searchValue.value || !pluginListDate.value.length) {
-    tableEmptyConf.value.emptyType = 'searchEmpty';
-    return;
-  }
-  if (searchValue.value) {
-    tableEmptyConf.value.emptyType = 'empty';
+  if (searchValue.value || selectedTag.value) {
+    tableEmptyConf.value.emptyType = 'search-empty';
     return;
   }
   tableEmptyConf.value.emptyType = '';

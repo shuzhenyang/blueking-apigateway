@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,12 +19,10 @@
 <template>
   <!--  SDK使用说明 Slider 的内容  -->
   <div class="sdk-wrapper">
-    <LangSelector
+    <SdkLanguageSelector
       v-if="curTab === 'gateway'"
       v-model="language"
       :margin-bottom="0"
-      :sdk-languages="['python', 'java', 'golang']"
-      :lang-list="['python', 'java', 'golang']"
       @select="handleLangSelect"
     />
     <div
@@ -61,18 +59,16 @@ import hljs from 'highlight.js';
 import { copy } from '@/utils';
 import { getESBSDKDoc } from '@/services/source/docs-esb';
 import { getGatewaySDKDoc } from '@/services/source/sdks';
-import type {
-  LanguageType,
-  TabType,
-} from '../types.d.ts';
-import LangSelector from './LangSelector.vue';
+import type { TabType } from '../types.d.ts';
+import type { IDocsSdksDocReadQuery } from '@/services/types/query/docs';
+import SdkLanguageSelector from '@/components/sdk-language-selector/Index.vue';
 import 'highlight.js/styles/github.css';
 
 const { t } = useI18n();
 
 const curTab = inject<Ref<TabType>>('curTab');
 
-const language = ref<LanguageType>('python');
+const language = ref('python');
 const board = ref('default');
 const sdkDoc = ref('');
 const markdownHtml = ref('');
@@ -111,7 +107,7 @@ const initMarkdownHtml = (content: string) => {
   nextTick(() => {
     const markdownDom = document.getElementById('sdk-instruction-markdown');
     // 复制代码
-    markdownDom.querySelectorAll('a')
+    markdownDom?.querySelectorAll('a')
       .forEach((item: any) => {
         item.target = '_blank';
       });
@@ -125,9 +121,10 @@ const initMarkdownHtml = (content: string) => {
         btn.className = 'ag-copy-btn';
         codeBox.className = 'code-box';
         btn.innerHTML = '<span title="复制"><i class="apigateway-icon icon-ag-copy-info"></i></span>';
-        btn.setAttribute('data-copy', code);
+        btn.setAttribute('data-copy', code ?? '');
         parentDiv?.appendChild(btn);
-        codeBox?.appendChild(item?.querySelector('code'));
+        const codeEl = item?.querySelector('code');
+        if (codeEl) codeBox?.appendChild(codeEl);
         item?.appendChild(codeBox);
         item?.parentNode?.replaceChild(parentDiv, item);
         parentDiv?.appendChild(item);
@@ -146,15 +143,15 @@ const initMarkdownHtml = (content: string) => {
 
 // 获取SDK 说明
 const getSDKDoc = async () => {
-  const params = { language: language.value };
+  const lang = language.value as IDocsSdksDocReadQuery['language'];
   isLoading.value = true;
   try {
-    if (curTab.value === 'gateway') {
-      const res = await getGatewaySDKDoc(params);
+    if (curTab?.value === 'gateway') {
+      const res = await getGatewaySDKDoc({ language: lang });
       sdkDoc.value = res.content;
     }
     else {
-      const res = await getESBSDKDoc(board.value, params);
+      const res = await getESBSDKDoc(board.value, { language: lang });
       sdkDoc.value = res.content;
     }
     isLoading.value = false;
@@ -166,7 +163,7 @@ const getSDKDoc = async () => {
   }
 };
 
-const handleLangSelect = (lang: LanguageType) => {
+const handleLangSelect = (lang: string) => {
   if (lang === language.value) return;
   init();
 };
@@ -188,7 +185,7 @@ const init = async () => {
 
 // 监听 tab 的变化，改变内容时重新渲染
 watch(
-  () => curTab.value,
+  () => curTab?.value,
   () => {
     renderKey.value += 1;
     init();

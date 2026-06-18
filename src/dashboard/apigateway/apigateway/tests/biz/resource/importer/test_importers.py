@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,8 +22,9 @@ from ddf import G
 from apigateway.apps.label.models import APILabel
 from apigateway.apps.plugin.constants import PluginBindingSourceEnum
 from apigateway.apps.plugin.models import PluginBinding, PluginConfig
+from apigateway.biz.openapi import ResourceDataConvertor
 from apigateway.biz.plugin.synchronizers import PluginConfigData
-from apigateway.biz.resource.importer import ResourceDataConvertor, ResourcesImporter
+from apigateway.biz.resource.importer import ResourcesImporter
 from apigateway.core.models import Backend, Resource
 from apigateway.utils.yaml import yaml_dumps
 

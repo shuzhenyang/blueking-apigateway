@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -154,6 +154,27 @@
               <span class="common-form-tips form-item-name-tips">
                 {{ t('自动创建开源仓库，将模板代码初始化到仓库中，并将创建者设定为仓库管理员') }}
               </span>
+              <bk-alert
+                v-if="isShowRepoAuthAlert"
+                theme="error"
+                class="common-form-tips form-item-name-tips"
+              >
+                <template #title>
+                  <div class="flex items-center justify-between">
+                    <span>{{ t('代码仓库未授权') }}</span>
+                    <span
+                      class="color-#3A84FF cursor-pointer"
+                      @click="handleGoToAuth"
+                    >
+                      {{ t('去授权') }}
+                      <AgIcon
+                        name="jump"
+                        color="#3A84FF"
+                      />
+                    </span>
+                  </div>
+                </template>
+              </bk-alert>
             </template>
 
             <template v-if="formData.kind === 1 && envStore.env.EDITION === 'ee' && !isEdit">
@@ -269,6 +290,7 @@
                   allow-create
                   has-delete-icon
                   collapse-tags
+                  :copyable="false"
                   :list="[]"
                 />
                 <span class="common-form-tips">{{ t('仅影响 HomePage 中运维开发分数的计算') }}</span>
@@ -282,6 +304,7 @@
                   :placeholder="t('请输入蓝鲸应用ID，并按enter确认')"
                   allow-create
                   has-delete-icon
+                  :copyable="false"
                   collapse-tags
                 />
                 <span class="common-form-tips">{{ t('允许列表中的应用使用 sdk 或者开放 API 调用网关接口，同步环境/资源以及发布版本') }}</span>
@@ -372,16 +395,20 @@
 </template>
 
 <script lang="ts" setup>
+// @ts-nocheck
 import { getEnv } from '@/services/source/basic.ts';
 import {
   checkNameAvailable,
+  checkRepoAuthorization,
   createGateway,
   getGuideDocs,
   patchGateway,
 } from '@/services/source/gateway.ts';
+import { usePopInfoBox } from '@/hooks';
 import { Form, Message } from 'bkui-vue';
 import { cloneDeep } from 'lodash-es';
 import type { IFormMethod } from '@/types/common';
+import type { IGatewayCreateInputSLZ } from '@/services/types/body/post/gateways';
 import MemberSelector from '@/components/member-selector';
 import BkUserSelector from '@blueking/bk-user-selector';
 import bareGit from '@/images/bare_git.png';
@@ -395,7 +422,11 @@ import {
 import AgIcon from '@/components/ag-icon/Index.vue';
 import AgSideslider from '@/components/ag-sideslider/Index.vue';
 
-type ParamType = Parameters<typeof patchGateway>[1];
+type ParamType = IGatewayCreateInputSLZ & {
+  id?: number
+  tenant_mode?: string
+  tenant_id?: string
+};
 
 interface IProps { initData?: ParamType }
 
@@ -445,6 +476,11 @@ const newGateway = ref({
   id: 0,
 });
 const repositoryUrl = ref('');
+// 代码仓库授权状态：null=未检测，true=已授权，false=未授权
+const isRepoAuthorized = ref<boolean | null>(null);
+const authUrl = ref('');
+// 授权状态轮询定时器
+let authPollingTimer: ReturnType<typeof setInterval> | null = null;
 
 const defaultFormData = ref({
   name: '',
@@ -494,6 +530,7 @@ const rules = {
     {
       validator: async (value: string) => {
         try {
+          if (isEdit.value) return true;
           if (!value) return true;
 
           const response = await checkNameAvailable({ name: value });
@@ -536,6 +573,8 @@ const languageList = [
     label: 'Go',
   },
 ];
+
+const isShowRepoAuthAlert = computed(() => isRepoAuthorized.value === false);
 
 const isEdit = computed(() => {
   return !!formData.value?.id;
@@ -614,7 +653,7 @@ const md = new MarkdownIt({
   },
 });
 
-const handleCompare = (callback) => {
+const handleCompare = (callback: (data: any) => void) => {
   callback(cloneDeep(formData.value));
 };
 
@@ -672,9 +711,27 @@ watch(
   },
 );
 
+// 检查代码仓库授权状态
+const checkAuthorization = async () => {
+  if (envStore.env.EDITION !== 'te' || formData.value.kind !== 1) return;
+  try {
+    const res = await checkRepoAuthorization();
+    isRepoAuthorized.value = res?.authorized ?? false;
+    authUrl.value = res?.address ?? '';
+  }
+  catch {
+    isRepoAuthorized.value = false;
+  }
+};
+
 const setRepositoryAddress = () => {
   if (envStore.env.EDITION === 'te' && formData.value.kind === 1) {
     formData.value.extra_info!.repository = `${repositoryUrl.value.replace('{{gateway_name}}', formData.value.name || '')}`;
+    // 代码仓库地址变更后清除旧轮询并重新检测授权状态
+    clearAuthPolling();
+    if (formData.value.name) {
+      checkAuthorization();
+    }
   }
 };
 
@@ -714,6 +771,34 @@ if (envStore.env.EDITION === 'te') {
   getUrlPrefix();
 }
 
+// 清除授权状态轮询
+const clearAuthPolling = () => {
+  if (authPollingTimer !== null) {
+    clearInterval(authPollingTimer);
+    authPollingTimer = null;
+  }
+};
+
+// 启动授权状态轮询
+const startAuthPolling = () => {
+  clearAuthPolling();
+  authPollingTimer = setInterval(async () => {
+    await checkAuthorization();
+    // 已授权则停止轮询
+    if (isRepoAuthorized.value) {
+      clearAuthPolling();
+    }
+  }, 3000);
+};
+
+// 跳转到代码仓库授权页面
+const handleGoToAuth = () => {
+  if (authUrl.value) {
+    startAuthPolling();
+    window.open(authUrl.value);
+  }
+};
+
 const handleTenantModeChange = (tenant_mode: string) => {
   if (tenant_mode === 'global') {
     formData.value.tenant_id = '';
@@ -734,6 +819,26 @@ const handleConfirmCreate = async () => {
     if (!formData.value.maintainers.length) {
       return;
     }
+
+    // 可编程网关在 te 版中需要检测代码仓库授权状态
+    if (formData.value.kind === 1 && envStore.env.EDITION === 'te' && !isEdit.value && isRepoAuthorized.value === false) {
+      usePopInfoBox({
+        isShow: true,
+        type: 'warning',
+        title: t('代码仓库未授权'),
+        subTitle: t('请先完成代码仓库授权后再提交'),
+        confirmText: t('去授权'),
+        cancelText: t('取消'),
+        onConfirm: () => {
+          handleGoToAuth();
+        },
+        onCancel: () => {
+          clearAuthPolling();
+        },
+      });
+      return;
+    }
+
     submitLoading.value = true;
     const payload = cloneDeep(formData.value);
     if (payload.kind === 0) {
@@ -780,6 +885,7 @@ const handleConfirmCreate = async () => {
 };
 
 const handleCancel = () => {
+  clearAuthPolling();
   formRef?.value?.clearValidate();
   formData.value = cloneDeep(defaultFormData.value);
   isShowMemberError.value = false;

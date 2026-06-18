@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -26,7 +26,6 @@ from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
-from pydantic import TypeAdapter
 from rest_framework import generics, serializers, status
 
 from apigateway.apis.open.permissions import (
@@ -37,8 +36,8 @@ from apigateway.apis.open.permissions import (
 )
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.biz.audit import Auditor
-from apigateway.biz.gateway import GatewayData, GatewayRelatedAppHandler, GatewaySaver
-from apigateway.biz.release import ReleaseHandler
+from apigateway.biz.data_plane import DataPlaneHandler
+from apigateway.biz.gateway import GatewayHandler, GatewayRelatedAppHandler
 from apigateway.common.constants import (
     CACHE_MAXSIZE,
     CACHE_TIME_5_MINUTES,
@@ -46,7 +45,6 @@ from apigateway.common.constants import (
 )
 from apigateway.common.tenant.query import gateway_filter_by_app_tenant_id
 from apigateway.components.bkauth import get_app_tenant_info
-from apigateway.core.constants import GatewayStatusEnum
 from apigateway.core.models import JWT, Gateway
 from apigateway.service.contexts import GatewayAuthContext
 from apigateway.utils.django import get_model_dict
@@ -126,7 +124,7 @@ class GatewayListApi(generics.ListAPIView):
         - 3. 已发布
         - 4. 满足 name、query, user_auth_type 等过滤条件
         """
-        queryset = Gateway.objects.filter(status=GatewayStatusEnum.ACTIVE.value, is_public=True)
+        queryset = GatewayHandler.list_public_released_gateways()
 
         # 可以申请全租户网关接口 + 本租户网关接口的权限
         if tenant_id:
@@ -149,10 +147,7 @@ class GatewayListApi(generics.ListAPIView):
                 if auth_config.user_auth_type == user_auth_type
             ]
 
-        # 过滤出已发布的网关 ID
-        released_gateway_ids = ReleaseHandler.filter_released_gateway_ids(gateway_ids)
-
-        return queryset.filter(id__in=released_gateway_ids)
+        return queryset.filter(id__in=gateway_ids)
 
 
 @method_decorator(
@@ -219,14 +214,20 @@ class GatewaySyncApi(generics.CreateAPIView):
 
         # save gateway
         username = request.user.username or settings.GATEWAY_DEFAULT_CREATOR
-        saver = GatewaySaver(
-            id=gateway and gateway.id,
-            data=TypeAdapter(GatewayData).validate_python(data),
-            bk_app_code=request.app.app_code,
-            username=username,
-            source=CallSourceTypeEnum.OpenAPI,
+
+        data_plane_ids = DataPlaneHandler.get_sync_data_plane_ids(
+            gateway_name=gateway_name,
+            data_plane_names=data.get("data_planes"),
         )
-        gateway = saver.save()
+
+        gateway = GatewayHandler.sync_gateway(
+            gateway,
+            data,
+            request.app.app_code,
+            username,
+            CallSourceTypeEnum.OpenAPI,
+            data_plane_ids,
+        )
 
         # record audit log
         Auditor.record_gateway_op_success(
@@ -297,10 +298,11 @@ class GatewayRelatedAppAddApi(generics.CreateAPIView):
                         }
                     )
 
-        related_app_codes = GatewayRelatedAppHandler.get_related_app_codes(request.gateway.id)
-        missing_app_codes = set(target_app_codes) - set(related_app_codes)
-        for bk_app_code in missing_app_codes:
-            GatewayRelatedAppHandler.add_related_app(request.gateway.id, bk_app_code)
+        related_app_codes_before, related_app_codes_after = GatewayRelatedAppHandler.sync_related_apps(
+            gateway_id=request.gateway.id,
+            bk_app_codes=target_app_codes,
+        )
+        added_app_codes = list(set(related_app_codes_after) - set(related_app_codes_before))
 
         # record audit log
         gateway = request.gateway
@@ -311,8 +313,8 @@ class GatewayRelatedAppAddApi(generics.CreateAPIView):
             gateway_id=gateway.id,
             instance_id=gateway.id,
             instance_name=gateway.name,
-            data_before={"related_app_codes": related_app_codes},
-            data_after={"added_related_app_codes": list(missing_app_codes)},
+            data_before={"related_app_codes": related_app_codes_before},
+            data_after={"added_related_app_codes": added_app_codes},
         )
 
         return V1OKJsonResponse()

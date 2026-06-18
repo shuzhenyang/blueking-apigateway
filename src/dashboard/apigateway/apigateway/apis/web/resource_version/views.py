@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -17,6 +17,8 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
+from tempfile import TemporaryDirectory
+
 from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
@@ -24,27 +26,38 @@ from drf_yasg import openapi as parameters
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, serializers, status
 
-from apigateway.apps.openapi.models import OpenAPIFileResourceSchemaVersion
+from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.apps.plugin.models import PluginType
 from apigateway.apps.programmable_gateway.models import ProgrammableGatewayDeployHistory
-from apigateway.apps.support.models import ResourceDoc, ResourceDocVersion
+from apigateway.biz.audit import Auditor
 from apigateway.biz.backend import BackendHandler
 from apigateway.biz.plugin import PluginBindingHandler
-from apigateway.biz.resource.importer.openapi import OpenAPIExportManager
-from apigateway.biz.resource_version import ResourceDifferHandler, ResourceDocVersionHandler, ResourceVersionHandler
-from apigateway.biz.sdk.gateway_sdk import GatewaySDKHandler
+from apigateway.biz.resource_doc import ArchiveFileFactory, NoResourceDocError
+from apigateway.biz.resource_doc.exporter import ResourceVersionDocArchiveGenerator
+from apigateway.biz.resource_version import (
+    ResourceDifferHandler,
+    ResourceDocVersionHandler,
+    ResourceVersionArtifactHandler,
+    ResourceVersionHandler,
+)
+from apigateway.biz.sdk import GatewaySDKHandler
+from apigateway.common.error_codes import error_codes
 from apigateway.core.constants import PublishSourceEnum
 from apigateway.core.models import Release, Resource, ResourceVersion
+from apigateway.service.backend import get_backend_id_to_instance
+from apigateway.service.resource_version import OpenAPIExportManager, get_resource_id_to_schema_by_resource_version
 from apigateway.utils.responses import DownloadableResponse, OKJsonResponse
 from apigateway.utils.version import get_next_version, get_next_version_with_type
 
 from .serializers import (
     NeedNewVersionOutputSLZ,
     NextProgrammableDeployVersionGetInputSLZ,
+    ResourceVersionBatchDeleteInputSLZ,
     ResourceVersionCreateInputSLZ,
     ResourceVersionDiffOutputSLZ,
     ResourceVersionDiffQueryInputSLZ,
+    ResourceVersionDocExportInputSLZ,
     ResourceVersionExportInputSLZ,
     ResourceVersionListInputSLZ,
     ResourceVersionListOutputSLZ,
@@ -108,29 +121,15 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
         slz = self.serializer_class(data=request.data, context={"gateway": request.gateway})
         slz.is_valid(raise_exception=True)
 
-        instance = ResourceVersionHandler.create_resource_version(request.gateway, slz.data, request.user.username)
-
-        # 创建文档版本
-        if ResourceDoc.objects.filter(gateway=request.gateway).exists():
-            ResourceDocVersion.objects.create(
-                gateway=self.request.gateway,
-                resource_version=instance,
-                data=ResourceDocVersionHandler().make_version(request.gateway.id),
-            )
-        exporter = OpenAPIExportManager(
-            api_version=instance.version,
-            title="the openapi of %s" % request.gateway.name,
-        )
-        # 创建openapi file版本
-        OpenAPIFileResourceSchemaVersion.objects.create(
+        ResourceVersionArtifactHandler.create_resource_version_with_artifacts(
             gateway=request.gateway,
-            resource_version=instance,
-            schema=exporter.export_resource_version_openapi(instance),
+            data=slz.validated_data,
+            username=request.user.username,
         )
         return OKJsonResponse(status=status.HTTP_201_CREATED)
 
 
-class ResourceVersionRetrieveApi(generics.RetrieveAPIView):
+class ResourceVersionRetrieveDestroyApi(generics.RetrieveDestroyAPIView):
     serializer_class = ResourceVersionRetrieveOutputSLZ
     lookup_field = "id"
 
@@ -143,7 +142,6 @@ class ResourceVersionRetrieveApi(generics.RetrieveAPIView):
             tags=["WebAPI.ResourceVersion"],
             operation_description="资源版本详情查询接口",
             manual_parameters=[
-                # 定义一个名为 "query" 的查询参数，默认值为 "None"
                 parameters.Parameter(
                     name="stage_id",
                     in_=parameters.IN_QUERY,
@@ -161,12 +159,10 @@ class ResourceVersionRetrieveApi(generics.RetrieveAPIView):
         resource_docs_updated_time = ResourceDocVersionHandler().get_doc_updated_time(request.gateway.id, instance.id)
 
         # 查询网关后端服务
-        resource_backends = BackendHandler.get_id_to_instance(request.gateway.id)
+        resource_backends = get_backend_id_to_instance(request.gateway.id)
 
         # 查询哪些资源有配置对应的 schema
-        resource_id_with_schema_dict = ResourceVersionHandler.get_resource_id_to_schema_by_resource_version(
-            instance.id
-        )
+        resource_id_with_schema_dict = get_resource_id_to_schema_by_resource_version(instance.id)
 
         context = {
             "resource_doc_updated_time": resource_docs_updated_time,
@@ -204,6 +200,35 @@ class ResourceVersionRetrieveApi(generics.RetrieveAPIView):
             data["resources"] = resources
 
         return OKJsonResponse(data=data)
+
+    @swagger_auto_schema(
+        operation_description="删除资源版本",
+        responses={status.HTTP_204_NO_CONTENT: ""},
+        tags=["WebAPI.ResourceVersion"],
+    )
+    @transaction.atomic
+    def delete(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        if ResourceVersionHandler.is_resource_version_referenced(instance.id):
+            raise serializers.ValidationError(_("资源版本已被发布或已生成 SDK，无法删除"))
+
+        instance_id = instance.id
+        instance_version = instance.version
+
+        ResourceVersionHandler.delete_resource_version(instance_id)
+
+        Auditor.record_resource_version_op_success(
+            op_type=OpTypeEnum.DELETE,
+            username=request.user.username,
+            gateway_id=request.gateway.id,
+            instance_id=instance_id,
+            instance_name=instance_version,
+            data_before={"version": instance_version},
+            data_after={},
+        )
+
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
 
 class ResourceVersionNeedNewVersionRetrieveApi(generics.RetrieveAPIView):
@@ -369,3 +394,88 @@ class ResourceVersionExportApi(generics.CreateAPIView):
         # 导出的文件名，需满足规范：bk_产品名_功能名_文件名.后缀
         export_filename = f"bk_apigw_resources_{self.request.gateway.name}_{instance.version}.{file_type}"
         return DownloadableResponse(content, filename=export_filename)
+
+
+class ResourceVersionDocExportApi(generics.CreateAPIView):
+    lookup_field = "id"
+
+    def get_queryset(self):
+        return ResourceVersion.objects.filter(gateway=self.request.gateway)
+
+    @swagger_auto_schema(
+        operation_description="导出资源版本对应的文档",
+        request_body=ResourceVersionDocExportInputSLZ,
+        responses={status.HTTP_200_OK: ""},
+        tags=["WebAPI.ResourceVersion"],
+    )
+    def post(self, request, *args, **kwargs):
+        instance = self.get_object()
+        slz = ResourceVersionDocExportInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        file_type = slz.validated_data["file_type"]
+
+        with TemporaryDirectory() as output_dir:
+            archive_name = f"bk_apigw_docs_{request.gateway.name}_{instance.version}.{file_type}"
+            archivefile = ArchiveFileFactory.from_file_type(file_type)
+
+            try:
+                generator = ResourceVersionDocArchiveGenerator()
+                files = generator.generate(output_dir, instance)
+                archive_path = archivefile.archive(output_dir, archive_name, files)
+            except NoResourceDocError:
+                raise error_codes.INVALID_ARGUMENT.format(_("该资源版本没有对应的资源文档。"))
+
+            return DownloadableResponse(open(archive_path, "rb"), filename=archive_name)
+
+
+class ResourceVersionBatchDeleteApi(generics.DestroyAPIView):
+    def get_queryset(self):
+        return ResourceVersion.objects.filter(gateway=self.request.gateway)
+
+    @swagger_auto_schema(
+        operation_description="批量删除资源版本",
+        responses={status.HTTP_204_NO_CONTENT: ""},
+        request_body=ResourceVersionBatchDeleteInputSLZ,
+        tags=["WebAPI.ResourceVersion"],
+    )
+    @transaction.atomic
+    def delete(self, request, *args, **kwargs):
+        slz = ResourceVersionBatchDeleteInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+
+        ids = list(dict.fromkeys(slz.validated_data["ids"]))
+
+        queryset = self.get_queryset().filter(id__in=ids)
+        existing_ids = set(queryset.values_list("id", flat=True))
+        not_exist_ids = set(ids) - existing_ids
+        if not_exist_ids:
+            raise serializers.ValidationError(
+                _("资源版本不存在，id={ids}").format(ids=", ".join(map(str, not_exist_ids)))
+            )
+
+        non_deletable_ids = [rv_id for rv_id in ids if ResourceVersionHandler.is_resource_version_referenced(rv_id)]
+        if non_deletable_ids:
+            raise serializers.ValidationError(
+                _("以下资源版本已被发布或已生成 SDK，无法删除，id={ids}").format(
+                    ids=", ".join(map(str, non_deletable_ids))
+                )
+            )
+
+        id_to_version = dict(queryset.values_list("id", "version"))
+
+        for rv_id in ids:
+            ResourceVersionHandler.delete_resource_version(rv_id)
+
+        Auditor.record_resource_version_op_success(
+            op_type=OpTypeEnum.DELETE,
+            username=request.user.username,
+            gateway_id=request.gateway.id,
+            instance_id=";".join(map(str, ids)),
+            instance_name=";".join(id_to_version[rv_id] for rv_id in ids),
+            comment="批量删除版本",
+            data_before=[{"id": rv_id, "version": id_to_version[rv_id]} for rv_id in ids],
+            data_after=[],
+        )
+
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)

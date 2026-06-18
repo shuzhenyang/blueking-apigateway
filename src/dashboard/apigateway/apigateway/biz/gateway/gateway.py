@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关 (BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -25,27 +25,29 @@ from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.db.models import Count
 from django.utils import timezone
+from pydantic import BaseModel, Field, TypeAdapter, field_validator
 
+from apigateway.apps.data_plane.models import DataPlane, GatewayDataPlaneBinding
 from apigateway.apps.metrics.models import StatisticsAppRequestByDay, StatisticsGatewayRequestByDay
 from apigateway.apps.plugin.models import PluginBinding
 from apigateway.apps.support.models import ReleasedResourceDoc
 from apigateway.biz.release import ReleaseHandler
-from apigateway.biz.resource import ResourceHandler
-from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.biz.stage import StageHandler
 from apigateway.common.constants import CallSourceTypeEnum
-from apigateway.common.tenant.query import gateway_filter_by_user_tenant_id
-from apigateway.core.api_auth import APIAuthConfig
+from apigateway.common.tenant.query import gateway_filter_by_maintainer_tenant_id
 from apigateway.core.constants import (
     ContextScopeTypeEnum,
     GatewayOperationSourceEnum,
     GatewayOperationStatusEnum,
+    GatewayStatusEnum,
     GatewayTypeEnum,
 )
+from apigateway.core.gateway_auth import GatewayAuthConfig
 from apigateway.core.models import Backend, BackendConfig, Context, Gateway, Release, Resource, Stage
 from apigateway.service.alarm_strategy import create_default_alarm_strategy
 from apigateway.service.contexts import GatewayAuthContext
 from apigateway.service.gateway_jwt import GatewayJWTHandler
+from apigateway.service.resource import delete_gateway_resource_versions, delete_gateway_resources
 from apigateway.utils.dict import deep_update
 
 from .app_binding import GatewayAppBindingHandler
@@ -59,14 +61,35 @@ logger = logging.getLogger(__name__)
 OPERATION_STATUS_DELTA_DAYS = 180
 
 
+class GatewayData(BaseModel):
+    name: str = Field(...)
+    description: str = Field(default="")
+    description_en: Optional[str] = Field(default=None)
+    maintainers: List[str] = Field(default_factory=list)
+    status: int = Field(...)
+    is_public: bool = Field(default=False)
+    gateway_type: Optional[GatewayTypeEnum] = Field(default=None)
+    user_config: Optional[Dict] = Field(default=None)
+    # allow_auth_from_params/allow_delete_sensitive_params 默认值 None，即默认不修改此配置，
+    # 上层如需修改，需明确指定配置值
+    allow_auth_from_params: Optional[bool] = Field(default=None)
+    allow_delete_sensitive_params: Optional[bool] = Field(default=None)
+
+    tenant_mode: Optional[str] = Field(default=None)
+    tenant_id: Optional[str] = Field(default=None)
+
+    @field_validator("gateway_type")
+    def validate_gateway_type(cls, v):  # noqa: N805
+        return GatewayTypeEnum(v) if isinstance(v, int) else v
+
+
 class GatewayHandler:
     @staticmethod
     def list_gateways_by_user(username: str, tenant_id: str = "") -> List[Gateway]:
-        """获取用户有权限的的网关列表"""
-
+        """获取用户有权限的网关列表"""
         queryset = Gateway.objects.filter(_maintainers__contains=username)
         if tenant_id:
-            queryset = gateway_filter_by_user_tenant_id(queryset, tenant_id)
+            queryset = gateway_filter_by_maintainer_tenant_id(queryset, tenant_id)
 
         # 使用 _maintainers 过滤的数据并不准确，需要根据其中人员列表二次过滤
         return [gateway for gateway in queryset if gateway.has_permission(username)]
@@ -104,11 +127,18 @@ class GatewayHandler:
         return gateway_id_to_stages
 
     @staticmethod
+    def list_public_released_gateways():
+        return Gateway.objects.filter(
+            status=GatewayStatusEnum.ACTIVE.value,
+            is_public=True,
+            id__in=Release.objects.values_list("gateway_id", flat=True),
+        )
+
+    @staticmethod
     def get_gateway_auth_config(gateway_id: int) -> dict:
         """
         获取网关当前的认证配置
         """
-
         try:
             return GatewayAuthContext().get_config(gateway_id)
         except Context.DoesNotExist:
@@ -160,7 +190,8 @@ class GatewayHandler:
             # 多租户版本，只允许从请求头获取认证信息，如果注册方配置 allow_auth_from_params 为 True，则强制设置为 False
             if allow_auth_from_params and settings.ENABLE_MULTI_TENANT_MODE:
                 logger.warning(
-                    "multi-tenant mode, allow_auth_from_params=True is not supported, force set to False, gateway_id=%s",
+                    "multi-tenant mode, allow_auth_from_params=True is not supported, force set to False, "
+                    "gateway_id=%s",
                     gateway_id,
                 )
                 new_config["allow_auth_from_params"] = False
@@ -174,7 +205,7 @@ class GatewayHandler:
         current_config = GatewayHandler.get_gateway_auth_config(gateway_id)
 
         # 因用户配置为 dict，参数 user_conf 仅传递了部分用户配置，因此需合并当前配置与传入配置
-        gateway_auth_config = APIAuthConfig.model_validate(deep_update(current_config, new_config))
+        gateway_auth_config = GatewayAuthConfig.model_validate(deep_update(current_config, new_config))
 
         return GatewayAuthContext().save(gateway_id, gateway_auth_config.config)
 
@@ -198,22 +229,19 @@ class GatewayHandler:
             gateway.id,
             user_auth_type=user_auth_type,
             user_conf=user_config,
-            api_type=api_type,
             unfiltered_sensitive_keys=unfiltered_sensitive_keys,
+            api_type=api_type,
             allow_auth_from_params=allow_auth_from_params,
             allow_delete_sensitive_params=allow_delete_sensitive_params,
         )
 
         # 2. save jwt
-
         GatewayJWTHandler.create_jwt(gateway)
 
         # 3. create default stage
-
         StageHandler().create_default(gateway, created_by=username, source=source)
 
         # 4. create default alarm-strategy
-
         create_default_alarm_strategy(gateway, created_by=username)
 
         # 5. create related app
@@ -223,6 +251,44 @@ class GatewayHandler:
         # 6. update gateway app binding
         if app_codes_to_binding is not None:
             GatewayAppBindingHandler.update_gateway_app_bindings(gateway, app_codes_to_binding)
+
+    @staticmethod
+    def sync_gateway(
+        gateway: Optional[Gateway],
+        data: dict,
+        bk_app_code: str,
+        username: str,
+        source: Optional[CallSourceTypeEnum],
+        data_plane_ids: Optional[List[int]],
+    ) -> Gateway:
+        """Create or update a gateway through the shared sync entrypoint."""
+        saver = GatewaySaver(
+            id=gateway and gateway.id,
+            data=TypeAdapter(GatewayData).validate_python(data),
+            bk_app_code=bk_app_code,
+            username=username,
+            source=source,
+            data_plane_ids=data_plane_ids,
+        )
+        return saver.save()
+
+    @staticmethod
+    def bind_to_data_planes(gateway: Gateway, data_plane_ids: List[int], username: str = ""):
+        """Bind a gateway to the given data planes."""
+        data_planes = DataPlane.objects.filter(id__in=data_plane_ids)
+        data_plane_map = {dp.id: dp for dp in data_planes}
+
+        for dp_id in data_plane_ids:
+            data_plane = data_plane_map.get(dp_id)
+            if not data_plane:
+                logger.warning("data plane id=%s not found when binding gateway '%s'", dp_id, gateway.name)
+                continue
+            GatewayDataPlaneBinding.objects.bind_gateway_to_data_plane(
+                gateway=gateway,
+                data_plane=data_plane,
+                created_by=username or "system",
+            )
+            logger.info("Bound gateway '%s' to data plane '%s'", gateway.name, data_plane.name)
 
     @staticmethod
     def delete_gateway(gateway_id: int):
@@ -246,11 +312,11 @@ class GatewayHandler:
 
         # 5. delete resource
 
-        ResourceHandler.delete_by_gateway_id(gateway_id)
+        delete_gateway_resources(gateway_id)
 
         # 6. delete resource-version
 
-        ResourceVersionHandler.delete_by_gateway_id(gateway_id)
+        delete_gateway_resource_versions(gateway_id)
 
         # 7. plugin bindings
 
@@ -288,8 +354,29 @@ class GatewayHandler:
         return ""
 
     @staticmethod
-    def get_api_domain(gateway: Gateway) -> str:
-        return settings.BK_API_URL_TMPL.format(api_name=gateway.name)
+    def get_bk_api_url_tmpl(gateway_id: int) -> str:
+        """Get the bk_api_url_tmpl for a gateway from its bound data plane, with fallback to settings.
+        If gateway bound to multiple data_planes, only use the first data_plane's bk_api_url_tmpl
+        """
+        binding = (
+            GatewayDataPlaneBinding.objects.filter(gateway_id=gateway_id)
+            .select_related("data_plane")
+            .order_by("data_plane_id")
+            .first()
+        )
+        if binding and binding.data_plane.bk_api_url_tmpl:
+            return binding.data_plane.bk_api_url_tmpl
+
+        logger.warning(
+            "Gateway %s has no data plane with bk_api_url_tmpl configured, falling back to settings.BK_API_URL_TMPL",
+            gateway_id,
+        )
+
+        return settings.BK_API_URL_TMPL
+
+    @staticmethod
+    def get_gateway_domain(gateway: Gateway) -> str:
+        return GatewayHandler.get_bk_api_url_tmpl(gateway.id).format(api_name=gateway.name)
 
     @staticmethod
     def get_resource_count(gateway_ids: List[int]) -> Dict[int, int]:
@@ -300,12 +387,6 @@ class GatewayHandler:
             .annotate(count=Count("gateway_id"))
         )
         return {i["gateway_id"]: i["count"] for i in resource_count}
-
-    @staticmethod
-    def get_max_resource_count(gateway_name: str):
-        return settings.API_GATEWAY_RESOURCE_LIMITS["max_resource_count_per_gateway_whitelist"].get(
-            gateway_name, settings.API_GATEWAY_RESOURCE_LIMITS["max_resource_count_per_gateway"]
-        )
 
     @staticmethod
     def get_operation_statuses(gateways: List[Gateway]) -> Dict[int, dict]:
@@ -322,9 +403,8 @@ class GatewayHandler:
 
         operation_statuses: Dict[int, dict] = {}
 
-        # start_time and end_time are timezone aware, now - delta_days from module-level constant
-        end_time = timezone.now()
-        start_time = end_time - timedelta(days=OPERATION_STATUS_DELTA_DAYS)
+        # start_time is timezone aware, now - delta_days from module-level constant
+        start_time = timezone.now() - timedelta(days=OPERATION_STATUS_DELTA_DAYS)
 
         to_stats_gateway_ids = []
         for gateway in gateways:
@@ -365,8 +445,9 @@ class GatewayHandler:
 
         # query data and set the result to operation_statuses
         # just check existence, no need to calculate
-        queryset = StatisticsGatewayRequestByDay.objects.filter(gateway_id__in=to_stats_gateway_ids).filter(
-            start_time__gte=start_time, end_time__lte=end_time
+        queryset = StatisticsGatewayRequestByDay.objects.filter(
+            gateway_id__in=to_stats_gateway_ids,
+            start_time__gte=start_time,
         )
 
         has_data_gateway_ids = set(queryset.values_list("gateway_id", flat=True).distinct())
@@ -378,3 +459,138 @@ class GatewayHandler:
                 operation_statuses[gateway_id]["status"] = GatewayOperationStatusEnum.INACTIVE.value
 
         return operation_statuses
+
+
+class GatewaySaver:
+    """
+    Gateway saver that handles creating/updating gateways and binding to data planes.
+
+    For new gateways:
+    - If data_plane_ids is provided, bind to those data planes
+    - Otherwise, bind to the 'default' data plane
+    """
+
+    def __init__(
+        self,
+        id: Optional[int],
+        data: GatewayData,
+        bk_app_code: str = "",
+        username: str = "",
+        source: Optional[CallSourceTypeEnum] = None,
+        data_plane_ids: Optional[List[int]] = None,
+    ):
+        self.bk_app_code = bk_app_code
+        self.username = username
+
+        self._gateway = self._get_gateway(id)
+        self._gateway_data = data
+        self._source = source
+        self._data_plane_ids = data_plane_ids
+
+    def _get_gateway(self, gateway_id: Optional[int]) -> Optional[Gateway]:
+        if gateway_id:
+            return Gateway.objects.get(id=gateway_id)
+
+        return None
+
+    def save(self) -> Gateway:
+        # 网关为 None，则新建网关；非 None，则更新网关
+        if not self._gateway:
+            self._create_gateway()
+        else:
+            self._update_gateway()
+
+        assert self._gateway
+
+        return self._gateway
+
+    def _create_gateway(self):
+        # 1. save gateway
+        self._gateway = gateway = Gateway(
+            name=self._gateway_data.name,
+            description=self._gateway_data.description,
+            description_en=self._gateway_data.description_en,
+            maintainers=self._gateway_data.maintainers,
+            status=self._gateway_data.status,
+            is_public=self._gateway_data.is_public,
+            tenant_mode=self._gateway_data.tenant_mode,
+            tenant_id=self._gateway_data.tenant_id,
+            created_by=self.username,
+            updated_by=self.username,
+        )
+        gateway.save()
+
+        # 2. save related data
+        GatewayHandler.save_related_data(
+            gateway=gateway,
+            user_auth_type=settings.DEFAULT_USER_AUTH_TYPE,
+            username=self.username,
+            related_app_code=self.bk_app_code,
+            user_config=self._gateway_data.user_config,
+            unfiltered_sensitive_keys=self._get_gateway_unfiltered_sensitive_keys(gateway.name),
+            api_type=self._gateway_data.gateway_type,
+            allow_auth_from_params=self._gateway_data.allow_auth_from_params,
+            allow_delete_sensitive_params=self._gateway_data.allow_delete_sensitive_params,
+            source=self._source,
+        )
+
+        # 3. bind to data plane(s)
+        self._bind_to_data_planes(gateway)
+
+    def _bind_to_data_planes(self, gateway: Gateway):
+        """Bind newly created gateway to data plane(s)"""
+        data_planes_to_bind: List[DataPlane] = []
+
+        # If data_plane_ids provided, bind to those data planes
+        if self._data_plane_ids:
+            data_plane_id_to_obj = {item.id: item for item in DataPlane.objects.filter(id__in=self._data_plane_ids)}
+            found_ids = set(data_plane_id_to_obj.keys())
+            missing_ids = set(self._data_plane_ids) - found_ids
+            if missing_ids:
+                missing_ids_list = sorted(missing_ids)
+                logger.error("Gateway '%s': invalid data_plane_ids=%s", gateway.name, missing_ids_list)
+                raise ValueError(f"invalid data_plane_ids: {missing_ids_list}")
+
+            data_planes_to_bind.extend(data_plane_id_to_obj[data_plane_id] for data_plane_id in self._data_plane_ids)
+        else:
+            default_data_plane = DataPlane.objects.get_default()
+            data_planes_to_bind.append(default_data_plane)
+
+        # Bind to all resolved data planes
+        for data_plane in data_planes_to_bind:
+            GatewayDataPlaneBinding.objects.bind_gateway_to_data_plane(
+                gateway=gateway,
+                data_plane=data_plane,
+                created_by=self.username or "system",
+            )
+            logger.info(
+                "Bound gateway '%s' to data plane '%s'",
+                gateway.name,
+                data_plane.name,
+            )
+
+    def _update_gateway(self):
+        gateway = self._gateway
+
+        # 1. update gateway
+        gateway.description = self._gateway_data.description
+        gateway.description_en = self._gateway_data.description_en
+        # 更新网关时，仅新增网关管理员，不删除，以防止删除已更新的管理员数据
+        gateway.maintainers = sorted(set(self._gateway_data.maintainers + gateway.maintainers))
+        gateway.is_public = self._gateway_data.is_public
+        gateway.updated_by = self.username
+        gateway.save()
+
+        # 2. update auth config
+        GatewayHandler.save_auth_config(
+            gateway.id,
+            user_conf=self._gateway_data.user_config,
+            unfiltered_sensitive_keys=self._get_gateway_unfiltered_sensitive_keys(gateway.name),
+            api_type=self._gateway_data.gateway_type,
+            allow_auth_from_params=self._gateway_data.allow_auth_from_params,
+            allow_delete_sensitive_params=self._gateway_data.allow_delete_sensitive_params,
+        )
+
+    def _get_gateway_unfiltered_sensitive_keys(self, gateway_name: str) -> Optional[List[str]]:
+        gateway_auth_configs = getattr(settings, "SPECIAL_GATEWAY_AUTH_CONFIGS", None) or {}
+        return gateway_auth_configs.get(gateway_name, {}).get("unfiltered_sensitive_keys")

@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -59,7 +59,7 @@ def build_logging_config(log_level: str, to_console: bool, file_directory: Optio
     }
     # 生成指定 Logger 对应的 Handlers
     logger_handlers_map: Dict[str, List[str]] = {}
-    for logger_name in ["root", "component", "mysql", "celery"]:
+    for logger_name in ["root", "component", "mysql", "celery", "sdk"]:
         handlers = []
 
         if to_console:
@@ -86,7 +86,7 @@ def build_logging_config(log_level: str, to_console: bool, file_directory: Optio
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
             "verbose_json": {
-                "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+                "()": "pythonjsonlogger.json.JsonFormatter",
                 "fmt": (
                     "%(name)s %(levelname)s %(asctime)s %(pathname)s %(lineno)d "
                     "%(funcName)s %(process)d %(thread)d %(message)s"
@@ -126,6 +126,11 @@ def build_logging_config(log_level: str, to_console: bool, file_directory: Optio
             },
             "celery": {
                 "handlers": [*logger_handlers_map["celery"], "sentry"],
+                "level": "INFO",
+                "propagate": False,
+            },
+            "apigateway.biz.sdk": {
+                "handlers": logger_handlers_map["sdk"],
                 "level": "INFO",
                 "propagate": False,
             },

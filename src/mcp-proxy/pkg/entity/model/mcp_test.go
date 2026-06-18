@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -53,6 +53,7 @@ var _ = Describe("MCP Models", func() {
 				IsPublic: true, Labels: model.ArrayString{"label1", "label2"},
 				ResourceNames: model.ArrayString{"resource1", "resource2"},
 				Status:        model.McpServerStatusActive, GatewayID: 100, StageID: 200,
+				RawResponseEnabled: true,
 			}
 			Expect(server.ID).To(Equal(1))
 			Expect(server.Name).To(Equal("test-server"))
@@ -63,6 +64,12 @@ var _ = Describe("MCP Models", func() {
 			Expect(server.Status).To(Equal(model.McpServerStatusActive))
 			Expect(server.GatewayID).To(Equal(100))
 			Expect(server.StageID).To(Equal(200))
+			Expect(server.RawResponseEnabled).To(BeTrue())
+		})
+
+		It("should default RawResponseEnabled to false", func() {
+			server := &model.MCPServer{}
+			Expect(server.RawResponseEnabled).To(BeFalse())
 		})
 
 		Describe("GetProtocolType", func() {
@@ -83,14 +90,19 @@ var _ = Describe("MCP Models", func() {
 		})
 
 		Describe("IsStreamableHTTP", func() {
-			DescribeTable("returns correct streamable HTTP status",
+			DescribeTable(
+				"returns correct streamable HTTP status",
 				func(protocolType string, expected bool) {
 					server := &model.MCPServer{ProtocolType: protocolType}
 					Expect(server.IsStreamableHTTP()).To(Equal(expected))
 				},
 				Entry("empty protocol type", "", false),
 				Entry("SSE protocol type", constant.MCPServerProtocolTypeSSE, false),
-				Entry("Streamable HTTP protocol type", constant.MCPServerProtocolTypeStreamableHTTP, true),
+				Entry(
+					"Streamable HTTP protocol type",
+					constant.MCPServerProtocolTypeStreamableHTTP,
+					true,
+				),
 				Entry("unknown protocol type", "unknown", false),
 			)
 		})
@@ -243,7 +255,7 @@ var _ = Describe("MCP Models", func() {
 	Describe("ArrayString", func() {
 		Describe("Scan", func() {
 			DescribeTable("scans values correctly",
-				func(input interface{}, expected model.ArrayString, hasError bool) {
+				func(input any, expected model.ArrayString, hasError bool) {
 					var arr model.ArrayString
 					err := arr.Scan(input)
 					if hasError {

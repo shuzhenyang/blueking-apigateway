@@ -1,34 +1,6 @@
-## Configuration
-
-Clients supporting the MCP protocol can be configured using the following settings:
-
-{% if protocol_type == "streamable_http" %}
-```json
-{
-    "mcpServers": {
-      "{{name}}": {
-        "type": "streamableHttp",
-        "url": "{{url}}",
-        "description": "{{description}}"
-      }
-    }
-}
-```
-{% else %}
-```json
-{
-    "mcpServers": {
-      "{{name}}": {
-        "type": "sse",
-        "url": "{{url}}",
-        "description": "{{description}}"
-      }
-    }
-}
-```
-{% endif %}
-
 ## Authentication
+
+> **Note**: If the MCP Server has **Public Client Mode** (OAuth2 Public Client) enabled, the `X-Bkapi-Authorization` header is not required in the client configuration — authentication will be handled automatically via the OAuth2 flow. However, the `X-Bkapi-Authorization` header is still supported; if provided, the system will process the authentication as usual.
 
 The MCP proxy currently integrates with BlueKing API Gateway, requiring both `user authentication` and `app authentication`. When configuring MCP Server, additional authentication headers must be configured as JSON-formatted strings.
 
@@ -41,7 +13,7 @@ or:
 > We recommend using `access_token` for its longer validity period. For acquisition methods, see [access_token documentation]({{bk_access_token_doc_url}})
 
 ```shell
-X-Bkapi-Authorization: {"bk_app_code": "x", "bk_app_secret": "y", "access_token": "z"}
+X-Bkapi-Authorization: {"access_token": "z"}
 ```
 
 ## Others

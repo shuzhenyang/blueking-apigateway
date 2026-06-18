@@ -2,7 +2,7 @@
 #  #
 #  TencentBlueKing is pleased to support the open source community by making
 #  蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-#  Copyright (C) 2025 Tencent. All rights reserved.
+#  Copyright (C) Tencent. All rights reserved.
 #  Licensed under the MIT License (the "License"); you may not use this file except
 #  in compliance with the License. You may obtain a copy of the License at
 #  #
@@ -27,6 +27,8 @@ class RepositoryConfig:
     repository_id: str
     username: str
     password: str
+    ssl_insecure: bool = False
+    mirror_url: str = ""
 
     @classmethod
     def by_name(cls, name: str):
@@ -38,4 +40,6 @@ class RepositoryConfig:
             repository_id=maven_config.get("repository_id", ""),
             username=maven_config.get("username", ""),
             password=maven_config.get("password", ""),
+            ssl_insecure=maven_config.get("ssl_insecure", False),
+            mirror_url=maven_config.get("mirror_url", ""),
         )

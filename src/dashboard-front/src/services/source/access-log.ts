@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -16,6 +16,20 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import http from '../http';
+import type {
+  ILogLinkOutput,
+  ILogListOutput,
+  IRequestLogDetailOutput,
+  IRequestLogOutput,
+  IStageListOutput,
+  ITimeChartOutput,
+} from '@/services/types/responses/gateways.ts';
+import type {
+  IGatewaysLogsListQuery,
+  IGatewaysLogsReadQuery,
+  IGatewaysLogsTimechartReadQuery,
+  IGatewaysStagesListQuery,
+} from '@/services/types/query/gateways.ts';
 
 const path = '/gateways';
 
@@ -50,33 +64,43 @@ export interface ILogDetailInterface {
  *  获取流程日志列表
  * @param gatewayId 网关id
  */
-export const fetchApigwAccessLogList = (gatewayId: number, params: IChartInterface, extraStr?: string) => http.get(`${path}/${gatewayId}/logs/?${extraStr}`, params);
+export const fetchApigwAccessLogList = (gatewayId: number, params: IGatewaysLogsListQuery = {}, extraStr?: string) =>
+  http.get<ILogListOutput>(`${path}/${gatewayId}/logs/?${extraStr}`, params);
 
 /**
  *  获取流程日志chart
  * @param gatewayId 网关id
  */
-export const fetchApigwAccessLogChart = (gatewayId: number, params: IChartInterface, extraStr?: string) => http.get(`${path}/${gatewayId}/logs/timechart/?${extraStr}`, params);
+export const fetchApigwAccessLogChart = (
+  gatewayId: number,
+  params: IGatewaysLogsTimechartReadQuery,
+  extraStr?: string,
+) =>
+  http.get<ITimeChartOutput>(`${path}/${gatewayId}/logs/timechart/?${extraStr}`, params);
 
 /**
  *  获取流程日志link
  * @param gatewayId 网关id
  */
-export const fetchApigwAccessLogShareLink = (gatewayId: number, params: { request_id: string }) => http.get(`${path}/${gatewayId}/logs/${params.request_id}/link/`);
+export const fetchApigwAccessLogShareLink = (gatewayId: number, params: { request_id: string }) =>
+  http.get<ILogLinkOutput>(`${path}/${gatewayId}/logs/${params.request_id}/link/`);
 
 /**
  *  获取流程日志详情
  * @param gatewayId 网关id
  */
-export const fetchApigwAccessLogDetail = (gatewayId: number, requestId: string, params: ILogDetailInterface) => http.get(`${path}/${gatewayId}/logs/${requestId}/`, params);
+export const fetchApigwAccessLogDetail = (gatewayId: number, requestId: string, params: IGatewaysLogsReadQuery) =>
+  http.get<IRequestLogDetailOutput>(`${path}/${gatewayId}/logs/${requestId}/`, params);
 
 /**
  *  根据 request_id 查询日志
  */
-export const getLogsInfo = (requestId: string) => http.get(`${path}/logs/query/${requestId}/`);
+export const getLogsInfo = (requestId: string) =>
+  http.get<IRequestLogOutput>(`${path}/logs/query/${requestId}/`);
 
 /**
  *  获取stage数据
  * @param gatewayId 网关id
  */
-export const fetchApigwStages = (gatewayId: number, params: any) => http.get(`${path}/${gatewayId}/stages/`, params);
+export const fetchApigwStages = (gatewayId: number, params: IGatewaysStagesListQuery = {}) =>
+  http.get<IStageListOutput[]>(`${path}/${gatewayId}/stages/`, params);

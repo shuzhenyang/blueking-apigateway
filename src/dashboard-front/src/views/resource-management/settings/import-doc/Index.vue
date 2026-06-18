@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -106,6 +106,8 @@
             :custom-request="handleReq"
             class="upload-cls"
             accept=".yaml,.json,.yml"
+            :size="uploadMaxSize"
+            @error="handleUploadError"
           >
             <template #default>
               <div>
@@ -144,8 +146,10 @@
           class="upload-cls"
           name="file"
           :header="{ name: 'X-CSRFToken', value: CSRFToken }"
+          :size="uploadMaxSize"
           @done="handleUploadDone"
           @progress="handleUploadSuccess"
+          @error="handleUploadError"
         >
           <template #default>
             <div>
@@ -325,7 +329,7 @@
 <script setup lang="ts">
 import { Message } from 'bkui-vue';
 import editorMonaco from '@/components/ag-editor/Index.vue';
-import { getStrFromFile } from '@/utils';
+import { getStrFromFile, messageError } from '@/utils';
 import {
   checkResourceImport,
   importResourceDoc,
@@ -334,7 +338,7 @@ import {
 import { RESOURCE_IMPORT_EXAMPLE } from '@/constants';
 import { useSelection } from '@/hooks';
 import TmplExampleSideslider from '../components/TmplExampleSideslider.vue';
-import { type UploadFile } from 'bkui-vue/lib/upload/upload.type.d.ts';
+import type { UploadFile } from 'bkui-vue/lib/upload/upload.type';
 import Cookie from 'js-cookie';
 import { useEnv } from '@/stores';
 
@@ -372,6 +376,9 @@ const editorText = ref<string>(RESOURCE_IMPORT_EXAMPLE.content);
 const zipFile = ref<any>('');
 const resourceEditorRef = ref<InstanceType<typeof editorMonaco>>(); // 实例化
 
+// 上传文件大小限制，单位 mb
+const uploadMaxSize = 10;
+
 const CSRFToken = computed(() => {
   const CSRF_TOKEN_KEY = envStore.env?.BK_DASHBOARD_CSRF_COOKIE_NAME || 'bk_apigw_dashboard_csrftoken';
   return Cookie.get(CSRF_TOKEN_KEY);
@@ -379,13 +386,13 @@ const CSRFToken = computed(() => {
 
 // 资源新建条数
 const createNum = computed(() => {
-  const results = deDuplication(selections.value.filter(item => !item.id), 'name');
+  const results = deDuplication(selections.value.filter((item: any) => !item.id), 'name');
   return results.length;
 });
 
 // 资源覆盖条数
 const updateNum = computed(() => {
-  const results = deDuplication(selections.value.filter(item => item.id), 'name');
+  const results = deDuplication(selections.value.filter((item: any) => item.id), 'name');
   return results.length;
 });
 
@@ -440,6 +447,12 @@ const handleUploadDone = async (fileList: IFile[]) => {
   nextTick(() => {
     selections.value = JSON.parse(JSON.stringify(checkData.value));
   });
+};
+
+const handleUploadError = (_1: any, _2: any, error: { message: string }) => {
+  if (error.message === 'invalid file size') {
+    messageError(t('文件大小超过{size}MB', { size: uploadMaxSize }));
+  }
 };
 
 // 下一步需要检查数据

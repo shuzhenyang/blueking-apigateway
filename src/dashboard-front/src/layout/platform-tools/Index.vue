@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -38,7 +38,7 @@
             >
               <template #icon>
                 <AgIcon
-                  :name="menu.icon"
+                  :name="menu.icon || ''"
                   size="18"
                 />
               </template>
@@ -72,17 +72,8 @@
 
 <script setup lang="ts">
 import { useEnv, useFeatureFlag } from '@/stores';
+import type { IMenu } from '@/types/common';
 import AgIcon from '@/components/ag-icon/Index.vue';
-
-interface IMenu {
-  name: string
-  title: string
-  icon?: string
-  enabled?: boolean
-  children?: IMenu[]
-  // 是否在可编程网关中隐藏，默认 false
-  hideInProgrammable?: boolean
-}
 
 const { t } = useI18n();
 const route = useRoute();
@@ -92,12 +83,21 @@ const featureFlagStore = useFeatureFlag();
 
 const collapse = ref(true);
 const activeMenuKey = ref('');
-const platformToolsMenu: IMenu[] = [
+// 页面header名
+const headerTitle = ref('');
+
+const platformToolsMenu = computed<IMenu[]>(() => [
   {
     name: 'PlatformToolsToolbox',
     title: t('工具箱'),
     icon: 'gongjuxiang',
     enabled: true,
+  },
+  {
+    name: 'PlatformToolsCLI',
+    title: t('CLI 工具'),
+    icon: 'cli',
+    enabled: featureFlagStore.flags.ENABLE_BK_CLI,
   },
   {
     name: 'PlatformToolsAutomatedGateway',
@@ -117,10 +117,9 @@ const platformToolsMenu: IMenu[] = [
     icon: 'apigateway-logo',
     enabled: envStore.env.EDITION === 'te',
   },
-];
-const openedKeys = platformToolsMenu.map(e => e.name);
-// 页面header名
-const headerTitle = ref('');
+]);
+
+const openedKeys = computed(() => platformToolsMenu.value.map((e: IMenu) => e.name));
 
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
 
@@ -138,7 +137,7 @@ const routerViewWrapperClass = computed(() => {
 // 监听当前路由
 watch(
   () => route.meta,
-  (meta) => {
+  (meta: typeof route.meta) => {
     activeMenuKey.value = meta.matchRoute as string;
     headerTitle.value = meta.title as string;
   },
@@ -311,10 +310,11 @@ const handleBack = () => {
       .default-header-view {
         height: calc(100vh - 105px);
         overflow: auto;
+        scrollbar-gutter: stable;
 
         &.custom-header-view {
-          margin-top: 52px;
           height: 100%;
+          margin-top: 52px;
           overflow: auto;
         }
 

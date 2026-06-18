@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -22,7 +22,7 @@ from django.conf import settings
 from elasticsearch_dsl import Search
 from elasticsearch_dsl.aggs import A
 
-from apigateway.service.es.clients import BKLogESClient
+from apigateway.service.es import BKLogESClient
 from apigateway.utils import time as time_utils
 from apigateway.utils.time import SmartTimeRange
 
@@ -48,6 +48,7 @@ class LogSearchClient:
         time_start: Optional[int] = None,
         time_end: Optional[int] = None,
         time_range: Optional[int] = None,
+        output_fields: Optional[List[str]] = None,
     ):
         self._gateway_id = gateway_id
         self._stage_name = stage_name
@@ -57,6 +58,7 @@ class LogSearchClient:
         self._query_string = query
         self._include_conditions = include_conditions
         self._exclude_conditions = exclude_conditions
+        self._output_fields = output_fields or ES_OUTPUT_FIELDS
 
         self._smart_time_range: Optional[SmartTimeRange] = None
 
@@ -145,7 +147,7 @@ class LogSearchClient:
 
     def _build_logs_search(self, offset: int = 0, limit: Optional[int] = None, order: Optional[bool] = None) -> Search:
         s = self._build_base_search(order=order)
-        s = s.source(fields=ES_OUTPUT_FIELDS)
+        s = s.source(fields=self._output_fields)
         if limit is None:
             return s[offset:]
         return s[offset : offset + limit]
@@ -186,5 +188,19 @@ class LogSearchClient:
 
     def _to_log_display(self, hit: Dict) -> Dict:
         log = hit["_source"]
-        log["timestamp"] = time_utils.convert_epoch_millisecond_to_second(hit["sort"][0])
+        # 从 ES 排序结果获取时间戳（排序字段为 dtEventTimeStamp）
+        # hit["sort"] 在 order=True 时总是存在
+        sort = hit.get("sort")
+        logger.info(
+            "LogSearchClient._to_log_display: hit_id=%s, sort=%s, is_list=%s, len=%s",
+            hit.get("_id"),
+            sort,
+            isinstance(sort, list),
+            len(sort) if isinstance(sort, list) else "N/A",
+        )
+        if sort and len(sort) > 0:
+            log["timestamp"] = time_utils.convert_epoch_millisecond_to_second(sort[0])
+            logger.info("LogSearchClient._to_log_display: added timestamp=%s to log", log.get("timestamp"))
+        else:
+            logger.warning("LogSearchClient._to_log_display: sort field is missing or empty!")
         return log

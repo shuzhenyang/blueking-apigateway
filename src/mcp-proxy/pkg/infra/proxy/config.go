@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -19,7 +19,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -28,24 +27,24 @@ import (
 
 // MCPServerConfig ...
 type MCPServerConfig struct {
-	Name              string        `json:"name"`  // 唯一标识name，可以是：gateway_name+stage或者其他id
-	Title             string        `json:"title"` // 标题
-	ResourceVersionID int           `json:"resource_version_id"`
-	Tools             []*ToolConfig `json:"tools"`
-	ProtocolType      string        `json:"protocol_type"` // 协议类型: sse 或 streamable_http
+	Name               string        `json:"name"`  // 唯一标识name，可以是：gateway_name+stage或者其他id
+	Title              string        `json:"title"` // 标题
+	ResourceVersionID  int           `json:"resource_version_id"`
+	Tools              []*ToolConfig `json:"tools"`
+	ProtocolType       string        `json:"protocol_type"`        // 协议类型: sse 或 streamable_http
+	RawResponseEnabled bool          `json:"raw_response_enabled"` // 是否返回原始响应，开启后直接返回 API 响应结果，不添加 request_id 等额外信息
 }
 
 // ToolConfig ...
 type ToolConfig struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description"`
-	Method       string            `json:"method"`
-	Host         string            `json:"host"`
-	BasePath     string            `json:"base_path"`
-	Schema       string            `json:"schema"`
-	Url          string            `json:"url"`
-	ParamSchema  jsonschema.Schema `json:"param_schema"`
-	OutputSchema json.RawMessage   `json:"output_schema"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Method      string            `json:"method"`
+	Host        string            `json:"host"`
+	BasePath    string            `json:"base_path"`
+	Schema      string            `json:"schema"`
+	Url         string            `json:"url"`
+	ParamSchema jsonschema.Schema `json:"param_schema"`
 }
 
 // String ...

@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -147,10 +147,6 @@ class BackendHandler:
                     break
 
         return list(stage_names)
-
-    @staticmethod
-    def get_id_to_instance(gateway_id: int) -> Dict[int, Backend]:
-        return {backend.id: backend for backend in Backend.objects.filter(gateway_id=gateway_id)}
 
     @staticmethod
     def get_backend_configs_by_stage(gateway_id, stage_id) -> Dict[int, BackendConfig]:

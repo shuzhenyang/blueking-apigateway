@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -45,6 +45,8 @@ import getMonitorAlarmRoutes from '@/views/monitor-alarm/routes';
 import getMCPServerRoutes from '@/views/mcp-server/route';
 // API 文档
 import getAPIDocsRoutes from '@/views/api-docs/route';
+// 个人工作台
+import getPersonalWorkbench from '@/views/personal-workbench/routes';
 
 function props(route: RouteLocationNormalized) {
   const { id } = route.params;
@@ -99,6 +101,14 @@ const routes: RouteRecordRaw[] = [
     redirect: { name: 'ApiDocs' },
     props,
     children: [...getAPIDocsRoutes()],
+  },
+  {
+    path: '/personal-workbench',
+    name: 'PersonalWorkbench',
+    component: () => import('@/layout/personal-workbench/Index.vue'),
+    props,
+    redirect: '/personal-workbench/my-apply',
+    children: [...getPersonalWorkbench()],
   },
 ];
 

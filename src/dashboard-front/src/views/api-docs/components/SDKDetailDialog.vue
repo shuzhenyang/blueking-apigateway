@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -27,9 +27,9 @@
   >
     <main class="dialog-content">
       <div class="dialog-main">
-        <LangSelector
+        <SdkLanguageSelector
           v-model="language"
-          :sdk-languages="sdks.map(item => item.language)"
+          :sdk-languages="sdks.map((item: ISdk) => item.language).filter((l: any): l is string => !!l)"
           :lang-list="languages"
           :maintainers="maintainers"
         />
@@ -44,18 +44,15 @@
 </template>
 
 <script setup lang="ts">
-import LangSelector from './LangSelector.vue';
-import type {
-  ISdk,
-  LanguageType,
-} from '../types.d.ts';
+import SdkLanguageSelector from '@/components/sdk-language-selector/Index.vue';
+import type { ISdk } from '../types.d.ts';
 import SdkDetail from './SDKDetail.vue';
 import { useI18n } from 'vue-i18n';
 
 interface IProps {
   sdks?: ISdk[]
   targetName?: string
-  languages: LanguageType[] | undefined
+  languages: string[] | undefined
   maintainers?: string[]
 }
 
@@ -72,10 +69,10 @@ const {
 
 const { t } = useI18n();
 
-const language = ref<LanguageType>('python');
+const language = ref('python');
 
 const curSdk = computed(() => {
-  return sdks.find(item => item.language === language.value) ?? null;
+  return sdks.find((item: ISdk) => item.language === language.value) ?? null;
 });
 
 const title = computed(() => {

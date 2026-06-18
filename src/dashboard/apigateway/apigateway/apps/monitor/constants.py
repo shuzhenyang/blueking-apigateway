@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -60,6 +60,16 @@ class NoticeWayEnum(StructuredEnum):
     WECHAT = EnumField("wechat")
     IM = EnumField("im")
     MAIL = EnumField("mail")
+
+
+class AlarmFilterTypeEnum(StructuredEnum):
+    BLACK_LIST = EnumField("black_list", label=_("黑名单"))
+    WHITE_LIST = EnumField("white_list", label=_("白名单"))
+
+
+class AlarmFilterMatchMethodEnum(StructuredEnum):
+    CONTAINS = EnumField("contains", label=_("包含"))
+    REGEX_MATCH = EnumField("regex_match", label=_("正则匹配"))
 
 
 class NoticeRoleEnum(StructuredEnum):

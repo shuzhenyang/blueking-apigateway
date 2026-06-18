@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -64,7 +64,6 @@ func NewRouter(cfg *config.Config) *gin.Engine {
 	// healthz
 	router.GET("/healthz", func(c *gin.Context) {
 		for _, dbConfig := range cfg.DatabaseMap {
-			dbConfig := dbConfig
 			// reset the options for check
 			dbConfig.MaxIdleConns = 1
 			dbConfig.MaxOpenConns = 1

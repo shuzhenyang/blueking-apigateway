@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -46,3 +46,13 @@ export * from './use-table-setting';
 export * from './use-sticky-bottom';
 // 操作锁
 export * from './use-operation-lock';
+// Mcp配置自适应5个tab宽度
+export * from './use-mcp-config-divide-ratio';
+// Mcp 可观测仪表盘
+export * from './use-observability-dashboard';
+// Mcp 批量复制配置
+export * from './use-mcp-batch-copy-config';
+// 个人工作台
+export * from './use-personal-workbench';
+// Mcp权限管理和已授权应用
+export * from './use-mcp-permission';

@@ -1,3 +1,95 @@
+<!-- 2026-05-15 -->
+# V1.22.0 Release Log
+
+### Features
+
+- Gateway data plane split, support unified control plane management of multiple data planes
+- Add bk-cli
+- MCP Server: add observability page (logs and dashboards)
+- MCP Server authentication adds bkoauth2 support
+- Email push: gateways with no access in the past year are offline
+- Resource version: support delete/batch delete
+- Online debugging: support debugging multiple interfaces at the same time
+- Plugin: support traffic coloring
+- Alarm policy supports keyword filtering
+
+### Enhancements
+
+- Permission approval: refresh list after approval operation
+- Import resource document file limit increased to 10M and added reminder
+- Documentation center: support hiding go sdk
+- Version comparison: performance optimization for large-scale resource comparison
+- Plugin: frequency control configuration supports cloning
+- Optimization: programming gateway deployment adds version verification to avoid user non-standard process error operation
+- MCP Server supports batch copy configuration
+
+### Bug Fixes
+
+- Fix: resource editing - verify and view address rendering error
+- Fix: [frontend] icon file not cached causing new icons to not display properly
+- Fix: [frontend] alarm record details cannot be displayed properly
+- Fix: version resource comparison, slide disappeared and cannot be operated again
+- Fix: [backend] mcp-proxy restart
+
+### Other
+
+- Security ticket processing, upgrade some dependency libraries
+- Refactor: remove frontend plugin dynamic form interface and all components
+- Upgrade: all go modules upgraded to go1.25
+- Add frontend automated testing
+
+---
+
+<!-- 2026-03-10 -->
+# V1.21.0 Release Log
+
+### Features
+
+- MCP Server supports OAuth2 authorization
+- Backend service supports health check (active/passive)
+- Resource parameter configuration supports JSON generation
+- Navigation bar: add BlueKing micro-gateway bk-apisix entry
+- Plugin configuration: add documentation for all plugins
+- Plugins: support categorization
+- Gateway list: display gateway operational status
+- Gateway: support marking as deprecated
+
+### Enhancements
+
+- Plugin configuration: all plugins use native forms
+- Gateway resources: path supports exclamation mark configuration
+- Left navigation menu optimization
+- Resource comparison: support Chinese/English document update time comparison
+- Online debugging: support call history backfill retry
+- Pipeline logs: add upstream 502 log recording
+- Plugin: bk-access-token-source supports fallback
+- MCP Server: tool configuration supports rename
+- MCP Server: configuration guide distinguishes different clients with one-click installation entry
+- MCP Server: MCP market adds categorization/search/sorting
+- MCP Server: permission approval entry optimization and PaaS application adds approval URL
+
+### Bug Fixes
+
+- Online debugging: request query parameter invalidation issue
+- Run data - dashboard: ingress/egress is empty
+- Run data - statistical report: inaccurate statistics / slow queries
+- Component API documentation: mouse cannot scroll down
+- Left menu: switching gateway resource version page not refreshed
+- Basic information: enable/disable gateway left dropdown menu status not updated
+- Run data: unified style for all time selection components
+- Pipeline logs: add loading effect when clicking download
+- Documentation center: add tooltip for long interface names
+- Programmable gateway: release history page display optimization
+- New environment: form validation error not reset when re-entering
+- Resource management: resource request/response parameter validation optimization
+- Release records: jump to resource version not positioning to target version
+- Create gateway: add duplicate name check
+- Resource management: frontend/backend routes support exclamation mark configuration
+- Gateway deletion did not fully clean associated data
+- Gateway list: disabled gateway operation changed to delete gateway
+
+---
+
 <!-- 2025-12-02 -->
 # V1.20.0 Release Log
 

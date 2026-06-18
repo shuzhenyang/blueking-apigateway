@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -75,6 +75,7 @@ class AppPermissionApplyFilter(filters.FilterSet):
 class AppGatewayPermissionFilter(filters.FilterSet):
     bk_app_code = filters.CharFilter()
     keyword = filters.CharFilter(method="query_filter")
+    grant_type = filters.ChoiceFilter(choices=GrantTypeEnum.get_choices())
     order_by = filters.OrderingFilter(
         choices=[(field, field) for field in ["bk_app_code", "-bk_app_code", "expires", "-expires"]]
     )
@@ -84,6 +85,7 @@ class AppGatewayPermissionFilter(filters.FilterSet):
         fields = [
             "bk_app_code",
             "keyword",
+            "grant_type",
             "order_by",
         ]
 

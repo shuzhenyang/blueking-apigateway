@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -54,6 +54,8 @@ COMMENTS = (
     _("创建网关"),
     _("更新网关"),
     _("删除网关"),
+    _("启用网关"),
+    _("停用网关"),
     _("创建网关标签"),
     _("更新网关标签"),
     _("删除网关标签"),
@@ -84,6 +86,8 @@ COMMENTS = (
     # extras
     _("环境状态变更"),
     _("更新环境变量"),
+    _("发布环境"),
+    _("下架环境"),
     _("批量更新资源"),
     _("批量删除资源"),
     _("创建环境后端配置"),

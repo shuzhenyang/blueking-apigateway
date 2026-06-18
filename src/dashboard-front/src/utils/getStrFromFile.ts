@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -21,7 +21,7 @@
  * @param {Object} file file文件对象
  */
 export const getStrFromFile = (file: any) => {
-  let resolveFn = (value: unknown) => {
+  let resolveFn = (_: unknown) => {
   };
   const PromiseFunc = new Promise(resolve => resolveFn = resolve);
   // ▼ new 一个 FileReader

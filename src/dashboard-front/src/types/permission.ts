@@ -1,7 +1,7 @@
 /*
  * TencentBlueKing is pleased to support the open source community by making
  * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
- * Copyright (C) 2025 Tencent. All rights reserved.
+ * Copyright (C) Tencent. All rights reserved.
  * Licensed under the MIT License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
  *
@@ -26,6 +26,8 @@ export interface IApprovalListItem {
   status: string
   comment: string
   grant_dimension_display: string
+  itsm_ticket_url: string
+  itsm_ticket_id: string
   expire_days_display: number
   resourceList: any[]
   resource_ids: any[]
@@ -44,13 +46,7 @@ export interface IPermission {
   grant_type: string // 授权类型
   renewable: boolean // 是否可续期
   detail?: unknown[] // 详细信息（可选）
-}
-
-export interface IFilterValues {
-  id: number | string // 过滤器ID
-  name: string // 过滤器名称
-  values: IFilterValue[] // 过滤器值数组
-  type?: string // 过滤器类型（可选）
+  handled_by?: string // 操作人
 }
 
 export interface IResource {

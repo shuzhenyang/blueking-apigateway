@@ -2,7 +2,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -23,7 +23,7 @@ from rest_framework import serializers
 
 from apigateway.biz.constants import SEMVER_PATTERN
 from apigateway.biz.stage import StageHandler
-from apigateway.biz.validators import ResourceVersionValidator
+from apigateway.biz.validators import ProgrammableGatewayVersionValidator, ResourceVersionValidator
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.core.models import ResourceVersion
 
@@ -61,7 +61,10 @@ class ResourceVersionCreateV1InputSLZ(serializers.Serializer):
     comment = serializers.CharField(allow_blank=True, allow_null=True, max_length=512, required=False)
 
     class Meta:
-        validators = [ResourceVersionValidator()]
+        validators = [
+            ResourceVersionValidator(),
+            ProgrammableGatewayVersionValidator(),
+        ]
 
 
 class ResourceVersionQueryV1InputSLZ(serializers.Serializer):

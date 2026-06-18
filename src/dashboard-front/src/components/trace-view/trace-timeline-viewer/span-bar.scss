@@ -1,0 +1,60 @@
+.span-bar-wrapper {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow: visible;
+  background-color: #ffffff;
+  box-sizing: border-box;
+}
+
+.span-bar {
+  position: absolute;
+  height: 12px;
+  border-radius: 2px;
+  z-index: 3;
+  overflow: visible;
+  will-change: left, width;
+
+  &.is-infer {
+    background-color: #ffffff !important;
+    background-image: linear-gradient(135deg, #dddfe3 35%, transparent 35%, transparent 50%, #dddfe3 50%, #dddfe3 85%, transparent 85%, transparent);
+    background-size: 4px 4px;
+  }
+
+  .span-duration {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: #979ba5;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 4;
+    padding: 0 2px;
+
+    &.right {
+      left: 100%;
+      margin-left: 4px;
+    }
+
+    /* 左侧文字：反向排列 */
+    &.left {
+      left: auto;
+      right: auto;
+      transform: translateY(-50%) translateX(-100%);
+      margin-right: 4px;
+      flex-direction: row-reverse;
+    }
+
+    /* 铺满宽度：文字自适应位于线条内 */
+    &.inside {
+      padding: 0 4px;
+      color: #313238;
+      flex-direction: row-reverse;
+    }
+  }
+}

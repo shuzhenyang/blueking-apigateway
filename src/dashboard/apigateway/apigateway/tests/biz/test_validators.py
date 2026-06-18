@@ -1,7 +1,7 @@
 #
 # TencentBlueKing is pleased to support the open source community by making
 # 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
-# Copyright (C) 2025 Tencent. All rights reserved.
+# Copyright (C) Tencent. All rights reserved.
 # Licensed under the MIT License (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
 #
@@ -28,8 +28,8 @@ from apigateway.biz.validators import (
     BKAppCodeListValidator,
     BKAppCodeValidator,
     MaxCountPerGatewayValidator,
-    PublishValidator,
-    ReleaseValidationError,
+    ProgrammableGatewayStageNameValidator,
+    ProgrammableGatewayVersionValidator,
     ResourceIDValidator,
     ResourceVersionValidator,
     SchemeHostInputValidator,
@@ -38,8 +38,9 @@ from apigateway.biz.validators import (
 )
 from apigateway.common.constants import CallSourceTypeEnum
 from apigateway.common.fields import CurrentGatewayDefault
-from apigateway.core.constants import BackendTypeEnum, GatewayStatusEnum
+from apigateway.core.constants import BackendTypeEnum, GatewayKindEnum, GatewayStatusEnum
 from apigateway.core.models import Backend, BackendConfig, Gateway, Release, Resource, ResourceVersion, Stage
+from apigateway.service.release import PublishValidator, ReleaseValidationError
 from apigateway.tests.utils.testing import create_request
 
 pytestmark = pytest.mark.django_db
@@ -294,7 +295,7 @@ class TestPublishValidator:
         self, mocker, fake_gateway, fake_stage, fake_resource_version, vars, mock_used_stage_vars, will_error
     ):
         mocker.patch(
-            "apigateway.biz.validators.ResourceVersionHandler.get_used_stage_vars",
+            "apigateway.service.release.validation.get_used_stage_vars",
             return_value=mock_used_stage_vars,
         )
 
@@ -403,16 +404,52 @@ class TestPublishValidator:
         )
 
         publish_validator = PublishValidator(fake_gateway, fake_stage, resource_version)
-        publish_validator._validate_stage_backends()
+        assert publish_validator._validate_stage_backends() is None
 
     def test_validate_stage_backends_without_default_backend(
         self, fake_stage, fake_backend, fake_default_empty_backend, fake_resource, fake_gateway
     ):
         """
-        测试编辑区资源没有绑定default backend（host为空）的情况
+        测试编辑区资源没有绑定 default backend 时，不校验 default backend 配置
         """
         publish_validator = PublishValidator(fake_gateway, fake_stage, None)
-        with pytest.raises(Exception):
+        assert publish_validator._validate_stage_backends() is None
+
+    def test_validate_stage_backends_missing_used_backend_config(self, fake_stage, fake_gateway):
+        """
+        测试资源绑定的后端服务在当前环境缺少配置时，发布校验失败
+        """
+        backend = G(
+            Backend,
+            gateway=fake_gateway,
+            type="http",
+            name="backend-without-config",
+            description="test",
+        )
+        resource_version = G(
+            ResourceVersion,
+            gateway=fake_gateway,
+            version="1",
+            _data=json.dumps(
+                [
+                    {
+                        "id": 1,
+                        "name": "approval_add_workitems",
+                        "proxy": {
+                            "id": 28,
+                            "type": "http",
+                            "backend_id": backend.id,
+                            "config": json.dumps(
+                                {"method": "ANY", "path": "/api/v2/", "match_subpath": False, "timeout": 0}
+                            ),
+                        },
+                    }
+                ]
+            ),
+        )
+
+        publish_validator = PublishValidator(fake_gateway, fake_stage, resource_version)
+        with pytest.raises(ReleaseValidationError):
             publish_validator._validate_stage_backends()
 
 
@@ -825,7 +862,7 @@ class TestStageVarsValidator:
                 },
             )
             mocker.patch(
-                "apigateway.biz.validators.ResourceVersionHandler.get_used_stage_vars",
+                "apigateway.service.release.validation.get_used_stage_vars",
                 return_value=test["mock_used_stage_vars"],
             )
 
@@ -982,3 +1019,108 @@ class TestUpstreamValidator:
             # 应该通过验证
             result = validator(attrs, serializer)
             assert result is None
+
+
+class TestProgrammableGatewayVersionValidator:
+    class VersionSLZ(serializers.Serializer):
+        gateway = serializers.HiddenField(default=CurrentGatewayDefault())
+        version = serializers.CharField()
+
+        class Meta:
+            validators = [ProgrammableGatewayVersionValidator()]
+
+    @pytest.mark.parametrize(
+        "version, will_error",
+        [
+            ("1.0.0+prod", False),
+            ("1.8.5+stag", False),
+            ("0.0.1+prod", False),
+            ("10.20.30+stag", False),
+            ("1.0.0", True),
+            ("1.0.0+dev", True),
+            ("1.0.0+test", True),
+            ("1.0.0+stage", True),
+            ("1.0.0+staging", True),
+            ("1.0.0+production", True),
+            ("1.0.0-beta+prod", True),
+            ("abc+prod", True),
+            ("1.0+prod", True),
+        ],
+    )
+    def test_validate_programmable_gateway(self, fake_gateway, version, will_error):
+        fake_gateway.kind = GatewayKindEnum.PROGRAMMABLE.value
+        fake_gateway.save()
+
+        slz = self.VersionSLZ(data={"version": version}, context={"gateway": fake_gateway})
+        slz.is_valid()
+        if will_error:
+            assert slz.errors
+        else:
+            assert not slz.errors
+
+    @pytest.mark.parametrize(
+        "version",
+        [
+            "1.0.0",
+            "1.0.0+prod",
+            "1.0.0+dev",
+            "2.0.0-beta",
+        ],
+    )
+    def test_skip_for_normal_gateway(self, fake_gateway, version):
+        fake_gateway.kind = GatewayKindEnum.NORMAL.value
+        fake_gateway.save()
+
+        slz = self.VersionSLZ(data={"version": version}, context={"gateway": fake_gateway})
+        slz.is_valid()
+        assert not slz.errors
+
+
+class TestProgrammableGatewayStageNameValidator:
+    class StageSLZ(serializers.Serializer):
+        gateway = serializers.HiddenField(default=CurrentGatewayDefault())
+        name = serializers.CharField()
+
+        class Meta:
+            validators = [ProgrammableGatewayStageNameValidator()]
+
+    @pytest.mark.parametrize(
+        "name, will_error",
+        [
+            ("stage", False),
+            ("prod", False),
+            ("dev", True),
+            ("test", True),
+            ("staging", True),
+            ("production", True),
+            ("stag", True),
+        ],
+    )
+    def test_validate_programmable_gateway(self, fake_gateway, name, will_error):
+        fake_gateway.kind = GatewayKindEnum.PROGRAMMABLE.value
+        fake_gateway.save()
+
+        slz = self.StageSLZ(data={"name": name}, context={"gateway": fake_gateway})
+        slz.is_valid()
+        if will_error:
+            assert slz.errors
+        else:
+            assert not slz.errors
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "stage",
+            "prod",
+            "dev",
+            "test",
+            "any-name",
+        ],
+    )
+    def test_skip_for_normal_gateway(self, fake_gateway, name):
+        fake_gateway.kind = GatewayKindEnum.NORMAL.value
+        fake_gateway.save()
+
+        slz = self.StageSLZ(data={"name": name}, context={"gateway": fake_gateway})
+        slz.is_valid()
+        assert not slz.errors
