@@ -21,11 +21,17 @@ package mcp_test
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/TencentBlueKing/gopkg/cache"
+	"github.com/TencentBlueKing/gopkg/cache/memory"
 	"github.com/getkin/kin-openapi/openapi3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"gorm.io/gorm"
 
+	"mcp_proxy/pkg/cacheimpls"
+	"mcp_proxy/pkg/config"
 	"mcp_proxy/pkg/constant"
 	"mcp_proxy/pkg/entity/model"
 	"mcp_proxy/pkg/infra/proxy"
@@ -61,6 +67,51 @@ var _ = Describe("MCP Load Functions", func() {
 			},
 		}
 		openapiSpec.Paths.Set("/users", pathItem)
+	})
+
+	Describe("openapi spec loading", func() {
+		It("should load OpenAPI 3.1 schema with numeric exclusive minimum", func() {
+			spec, err := mcppkg.LoadOpenAPISpecForTest(`{
+					"openapi": "3.1.0",
+					"info": {"title": "Test API", "version": "1.0.0"},
+					"servers": [{"url": "https://api.example.com"}],
+					"paths": {
+						"/qrcode/json": {
+							"post": {
+								"operationId": "qrcode_post_qrcode_json_post",
+								"requestBody": {
+									"required": true,
+									"content": {
+										"application/json": {
+											"schema": {
+												"type": "object",
+												"properties": {
+													"box_size": {
+														"type": "integer",
+														"exclusiveMinimum": 0
+													}
+												}
+											}
+										}
+									}
+								},
+								"responses": {
+									"200": {
+										"description": "OK"
+									}
+								}
+							}
+						}
+					}
+				}`)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mcppkg.GetOpenAPISpecVersionForTest(spec)).To(Equal("3.1.0"))
+		})
+
+		It("should report unknown version for nil spec", func() {
+			Expect(mcppkg.GetOpenAPISpecVersionForTest(nil)).To(Equal("unknown"))
+		})
 	})
 
 	Describe("checkNeedLoad", func() {
@@ -182,6 +233,23 @@ var _ = Describe("MCP Load Functions", func() {
 		})
 	})
 
+	Describe("reload panic reporting", func() {
+		It("should include stack and sentry context", func() {
+			stack, tags, extra, err := mcppkg.BuildReloadPanicReportForTest(
+				"prefetch",
+				"bad-server",
+				"boom",
+			)
+
+			Expect(err).To(MatchError(ContainSubstring("prefetch panic: boom")))
+			Expect(stack).To(ContainSubstring("goroutine"))
+			Expect(tags).To(HaveKeyWithValue("mcp_server_name", "bad-server"))
+			Expect(tags).To(HaveKeyWithValue("phase", "prefetch"))
+			Expect(extra).To(HaveKeyWithValue("panic", "boom"))
+			Expect(extra).To(HaveKeyWithValue("stacktrace", stack))
+		})
+	})
+
 	Describe("cleanupAllMCPServers", func() {
 		It("should remove all MCP servers from proxy", func() {
 			// Add two servers
@@ -286,6 +354,21 @@ var _ = Describe("MCP Load Functions", func() {
 		})
 	})
 
+	Describe("prefetchServerConfigs", func() {
+		It("should record panic as a server load error", func() {
+			previousMaxConcurrentPrefetch := config.G.McpServer.MaxConcurrentPrefetch
+			config.G.McpServer.MaxConcurrentPrefetch = 1
+			DeferCleanup(func() {
+				config.G.McpServer.MaxConcurrentPrefetch = previousMaxConcurrentPrefetch
+			})
+
+			results := mcppkg.PrefetchServerConfigsForTest(ctx, mcpProxy, []*model.MCPServer{nil})
+
+			Expect(results).To(HaveLen(1))
+			Expect(mcppkg.GetServerLoadResultError(results[0])).To(HaveOccurred())
+		})
+	})
+
 	Describe("applyServerChanges", func() {
 		It("should count errors for failed results", func() {
 			r := mcppkg.NewServerLoadResult(
@@ -356,6 +439,256 @@ var _ = Describe("MCP Load Functions", func() {
 			_, _, _, errCount := mcppkg.GetLoadStatsValues(stats)
 
 			Expect(errCount).To(Equal(3))
+		})
+
+		It("should count nil-server apply results as errors and continue later servers", func() {
+			previousPromptCache := cacheimpls.GetMCPServerPromptCache()
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
+				return nil, gorm.ErrRecordNotFound
+			}
+			cacheimpls.SetMCPServerPromptCache(
+				memory.NewCache("mockPromptCache", retrieveFunc, time.Minute, nil),
+			)
+			DeferCleanup(func() {
+				cacheimpls.SetMCPServerPromptCache(previousPromptCache)
+			})
+
+			goodSpec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Good API", Version: "1.0.0"},
+				Servers: []*openapi3.Server{{URL: "https://good.example.com"}},
+				Paths:   &openapi3.Paths{},
+			}
+			goodSpec.Paths.Set("/good", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "goodTool",
+					Responses:   &openapi3.Responses{},
+				},
+			})
+
+			results := []*mcppkg.ServerLoadResult{
+				mcppkg.NewServerLoadResult(
+					nil,
+					nil,
+					nil,
+					errors.New("prefetch panic"),
+					false,
+					false,
+					false,
+				),
+				mcppkg.NewServerLoadResult(
+					&model.MCPServer{
+						ID:            2,
+						Name:          "good-server",
+						ResourceNames: model.ArrayString{"goodTool"},
+						ProtocolType:  constant.MCPServerProtocolTypeSSE,
+					},
+					nil,
+					mcppkg.NewConfigWithOpenAPISpec(1, goodSpec),
+					nil,
+					false,
+					true,
+					true,
+				),
+			}
+
+			var stats *mcppkg.LoadStats
+			var activeServers map[string]struct{}
+			Expect(func() {
+				stats, activeServers = mcppkg.ApplyServerChangesForTest(ctx, mcpProxy, results)
+			}).NotTo(Panic())
+
+			added, updated, skipped, errCount := mcppkg.GetLoadStatsValues(stats)
+			Expect(added).To(Equal(1))
+			Expect(updated).To(Equal(0))
+			Expect(skipped).To(Equal(0))
+			Expect(errCount).To(Equal(1))
+			Expect(activeServers).To(HaveKey("good-server"))
+			Expect(mcpProxy.IsMCPServerExist("good-server")).To(BeTrue())
+		})
+
+		It("should keep existing tools when an update panics before applying the new spec", func() {
+			initialSpec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Initial API", Version: "1.0.0"},
+				Servers: []*openapi3.Server{{URL: "https://initial.example.com"}},
+				Paths:   &openapi3.Paths{},
+			}
+			initialSpec.Paths.Set("/keep", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "keepTool",
+					Responses:   &openapi3.Responses{},
+				},
+			})
+			initialSpec.Paths.Set("/remove", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "removeTool",
+					Responses:   &openapi3.Responses{},
+				},
+			})
+			err := mcpProxy.AddMCPServerFromOpenAPISpec(
+				"bad-server",
+				1,
+				initialSpec,
+				[]string{"keepTool", "removeTool"},
+				nil,
+				constant.MCPServerProtocolTypeSSE,
+				false,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			badSpec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Bad API", Version: "1.0.0"},
+				Paths:   &openapi3.Paths{},
+			}
+			badSpec.Paths.Set("/keep", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "keepTool",
+					Responses:   &openapi3.Responses{},
+				},
+			})
+			results := []*mcppkg.ServerLoadResult{
+				mcppkg.NewServerLoadResult(
+					&model.MCPServer{
+						ID:            1,
+						Name:          "bad-server",
+						ResourceNames: model.ArrayString{"keepTool"},
+						ProtocolType:  constant.MCPServerProtocolTypeSSE,
+					},
+					nil,
+					mcppkg.NewConfigWithOpenAPISpec(2, badSpec),
+					nil,
+					false,
+					false,
+					true,
+				),
+			}
+
+			var stats *mcppkg.LoadStats
+			Expect(func() {
+				stats, _ = mcppkg.ApplyServerChangesForTest(ctx, mcpProxy, results)
+			}).NotTo(Panic())
+
+			_, updated, skipped, errCount := mcppkg.GetLoadStatsValues(stats)
+			Expect(updated).To(Equal(0))
+			Expect(skipped).To(Equal(0))
+			Expect(errCount).To(Equal(1))
+			Expect(
+				mcpProxy.GetMCPServer("bad-server").GetTools(),
+			).To(
+				ContainElements("keepTool", "removeTool"),
+			)
+		})
+
+		It("should count update failures as errors", func() {
+			results := []*mcppkg.ServerLoadResult{
+				mcppkg.NewServerLoadResult(
+					&model.MCPServer{
+						ID:           1,
+						Name:         "missing-server",
+						ProtocolType: constant.MCPServerProtocolTypeSSE,
+					},
+					nil,
+					nil,
+					nil,
+					false,
+					false,
+					true,
+				),
+			}
+
+			stats, _ := mcppkg.ApplyServerChangesForTest(ctx, mcpProxy, results)
+
+			added, updated, skipped, errCount := mcppkg.GetLoadStatsValues(stats)
+			Expect(added).To(Equal(0))
+			Expect(updated).To(Equal(0))
+			Expect(skipped).To(Equal(0))
+			Expect(errCount).To(Equal(1))
+		})
+
+		It("should isolate panic from one server and continue applying later servers", func() {
+			previousPromptCache := cacheimpls.GetMCPServerPromptCache()
+			retrieveFunc := func(ctx context.Context, key cache.Key) (any, error) {
+				return nil, gorm.ErrRecordNotFound
+			}
+			cacheimpls.SetMCPServerPromptCache(
+				memory.NewCache("mockPromptCache", retrieveFunc, time.Minute, nil),
+			)
+			DeferCleanup(func() {
+				cacheimpls.SetMCPServerPromptCache(previousPromptCache)
+			})
+
+			badSpec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Bad API", Version: "1.0.0"},
+				Paths:   &openapi3.Paths{},
+			}
+			badSpec.Paths.Set("/bad", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "badTool",
+					Responses:   &openapi3.Responses{},
+				},
+			})
+
+			goodSpec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Good API", Version: "1.0.0"},
+				Servers: []*openapi3.Server{{URL: "https://good.example.com"}},
+				Paths:   &openapi3.Paths{},
+			}
+			goodSpec.Paths.Set("/good", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "goodTool",
+					Responses:   &openapi3.Responses{},
+				},
+			})
+
+			results := []*mcppkg.ServerLoadResult{
+				mcppkg.NewServerLoadResult(
+					&model.MCPServer{
+						ID:            1,
+						Name:          "bad-server",
+						ResourceNames: model.ArrayString{"badTool"},
+						ProtocolType:  constant.MCPServerProtocolTypeSSE,
+					},
+					nil,
+					mcppkg.NewConfigWithOpenAPISpec(1, badSpec),
+					nil,
+					false,
+					true,
+					true,
+				),
+				mcppkg.NewServerLoadResult(
+					&model.MCPServer{
+						ID:            2,
+						Name:          "good-server",
+						ResourceNames: model.ArrayString{"goodTool"},
+						ProtocolType:  constant.MCPServerProtocolTypeSSE,
+					},
+					nil,
+					mcppkg.NewConfigWithOpenAPISpec(1, goodSpec),
+					nil,
+					false,
+					true,
+					true,
+				),
+			}
+
+			var stats *mcppkg.LoadStats
+			var activeServers map[string]struct{}
+			Expect(func() {
+				stats, activeServers = mcppkg.ApplyServerChangesForTest(ctx, mcpProxy, results)
+			}).NotTo(Panic())
+
+			added, updated, skipped, errCount := mcppkg.GetLoadStatsValues(stats)
+			Expect(added).To(Equal(1))
+			Expect(updated).To(Equal(0))
+			Expect(skipped).To(Equal(0))
+			Expect(errCount).To(Equal(1))
+			Expect(activeServers).To(HaveKey("bad-server"))
+			Expect(activeServers).To(HaveKey("good-server"))
+			Expect(mcpProxy.IsMCPServerExist("good-server")).To(BeTrue())
 		})
 	})
 

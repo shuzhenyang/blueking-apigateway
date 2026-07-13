@@ -20,7 +20,7 @@
 import logging
 from collections import defaultdict
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from django.conf import settings
 from django.db.models import Count
@@ -33,7 +33,6 @@ from apigateway.apps.plugin.models import PluginBinding
 from apigateway.apps.support.models import ReleasedResourceDoc
 from apigateway.biz.release import ReleaseHandler
 from apigateway.biz.stage import StageHandler
-from apigateway.common.constants import CallSourceTypeEnum
 from apigateway.common.tenant.query import gateway_filter_by_maintainer_tenant_id
 from apigateway.core.constants import (
     ContextScopeTypeEnum,
@@ -53,12 +52,22 @@ from apigateway.utils.dict import deep_update
 from .app_binding import GatewayAppBindingHandler
 from .related_app import GatewayRelatedAppHandler
 
+if TYPE_CHECKING:
+    from apigateway.common.constants import CallSourceTypeEnum
+
 logger = logging.getLogger(__name__)
 
 
 # 运营状态查询时间范围，默认 180 天
 # 用于查询网关的运营状态，如果网关在最近 180 天内有请求数据，则认为网关处于活跃状态
 OPERATION_STATUS_DELTA_DAYS = 180
+
+
+def _is_official_gateway_type(gateway_type: Optional[GatewayTypeEnum]) -> bool:
+    if gateway_type is None:
+        return False
+
+    return gateway_type.value in (GatewayTypeEnum.SUPER_OFFICIAL_API.value, GatewayTypeEnum.OFFICIAL_API.value)
 
 
 class GatewayData(BaseModel):
@@ -375,6 +384,38 @@ class GatewayHandler:
         return settings.BK_API_URL_TMPL
 
     @staticmethod
+    def get_gateway_id_to_bk_api_url_tmpl(gateway_ids: List[int]) -> Dict[int, str]:
+        gateway_id_to_bk_api_url_tmpl: Dict[int, str] = {}
+        seen_gateway_ids = set()
+        bindings = (
+            GatewayDataPlaneBinding.objects.filter(gateway_id__in=gateway_ids)
+            .select_related("data_plane")
+            .order_by("gateway_id", "data_plane_id")
+        )
+        for binding in bindings:
+            if binding.gateway_id in seen_gateway_ids:
+                continue
+
+            seen_gateway_ids.add(binding.gateway_id)
+            if binding.data_plane.bk_api_url_tmpl:
+                gateway_id_to_bk_api_url_tmpl[binding.gateway_id] = binding.data_plane.bk_api_url_tmpl
+
+        result = {}
+        for gateway_id in gateway_ids:
+            bk_api_url_tmpl = gateway_id_to_bk_api_url_tmpl.get(gateway_id)
+            if bk_api_url_tmpl:
+                result[gateway_id] = bk_api_url_tmpl
+                continue
+
+            logger.warning(
+                "Gateway %s has no data plane with bk_api_url_tmpl configured, falling back to settings.BK_API_URL_TMPL",
+                gateway_id,
+            )
+            result[gateway_id] = settings.BK_API_URL_TMPL
+
+        return result
+
+    @staticmethod
     def get_gateway_domain(gateway: Gateway) -> str:
         return GatewayHandler.get_bk_api_url_tmpl(gateway.id).format(api_name=gateway.name)
 
@@ -513,6 +554,7 @@ class GatewaySaver:
             maintainers=self._gateway_data.maintainers,
             status=self._gateway_data.status,
             is_public=self._gateway_data.is_public,
+            is_official=_is_official_gateway_type(self._gateway_data.gateway_type),
             tenant_mode=self._gateway_data.tenant_mode,
             tenant_id=self._gateway_data.tenant_id,
             created_by=self.username,
@@ -578,6 +620,8 @@ class GatewaySaver:
         # 更新网关时，仅新增网关管理员，不删除，以防止删除已更新的管理员数据
         gateway.maintainers = sorted(set(self._gateway_data.maintainers + gateway.maintainers))
         gateway.is_public = self._gateway_data.is_public
+        if self._gateway_data.gateway_type is not None:
+            gateway.is_official = _is_official_gateway_type(self._gateway_data.gateway_type)
         gateway.updated_by = self.username
         gateway.save()
 

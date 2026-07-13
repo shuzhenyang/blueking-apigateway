@@ -16,6 +16,7 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import copy
 from typing import Optional
 
 from django.conf import settings
@@ -24,6 +25,7 @@ from django.utils.translation.trans_null import gettext_lazy
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
+from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.mcp_server.constants import (
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
@@ -31,6 +33,7 @@ from apigateway.apps.mcp_server.constants import (
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerCategory
 from apigateway.apps.permission.constants import FormattedGrantDimensionEnum, GrantDimensionEnum
 from apigateway.apps.support.constants import DocLanguageEnum, ProgrammingLanguageEnum
+from apigateway.biz.audit import Auditor
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND, SEMVER_PATTERN
 from apigateway.biz.stage import StageHandler, StageSyncHandler
 from apigateway.biz.validators import (
@@ -179,6 +182,14 @@ class GatewaySyncOutputSLZ(serializers.Serializer):
         ref_name = "apigateway.apis.v2.sync.serializers.GatewaySyncOutputSLZ"
 
 
+class GatewayPublicKeyRetrieveOutputSLZ(serializers.Serializer):
+    issuer = serializers.CharField(read_only=True, help_text="颁发者")
+    public_key = serializers.CharField(read_only=True, help_text="公钥")
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.GatewayPublicKeyRetrieveOutputSLZ"
+
+
 class HostSLZ(serializers.Serializer):
     host = serializers.RegexField(
         DOMAIN_PATTERN,
@@ -296,23 +307,13 @@ class PassiveCheckSLZ(serializers.Serializer):
 
 
 class CheckSLZ(serializers.Serializer):
-    """Health check configuration (active and/or passive)"""
+    """Health check configuration (active required, passive optional)"""
 
-    active = ActiveCheckSLZ(required=False, allow_null=True, help_text="主动健康检查")
+    active = ActiveCheckSLZ(help_text="主动健康检查")
     passive = PassiveCheckSLZ(required=False, allow_null=True, help_text="被动健康检查")
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.CheckSLZ"
-
-    def validate(self, attrs):
-        """Ensure at least one of active or passive is provided"""
-        active = attrs.get("active")
-        passive = attrs.get("passive")
-
-        if not active and not passive:
-            raise serializers.ValidationError("至少需要配置主动健康检查或被动健康检查中的一项")
-
-        return attrs
 
 
 class UpstreamsSLZ(serializers.Serializer):
@@ -487,6 +488,7 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         # 仅能通过发布更新 status，不允许直接更新 status
         validated_data.pop("status", None)
         validated_data.pop("created_by", None)
+        request = self.context["request"]
 
         # 1. 更新数据
         instance = super().update(instance, validated_data)
@@ -510,8 +512,23 @@ class StageSyncInputSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
                     backend=backend,
                     stage=instance,
                 )
-            backend_config.config = StageSyncHandler.build_backend_config(backend_info)
+            is_update = bool(backend_config.id)
+            data_before = copy.deepcopy(backend_config.config) if is_update else None
+            data_after = StageSyncHandler.build_backend_config(backend_info)
+            backend_config.config = data_after
             backend_config.save()
+
+            if is_update and data_before != data_after:
+                Auditor.record_stage_backend_op_success(
+                    op_type=OpTypeEnum.MODIFY,
+                    username=request.user.username or settings.GATEWAY_DEFAULT_CREATOR,
+                    gateway_id=instance.gateway_id,
+                    instance_id=backend_config.id,
+                    instance_name=f"{instance.name}:{backend.name}",
+                    data_before=data_before,
+                    data_after=data_after,
+                    comment="OpenAPI 同步更新环境后端配置",
+                )
 
         # 4. sync stage plugin
         StageSyncHandler.sync_plugin_configs(
@@ -675,6 +692,14 @@ class ResourceVersionCreateInputSLZ(serializers.Serializer):
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.ResourceVersionCreateInputSLZ"
         validators = [ResourceVersionValidator()]
+
+
+class ResourceVersionCreateOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True, help_text="资源版本ID")
+    version = serializers.CharField(read_only=True, help_text="版本号")
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.ResourceVersionCreateOutputSLZ"
 
 
 class ResourceVersionListInputSLZ(serializers.Serializer):

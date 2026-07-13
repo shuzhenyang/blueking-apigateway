@@ -16,18 +16,20 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from apigateway.controller.models import BkRelease, GatewayApisixModel
-from apigateway.controller.release_data import ReleaseData
 from apigateway.utils.time import now_str
 
 from .base import GatewayResourceConvertor
 
+if TYPE_CHECKING:
+    from apigateway.controller.release_data import ReleaseData
+
 
 class BkReleaseConvertor(GatewayResourceConvertor):
-    def __init__(self, release_data: ReleaseData, publish_id: int):
-        super().__init__(release_data=release_data, publish_id=publish_id)
+    def __init__(self, release_data: ReleaseData, publish_id: int, apisix_version: str):
+        super().__init__(release_data=release_data, publish_id=publish_id, apisix_version=apisix_version)
 
     def convert(self) -> List[GatewayApisixModel]:
         return [

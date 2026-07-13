@@ -20,9 +20,26 @@ from unittest.mock import patch
 import pytest
 from ddf import G
 
-from apigateway.apps.mcp_server.tasks import sync_mcp_server_after_release
+from apigateway.apps.mcp_server.models import MCPServer
+from apigateway.apps.mcp_server.tasks import _fetch_updated_prompts, sync_mcp_server_after_release
 from apigateway.core.constants import ReleaseHistoryStatusEnum
 from apigateway.core.models import ReleaseHistory
+
+
+class TestFetchUpdatedPrompts:
+    def test_skip_invalid_payload_items(self, caplog):
+        with (
+            patch(
+                "apigateway.apps.mcp_server.tasks.MCPServerPromptHandler.fetch_remote_prompts_by_ids",
+                return_value=[{"id": 1, "name": "ok"}, {"name": "no-id"}, "invalid-item"],
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = _fetch_updated_prompts({1, 2, 3})
+
+        assert result == {1: {"id": 1, "name": "ok"}}
+        assert "without id" in caplog.text
+        assert "expected dict" in caplog.text
 
 
 class TestSyncMcpServerAfterRelease:
@@ -38,6 +55,13 @@ class TestSyncMcpServerAfterRelease:
     def test_success(self, fake_gateway, fake_stage, release_history):
         """发布成功后写入 MCP Server"""
         mcp_data = [{"name": "s1", "description": "d", "resource_names": ["r1"], "tool_names": ["r1"]}]
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name=f"{fake_gateway.name}-{fake_stage.name}-s1",
+            status=0,
+        )
 
         with (
             patch(
@@ -46,7 +70,7 @@ class TestSyncMcpServerAfterRelease:
             ),
             patch(
                 "apigateway.apps.mcp_server.tasks.MCPServerHandler.save_mcp_servers",
-                return_value=[{"name": "s1", "action": "created", "id": 1}],
+                return_value=[{"name": "s1", "action": "updated", "id": mcp_server.id}],
             ) as mock_save,
         ):
             sync_mcp_server_after_release(
@@ -56,6 +80,7 @@ class TestSyncMcpServerAfterRelease:
                 stage_name=fake_stage.name,
                 release_history_id=release_history.id,
                 mcp_servers_data=mcp_data,
+                username="open-api-user",
             )
 
         mock_save.assert_called_once_with(
@@ -64,6 +89,8 @@ class TestSyncMcpServerAfterRelease:
             stage_id=fake_stage.id,
             stage_name=fake_stage.name,
             mcp_servers_data=mcp_data,
+            username="open-api-user",
+            comment=None,
         )
 
     def test_release_failed_skips_save(self, fake_gateway, fake_stage, release_history):

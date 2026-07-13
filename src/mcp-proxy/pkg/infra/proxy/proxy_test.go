@@ -21,14 +21,21 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-openapi/runtime"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -443,76 +450,432 @@ var _ = Describe("MCPProxy", func() {
 		})
 	})
 
-	Describe("buildToolResponseEnvelope", func() {
-		It("should include response_body as nil when body is nil", func() {
-			envelope := buildToolResponseEnvelope(204, "req-1", "trace-1", "x-req-1", nil)
-
-			Expect(envelope).To(Equal(map[string]any{
-				toolResponseStatusCodeField: 204,
-				toolResponseRequestIDField:  "req-1",
-				toolResponseTraceIDField:    "trace-1",
-				toolResponseXRequestIDField: "x-req-1",
-				toolResponseBodyField:       nil,
+	Describe("genToolHandler response payload behavior", func() {
+		It("returns envelope response with upstream JSON body", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				_, _ = w.Write([]byte(`{"items":[{"id":1,"name":"alpha"}]}`))
 			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.Content).To(HaveLen(1))
+			text := result.Content[0].(*mcp.TextContent).Text
+			Expect(text).To(MatchJSON(`{
+				"status_code": 200,
+				"request_id": "upstream-req-1",
+				"trace_id": "",
+				"x_request_id": "test-x-request-id",
+				"response_body": {"items":[{"id":1,"name":"alpha"}]}
+			}`))
+		})
+
+		It("returns raw upstream JSON body when raw response is enabled", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				_, _ = w.Write([]byte(`{"items":[{"id":1,"name":"alpha"}]}`))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, true)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(
+				result.Content[0].(*mcp.TextContent).Text,
+			).To(
+				MatchJSON(`{"items":[{"id":1,"name":"alpha"}]}`),
+			)
+		})
+
+		It("returns raw non-JSON upstream body as a JSON string when raw response is enabled", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/plain")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				_, _ = w.Write([]byte("plain \"quoted\"\nline"))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, true)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(result.Content[0].(*mcp.TextContent).Text).To(Equal(`"plain \"quoted\"\nline"`))
+		})
+
+		It("returns non-JSON upstream body as a JSON string in the envelope", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/plain")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				_, _ = w.Write([]byte(`plain text response`))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(result.Content[0].(*mcp.TextContent).Text).To(MatchJSON(`{
+				"status_code": 200,
+				"request_id": "upstream-req-1",
+				"trace_id": "",
+				"x_request_id": "test-x-request-id",
+				"response_body": "plain text response"
+			}`))
+		})
+
+		It("returns IsError when upstream declares JSON but returns an invalid non-empty body", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				_, _ = w.Write([]byte(`{"bad"`))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.IsError).To(BeTrue())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(
+				result.Content[0].(*mcp.TextContent).Text,
+			).To(
+				ContainSubstring("invalid JSON response body"),
+			)
+		})
+
+		It("returns IsError when upstream declares JSON but returns an empty body", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.IsError).To(BeTrue())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(
+				result.Content[0].(*mcp.TextContent).Text,
+			).To(
+				ContainSubstring("invalid JSON response body"),
+			)
+		})
+
+		It("preserves large JSON numbers without float conversion", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				_, _ = w.Write([]byte(`{"id":9007199254740993,"items":[{"enabled":true}]}`))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(result.Content[0].(*mcp.TextContent).Text).To(ContainSubstring(`"id":9007199254740993`))
+		})
+
+		It("returns IsError and surfaces non-2xx envelope to client", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"code":500,"message":"upstream boom"}}`))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.IsError).To(BeTrue())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(result.Content[0].(*mcp.TextContent).Text).To(ContainSubstring("upstream boom"))
+		})
+
+		It("surfaces non-2xx non-JSON HTML body in envelope to client", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/html")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`<html><body>500 Internal Server Error</body></html>`))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, false)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.IsError).To(BeTrue())
+			Expect(result.Content).To(HaveLen(1))
+			text := result.Content[0].(*mcp.TextContent).Text
+			// Envelope embeds the HTML body as a JSON-encoded string. json.Marshal escapes <>
+			// to \u003c / \u003e by default, so assert via JSON decode round-trip rather than
+			// the raw text shape.
+			Expect(text).To(ContainSubstring(`"status_code":500`))
+			var envelope struct {
+				ResponseBody string `json:"response_body"`
+			}
+			payload := text
+			// Strip the "call tool err (status 500): " prefix when present so we can decode the envelope.
+			if idx := strings.Index(text, "{"); idx > 0 {
+				payload = text[idx:]
+			}
+			Expect(json.Unmarshal([]byte(payload), &envelope)).To(Succeed())
+			Expect(envelope.ResponseBody).To(Equal(`<html><body>500 Internal Server Error</body></html>`))
+		})
+
+		It("surfaces raw non-JSON error body when raw response is enabled", func() {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/plain")
+				w.Header().Set(constant.BkGatewayRequestIDKey, "upstream-req-1")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("upstream boom"))
+			}))
+			defer upstream.Close()
+
+			result := callTestToolHandler(upstream.URL, true)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.IsError).To(BeTrue())
+			Expect(result.Content).To(HaveLen(1))
+			Expect(result.Content[0].(*mcp.TextContent).Text).To(ContainSubstring(`"upstream boom"`))
 		})
 	})
 
-	Describe("buildToolResult", func() {
-		It("should populate text content for envelope with object body", func() {
-			envelope := buildToolResponseEnvelope(200, "req-1", "trace-1", "x-req-1", map[string]any{
-				"timezone": "Asia/Shanghai",
-				"datetime": "2026-03-19T15:04:05+08:00",
-			})
-			result := buildToolResult(envelope)
+	Describe("handleUnexpectedSubmitResult", func() {
+		It("marks audit as failed and returns an MCP error result", func() {
+			auditStatus := "success"
+			auditLatency := time.Duration(0)
+			auditResponse := ""
+			auditResponseSize := int64(0)
+			auditUpstreamReqID := ""
 
+			result := handleUnexpectedSubmitResult(
+				context.Background(),
+				struct{}{},
+				&ToolConfig{Name: "list_items"},
+				zap.NewNop(),
+				nil,
+				nil,
+				time.Now(),
+				&auditStatus,
+				&auditLatency,
+				&auditResponse,
+				&auditResponseSize,
+				&auditUpstreamReqID,
+				nil,
+				"",
+				"",
+				config.LogTruncate{},
+			)
+
+			Expect(auditStatus).To(Equal("failed"))
+			Expect(auditLatency).To(BeNumerically(">", 0))
+			Expect(auditResponse).To(ContainSubstring("unexpected submit result type"))
+			Expect(auditResponseSize).To(Equal(int64(0)))
+			Expect(auditUpstreamReqID).To(BeEmpty())
 			Expect(result).NotTo(BeNil())
-			Expect(result.StructuredContent).To(BeNil())
+			Expect(result.IsError).To(BeTrue())
 			Expect(result.Content).To(HaveLen(1))
-			Expect(result.Content[0]).To(BeAssignableToTypeOf(&mcp.TextContent{}))
 			Expect(
 				result.Content[0].(*mcp.TextContent).Text,
-			).To(MatchJSON(`{"status_code":200,"request_id":"req-1","trace_id":"trace-1","x_request_id":"x-req-1","response_body":{"datetime":"2026-03-19T15:04:05+08:00","timezone":"Asia/Shanghai"}}`))
+			).To(
+				ContainSubstring("unexpected submit result type"),
+			)
 		})
 
-		It("should populate text content for envelope with array body", func() {
-			envelope := buildToolResponseEnvelope(200, "req-1", "trace-1", "x-req-1", []any{"a", "b"})
-			result := buildToolResult(envelope)
+		It("rerenders audit response with error budget after final type assertion failure", func() {
+			auditStatus := "success"
+			auditLatency := time.Duration(0)
+			auditResponse := ""
+			auditResponseSize := int64(0)
+			auditUpstreamReqID := ""
+			payload := newToolResponsePayload(
+				http.StatusOK,
+				"upstream-req-1",
+				"application/json",
+				[]byte(`{"items":[`+strings.Repeat(`1,`, 90)+`0]}`),
+			)
+
+			result := handleUnexpectedSubmitResult(
+				context.Background(),
+				struct{}{},
+				&ToolConfig{Name: "list_items"},
+				zap.NewNop(),
+				nil,
+				nil,
+				time.Now(),
+				&auditStatus,
+				&auditLatency,
+				&auditResponse,
+				&auditResponseSize,
+				&auditUpstreamReqID,
+				payload,
+				"trace-1",
+				"x-req-1",
+				config.LogTruncate{
+					AuditLogMaxResponseSize:      50,
+					AuditLogMaxErrorResponseSize: 4096,
+				},
+			)
 
 			Expect(result).NotTo(BeNil())
-			Expect(result.StructuredContent).To(BeNil())
-			Expect(result.Content).To(HaveLen(1))
-			Expect(result.Content[0]).To(BeAssignableToTypeOf(&mcp.TextContent{}))
-			Expect(
-				result.Content[0].(*mcp.TextContent).Text,
-			).To(MatchJSON(`{"status_code":200,"request_id":"req-1","trace_id":"trace-1","x_request_id":"x-req-1","response_body":["a","b"]}`))
+			Expect(auditStatus).To(Equal("failed"))
+			Expect(auditResponse).To(ContainSubstring(`"response_body":{"items":[1,1,`))
+			Expect(auditResponse).NotTo(ContainSubstring(truncatedSuffix))
+			Expect(auditResponseSize).To(Equal(int64(len(payload.rawBody))))
+			Expect(auditUpstreamReqID).To(Equal("upstream-req-1"))
+		})
+	})
+
+	Describe("audit state helpers", func() {
+		It("marks early failures as failed with latency and response details", func() {
+			status := "success"
+			latency := time.Duration(0)
+			response := ""
+			err := errors.New("decode arguments failed")
+
+			markAuditCallFailed(time.Now().Add(-time.Second), err, &status, &latency, &response)
+
+			Expect(status).To(Equal("failed"))
+			Expect(latency).To(BeNumerically(">", 0))
+			Expect(response).To(Equal("decode arguments failed"))
 		})
 
-		It("should return raw API response directly when rawResponseEnabled is enabled", func() {
-			// When rawResponseEnabled is true, the response result is the raw API response (not wrapped in
-			// envelope)
-			rawBody := map[string]any{
-				"timezone": "Asia/Shanghai",
-				"datetime": "2026-03-19T15:04:05+08:00",
+		It("marks panic as failed and keeps the panic available for outer recovery", func() {
+			status := "success"
+
+			Expect(func() {
+				defer func() {
+					if panicValue := markAuditPanic(recover(), &status); panicValue != nil {
+						panic(panicValue)
+					}
+				}()
+				panic("boom")
+			}).To(PanicWith("boom"))
+			Expect(status).To(Equal("failed"))
+		})
+	})
+
+	Describe("serializeToolCallResponse", func() {
+		It("renders envelope preview with APILogResponseSize for 2xx", func() {
+			payload := newToolResponsePayload(200, "req-1", "application/json", []byte(`{"items":[1]}`))
+
+			response, responseSize, upstreamRequestID := serializeToolCallResponse(
+				"trace-1",
+				"x-req-1",
+				&mcp.CallToolResult{},
+				payload,
+				false,
+				config.LogTruncate{
+					APILogResponseSize:      1024,
+					APILogErrorResponseSize: 4096,
+				},
+			)
+
+			Expect(response).To(MatchJSON(`{
+				"status_code": 200,
+				"request_id": "req-1",
+				"trace_id": "trace-1",
+				"x_request_id": "x-req-1",
+				"response_body": {"items":[1]}
+			}`))
+			Expect(responseSize).To(Equal(int64(len(payload.rawBody))))
+			Expect(upstreamRequestID).To(Equal("req-1"))
+		})
+
+		It("uses APILogErrorResponseSize for non-2xx", func() {
+			// Body is 200 bytes of JSON; success limit 50 would truncate, error limit 4096 would not.
+			big := []byte(`{"items":[` + strings.Repeat(`1,`, 90) + `0]}`)
+			payload := newToolResponsePayload(500, "req-1", "application/json", big)
+
+			response, _, _ := serializeToolCallResponse(
+				"",
+				"",
+				&mcp.CallToolResult{},
+				payload,
+				true,
+				config.LogTruncate{
+					APILogResponseSize:      50,
+					APILogErrorResponseSize: 4096,
+				},
+			)
+
+			// Error budget large enough to embed raw JSON unchanged
+			Expect(response).To(ContainSubstring(`"response_body":{"items":[1,1,`))
+			Expect(response).NotTo(ContainSubstring(truncatedSuffix))
+		})
+
+		It(
+			"uses APILogErrorResponseSize when final tool result is an error despite a 2xx upstream status",
+			func() {
+				// Body is larger than the success limit but smaller than the error limit.
+				big := []byte(`{"items":[` + strings.Repeat(`1,`, 90) + `0]}`)
+				payload := newToolResponsePayload(200, "req-1", "application/json", big)
+
+				response, _, _ := serializeToolCallResponse(
+					"",
+					"",
+					&mcp.CallToolResult{IsError: true},
+					payload,
+					true,
+					config.LogTruncate{
+						APILogResponseSize:      50,
+						APILogErrorResponseSize: 4096,
+					},
+				)
+
+				Expect(response).To(ContainSubstring(`"response_body":{"items":[1,1,`))
+				Expect(response).NotTo(ContainSubstring(truncatedSuffix))
+			},
+		)
+
+		It("preserves non-JSON error body verbatim in envelope preview", func() {
+			payload := newToolResponsePayload(
+				500, "req-1", "text/html",
+				[]byte(`<html><body>upstream 500</body></html>`),
+			)
+
+			response, _, upstreamReq := serializeToolCallResponse(
+				"", "",
+				&mcp.CallToolResult{},
+				payload,
+				true,
+				config.LogTruncate{APILogResponseSize: 1024, APILogErrorResponseSize: 4096},
+			)
+
+			Expect(response).To(MatchJSON(`{
+				"status_code": 500,
+				"request_id": "req-1",
+				"trace_id": "",
+				"x_request_id": "",
+				"response_body": "<html><body>upstream 500</body></html>"
+			}`))
+			Expect(upstreamReq).To(Equal("req-1"))
+		})
+
+		It("falls back to result marshal when payload is nil (panic path)", func() {
+			result := &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "panic recovery output"}},
 			}
-			result := buildToolResult(rawBody)
 
-			Expect(result).NotTo(BeNil())
-			Expect(result.Content).To(HaveLen(1))
-			Expect(result.Content[0]).To(BeAssignableToTypeOf(&mcp.TextContent{}))
-			// Raw response should NOT contain status_code, request_id, trace_id, x_request_id wrapper
-			Expect(
-				result.Content[0].(*mcp.TextContent).Text,
-			).To(MatchJSON(`{"timezone":"Asia/Shanghai","datetime":"2026-03-19T15:04:05+08:00"}`))
-		})
+			response, size, upstreamReq := serializeToolCallResponse(
+				"", "",
+				result,
+				nil,
+				true,
+				config.LogTruncate{APILogResponseSize: 1024, APILogErrorResponseSize: 4096},
+			)
 
-		It("should return raw string response directly when rawResponseEnabled is enabled", func() {
-			rawBody := "plain text response"
-			result := buildToolResult(rawBody)
-
-			Expect(result).NotTo(BeNil())
-			Expect(result.Content).To(HaveLen(1))
-			Expect(result.Content[0]).To(BeAssignableToTypeOf(&mcp.TextContent{}))
-			Expect(result.Content[0].(*mcp.TextContent).Text).To(Equal(`"plain text response"`))
+			Expect(response).NotTo(BeEmpty())
+			Expect(size).To(BeNumerically(">", 0))
+			Expect(upstreamReq).To(BeEmpty())
 		})
 	})
 
@@ -1046,12 +1409,63 @@ var _ = Describe("MCPProxy", func() {
 		})
 	})
 
+	Describe("setHandlerRequestParams", func() {
+		It("should set array query values as repeated query params", func() {
+			req := newRecordingClientRequest()
+			handlerRequest := &HandlerRequest{
+				QueryParam: QueryParam{
+					"related": {"fields", "storages"},
+				},
+			}
+
+			err := setHandlerRequestParams(req, handlerRequest, map[string]string{}, zap.NewNop())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(req.GetQueryParams()["related"]).To(Equal([]string{"fields", "storages"}))
+			Expect(req.GetQueryParams().Encode()).To(Equal("related=fields&related=storages"))
+			Expect(req.GetQueryParams().Encode()).NotTo(ContainSubstring("%5Bfields+storages%5D"))
+		})
+
+		It("should keep scalar query values unchanged", func() {
+			req := newRecordingClientRequest()
+			handlerRequest := &HandlerRequest{
+				QueryParam: QueryParam{
+					"extra": {"true"},
+					"ratio": {"1.25"},
+				},
+			}
+
+			err := setHandlerRequestParams(req, handlerRequest, map[string]string{}, zap.NewNop())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(req.GetQueryParams()["extra"]).To(Equal([]string{"true"}))
+			Expect(req.GetQueryParams()["ratio"]).To(Equal([]string{"1.25"}))
+		})
+
+		It("should keep header and path params scalar", func() {
+			req := newRecordingClientRequest()
+			headerInfo := map[string]string{}
+			handlerRequest := &HandlerRequest{
+				HeaderParam: StringParamMap{"X-Trace-ID": "2005000002"},
+				PathParam:   StringParamMap{"bk_biz_id": "2005000002"},
+			}
+
+			err := setHandlerRequestParams(req, handlerRequest, headerInfo, zap.NewNop())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(req.GetHeaderParams().Values("X-Trace-ID")).To(Equal([]string{"2005000002"}))
+			Expect(req.pathParams["bk_biz_id"]).To(Equal("2005000002"))
+			Expect(headerInfo["X-Trace-ID"]).To(Equal("2005000002"))
+		})
+	})
+
 	Describe("decodeHandlerRequest with UseNumber", func() {
 		It("should preserve numbers for all request parameter groups", func() {
 			arguments := map[string]any{
 				"header_param": map[string]any{"X-Trace-ID": 2005000002},
-				"query_param":  map[string]any{"bk_biz_id": 2005000002, "ratio": 1.25},
-				"path_param":   map[string]any{"bk_biz_id": 2005000002},
+				"query_param": map[string]any{
+					"bk_biz_id": 2005000002,
+					"ratio":     1.25,
+					"ids":       []any{2005000002, json.Number("9007199254740992")},
+				},
+				"path_param": map[string]any{"bk_biz_id": 2005000002},
 				"body_param": map[string]any{
 					"bk_biz_id": 2005000002,
 					"nested":    map[string]any{"id": 2005000003},
@@ -1068,13 +1482,204 @@ var _ = Describe("MCPProxy", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(handlerRequest.HeaderParam["X-Trace-ID"]).To(Equal("2005000002"))
-			Expect(handlerRequest.QueryParam["bk_biz_id"]).To(Equal("2005000002"))
-			Expect(handlerRequest.QueryParam["ratio"]).To(Equal("1.25"))
+			Expect(handlerRequest.QueryParam["bk_biz_id"]).To(Equal([]string{"2005000002"}))
+			Expect(handlerRequest.QueryParam["ratio"]).To(Equal([]string{"1.25"}))
+			Expect(handlerRequest.QueryParam["ids"]).To(Equal([]string{"2005000002", "9007199254740992"}))
 			Expect(handlerRequest.PathParam["bk_biz_id"]).To(Equal("2005000002"))
 
-			body := handlerRequest.BodyParam.(map[string]any)
-			Expect(body["bk_biz_id"]).To(Equal(json.Number("2005000002")))
-			Expect(body["nested"].(map[string]any)["id"]).To(Equal(json.Number("2005000003")))
+			// BodyParam is now json.RawMessage, preserving original JSON bytes
+			Expect(string(handlerRequest.BodyParam)).To(ContainSubstring("2005000002"))
+			Expect(string(handlerRequest.BodyParam)).To(ContainSubstring("2005000003"))
+		})
+
+		It("should preserve large integers in body param without precision loss", func() {
+			// This is the exact scenario that causes precision loss with float64:
+			// 7643696123382648115 exceeds float64 precision (2^53)
+			arguments := json.RawMessage(`{
+				"body_param": {"video_kol_item_list": [7643696123382648115], "unique_id": 1750035600002}
+			}`)
+
+			var handlerRequest HandlerRequest
+			decoder := json.NewDecoder(bytes.NewReader(arguments))
+			decoder.UseNumber()
+			err := decoder.Decode(&handlerRequest)
+			Expect(err).NotTo(HaveOccurred())
+
+			// json.RawMessage preserves the exact original bytes
+			Expect(string(handlerRequest.BodyParam)).To(ContainSubstring("7643696123382648115"))
+			Expect(string(handlerRequest.BodyParam)).To(ContainSubstring("1750035600002"))
+		})
+
+		It("should treat explicit null body_param as empty (no body forwarded)", func() {
+			arguments := json.RawMessage(`{
+				"body_param": null
+			}`)
+
+			var handlerRequest HandlerRequest
+			decoder := json.NewDecoder(bytes.NewReader(arguments))
+			decoder.UseNumber()
+			err := decoder.Decode(&handlerRequest)
+			Expect(err).NotTo(HaveOccurred())
+
+			// json.RawMessage decodes JSON null as the literal bytes "null"
+			// but setHandlerRequestParams should skip it (preserve old behavior)
+			Expect(string(handlerRequest.BodyParam)).To(Equal("null"))
+			Expect(
+				len(handlerRequest.BodyParam) > 0 && string(handlerRequest.BodyParam) != "null",
+			).To(
+				BeFalse(),
+			)
 		})
 	})
 })
+
+func callTestToolHandler(upstream string, rawResponseEnabled bool) *mcp.CallToolResult {
+	upstreamURL, err := url.Parse(upstream)
+	Expect(err).NotTo(HaveOccurred())
+
+	sharedTransportOnce = sync.Once{}
+	sharedTransport = nil
+	InitSharedTransport(config.Transport{
+		MaxIdleConns:          10,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeoutSecond: 30,
+	})
+
+	toolConfig := &ToolConfig{
+		Name:   "list_items",
+		Method: http.MethodGet,
+		Host:   upstreamURL.Host,
+		Schema: upstreamURL.Scheme,
+		Url:    "/",
+	}
+	handler := genToolHandler(toolConfig, "test-server", func() bool {
+		return rawResponseEnabled
+	})
+	result, err := handler(testToolCallContext(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Name:      "list_items",
+			Arguments: json.RawMessage(`{}`),
+		},
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return result
+}
+
+func testToolCallContext() context.Context {
+	config.G = &config.Config{
+		McpServer: config.McpServer{
+			InnerJwtExpireTime: 5 * time.Minute,
+		},
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	Expect(err).NotTo(HaveOccurred())
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, constant.BkGatewayJWTClaims, &util.JWTClaimsForLazySigning{
+		AppCode:      "test-app",
+		AppVerified:  true,
+		Username:     "test-user",
+		UserVerified: true,
+		Issuer:       "test-issuer",
+		Audience:     []string{"test-audience"},
+	})
+	ctx = context.WithValue(ctx, constant.BkGatewayPrivateKey, privateKeyPEM)
+	ctx = context.WithValue(ctx, constant.MCPServerID, 123)
+	ctx = context.WithValue(ctx, constant.MCPServerName, "test-server")
+	ctx = context.WithValue(ctx, constant.GatewayID, 456)
+	ctx = context.WithValue(ctx, constant.GatewayName, "test-gateway")
+	ctx = context.WithValue(ctx, constant.BkAppCode, "test-app")
+	ctx = context.WithValue(ctx, constant.BkUsername, "test-user")
+	ctx = context.WithValue(ctx, constant.RequestID, "test-request-id")
+	ctx = context.WithValue(ctx, constant.XRequestID, "test-x-request-id")
+	ctx = context.WithValue(ctx, constant.ClientIP, "127.0.0.1")
+	ctx = context.WithValue(ctx, constant.ClientID, "test-client")
+	return ctx
+}
+
+type recordingClientRequest struct {
+	headers    http.Header
+	query      url.Values
+	pathParams map[string]string
+	bodyParam  any
+	timeout    time.Duration
+}
+
+func newRecordingClientRequest() *recordingClientRequest {
+	return &recordingClientRequest{
+		headers:    http.Header{},
+		query:      url.Values{},
+		pathParams: map[string]string{},
+	}
+}
+
+var _ runtime.ClientRequest = (*recordingClientRequest)(nil)
+
+func (r *recordingClientRequest) SetHeaderParam(name string, values ...string) error {
+	r.headers.Del(name)
+	for _, value := range values {
+		r.headers.Add(name, value)
+	}
+	return nil
+}
+
+func (r *recordingClientRequest) GetHeaderParams() http.Header {
+	return r.headers.Clone()
+}
+
+func (r *recordingClientRequest) SetQueryParam(name string, values ...string) error {
+	r.query[name] = values
+	return nil
+}
+
+func (r *recordingClientRequest) SetFormParam(string, ...string) error {
+	return nil
+}
+
+func (r *recordingClientRequest) SetPathParam(name, value string) error {
+	r.pathParams[name] = value
+	return nil
+}
+
+func (r *recordingClientRequest) GetQueryParams() url.Values {
+	return r.query
+}
+
+func (r *recordingClientRequest) SetFileParam(string, ...runtime.NamedReadCloser) error {
+	return nil
+}
+
+func (r *recordingClientRequest) SetBodyParam(body any) error {
+	r.bodyParam = body
+	return nil
+}
+
+func (r *recordingClientRequest) SetTimeout(timeout time.Duration) error {
+	r.timeout = timeout
+	return nil
+}
+
+func (r *recordingClientRequest) GetMethod() string {
+	return ""
+}
+
+func (r *recordingClientRequest) GetPath() string {
+	return ""
+}
+
+func (r *recordingClientRequest) GetBody() []byte {
+	return nil
+}
+
+func (r *recordingClientRequest) GetBodyParam() any {
+	return r.bodyParam
+}
+
+func (r *recordingClientRequest) GetFileParam() map[string][]runtime.NamedReadCloser {
+	return nil
+}

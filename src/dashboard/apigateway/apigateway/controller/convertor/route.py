@@ -18,12 +18,11 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from apigateway.controller.constants import DELETE_PUBLISH_ID
 from apigateway.controller.models import GatewayApisixModel, Plugin, Route, Timeout
 from apigateway.controller.models.constants import HttpMethodEnum
-from apigateway.controller.release_data import ReleaseData
 from apigateway.controller.uri_render import UpstreamURIRender, URIRender
 from apigateway.core.constants import ProxyTypeEnum
 from apigateway.utils.time import now_str
@@ -31,6 +30,9 @@ from apigateway.utils.time import now_str
 from .base import GatewayResourceConvertor
 from .constants import MATCH_SUB_PATH_PRIORITY, SUBPATH_PARAM_NAME
 from .utils import truncate_string
+
+if TYPE_CHECKING:
+    from apigateway.controller.release_data import ReleaseData
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +43,10 @@ class RouteConvertor(GatewayResourceConvertor):
         release_data: ReleaseData,
         backend_service_mapping: Dict[int, str],
         publish_id: int,
+        apisix_version: str,
         revoke_flag: Union[bool, None] = False,
     ):
-        super().__init__(release_data=release_data, publish_id=publish_id)
+        super().__init__(release_data=release_data, publish_id=publish_id, apisix_version=apisix_version)
         self._revoke_flag = revoke_flag
         self._backend_service_mapping = backend_service_mapping
 
@@ -57,7 +60,7 @@ class RouteConvertor(GatewayResourceConvertor):
         routes: List[GatewayApisixModel] = []
 
         if not self._revoke_flag:
-            for resource in self._release_data.resource_version.data:
+            for resource in self._release_data.resource_configs:
                 route = self._convert_http_route(resource)
                 if route:
                     routes.append(route)

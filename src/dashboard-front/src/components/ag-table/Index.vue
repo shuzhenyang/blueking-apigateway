@@ -19,6 +19,7 @@
   <ConfigProvider :global-config="localeConfig">
     <PrimaryTable
       ref="primaryTableRef"
+      :key="tableKey"
       v-model:selected-row-keys="selectedRowKeys"
       class="primary-table-wrapper"
       :class="[
@@ -28,7 +29,7 @@
           'primary-table-show-pagination': showPagination
         }
       ]"
-      :size="tableSetting?.rowSize ?? 'medium'"
+      :size="tableSettings?.rowSize ?? 'medium'"
       :data="localTableData"
       :columns="tableColumns"
       :pagination="showPagination ? pagination : null"
@@ -39,7 +40,7 @@
       :table-layout="tableLayout"
       :row-key="isExistUniqueKey ? tableRowKey : 'tempUniqueId'"
       :max-height="maxHeight || clientHeight"
-      :bk-ui-settings="tableSetting"
+      :bk-ui-settings="tableSettings"
       :resizable="resizable"
       v-bind="$attrs"
       @bk-ui-settings-change="handleSettingChange"
@@ -125,7 +126,7 @@
 
 <script setup lang="tsx">
 // @ts-nocheck
-import { cloneDeep, memoize, sortBy, sortedUniq, throttle } from 'lodash-es';
+import { cloneDeep, memoize, sortBy, sortedUniq, throttle, uniq } from 'lodash-es';
 import {
   type BkUiSettings,
   PrimaryTable,
@@ -137,14 +138,11 @@ import cnConfig from 'tdesign-vue-next/es/locale/zh_CN';
 import enConfig from 'tdesign-vue-next/es/locale/en_US';
 import { Checkbox, Loading } from 'bkui-vue';
 import { useRequest } from 'vue-request';
-import type { ITableMethod } from '@/types/common';
+import type { ITableMethod, ITableSettings } from '@/types/common';
 import { filterSimpleEmpty } from '@/utils/filterEmptyValues';
 import { useMaxTableLimit, useTDesignSelection, useTableSetting } from '@/hooks';
 import i18n from '@/locales';
-import router from '@/router';
 import TableEmpty from '@/components/table-empty/Index.vue';
-// @ts-ignore ShallowRef 类型兼容
-import type { ShallowRef } from 'vue';
 
 interface IProps {
   apiMethod?: (params?: any) => Promise<unknown>
@@ -167,13 +165,15 @@ interface IProps {
   resizable?: boolean
   showCellEmptyContent?: boolean
   maxHeight?: string | number | undefined
+  cacheSettingsInLocalStorage?: boolean
+  cacheIdentifier?: string
 }
 
 const selectedRowKeys = defineModel<any[]>('selectedRowKeys', { default: () => [] });
 
 const tableData = defineModel<any[]>('tableData', { default: () => [] });
 
-const tableSetting = defineModel<null | ShallowRef<BkUiSettings>>('settings', { default: () => null });
+const tableSettings = defineModel<BkUiSettings | null>('settings', { default: () => null });
 
 const {
   apiMethod = undefined,
@@ -213,6 +213,10 @@ const {
   showCellEmptyContent = false,
   // 父组件限制最大表格高度
   maxHeight = undefined,
+  // 是否缓存表格设置到 LocalStorage，默认开启
+  cacheSettingsInLocalStorage = true,
+  // 表格设置缓存唯一标识符，注意不是 LocalStorage 的 key，而是用于区分不同表格的标识符，不传的话会自动生成一个
+  cacheIdentifier = undefined,
 } = defineProps<IProps>();
 
 const emit = defineEmits<{
@@ -246,6 +250,12 @@ const slots = useSlots();
 const { maxTableLimit, clientHeight } = useMaxTableLimit(maxLimitConfig);
 
 const {
+  localStorageKey,
+  changeTableSettings,
+  updateCacheIdentifier,
+} = useTableSetting(tableSettings, cacheSettingsInLocalStorage, cacheIdentifier);
+
+const {
   selections,
   selectionsRowKeys,
   resetSelections,
@@ -257,15 +267,15 @@ const {
 const TDesignTableRef = useTemplateRef<InstanceType<typeof PrimaryTable> & ITableMethod>('primaryTableRef');
 
 let radioClickHandler: ((e: Event) => void) | null = null;
+// 标记filterPopup是否已经触发过一次emit
+let hasEmitFilterPopup = false;
+
 const paramsData: Record<string, any> = ref({});
 
 const radioEl = ref<HTMLElement | undefined | null>(null);
-
 // 设置列实例
 const settingColumnEl = ref<HTMLElement | null>(null);
-
 const localTableData = ref<any[]>([]);
-
 const pagination = ref<PrimaryTableProps['pagination']>({
   current: 1,
   pageSize: 10,
@@ -274,8 +284,9 @@ const pagination = ref<PrimaryTableProps['pagination']>({
   showPageSize: true,
   pageSizeOptions: [10, 20, 50, 100],
 });
-
 const isAllSelection = ref(false);
+// 用于处理同步更新表格组件数据后，组件实例销毁重建
+const tableKey = ref(-1);
 
 if (Object.keys(maxLimitConfig)?.length) {
   pagination.value = Object.assign(pagination.value, {
@@ -283,8 +294,6 @@ if (Object.keys(maxLimitConfig)?.length) {
     pageSizeOptions: sortedUniq(sortBy([10, 20, 50, 100, maxTableLimit])),
   });
 }
-
-const { changeTableSetting, isDiffSize } = useTableSetting(tableSetting.value);
 
 const isShowSelectionRow = computed(() => {
   return showFirstFullRow && selections.value.length > 0;
@@ -295,8 +304,8 @@ const disabledSelected = computed(() => {
 });
 // 缓存filteredTableData
 const memoizedFilter = memoize(
-  (list: any[]) => list.filter((item: any) => !disabledCheckSelection(item)),
-  (list: any[]) => JSON.stringify(list.map((item: any) => item[tableRowKey])),
+  (list: any[]) => list.filter(item => !disabledCheckSelection(item)),
+  (list: any[]) => JSON.stringify(list.map(item => item[tableRowKey])),
 );
 
 // 过滤掉禁止勾选的数据
@@ -307,7 +316,7 @@ const setIndeterminate = computed(() => {
   const availableCount = filteredTableData.value.length;
   if (availableCount === 0) return false;
 
-  const selectedAvailableCount = filteredTableData.value.filter((item: any) => {
+  const selectedAvailableCount = filteredTableData.value.filter((item) => {
     return selectionsRowKeys.value.includes(item[tableRowKey]);
   }).length;
 
@@ -322,7 +331,7 @@ const selectionColumns = computed(() => [{
   fixed: 'left',
   width: 60,
   title: () => {
-    const isDisabled = disabledSelected.value || tableData.value.every((item: any) => disabledCheckSelection?.(item));
+    const isDisabled = disabledSelected.value || tableData.value.every(item => disabledCheckSelection?.(item));
     return (
       <Checkbox
         v-model={isAllSelection.value}
@@ -341,16 +350,16 @@ const selectionColumns = computed(() => [{
           });
 
           emit('selection-change', {
-            selectionsRowKeys: selections.value.map((item: any) => item[tableRowKey]),
+            selectionsRowKeys: selections.value.map(item => item[tableRowKey]),
             selections: selections.value,
           });
         }}
       />
     );
   },
-  cell: (h: any, { row }: { row: any }) => {
+  cell: (h: unknown, { row }: { row: TableRowData }) => {
     const isDisabled = disabledSelected.value || disabledCheckSelection?.(row);
-    const isChecked = selections.value.map((item: any) => item[tableRowKey]).includes(row[tableRowKey]);
+    const isChecked = selections.value.map(item => item[tableRowKey]).includes(row[tableRowKey]);
 
     return (
       <Checkbox
@@ -373,8 +382,8 @@ const selectionColumns = computed(() => [{
             row,
           });
           const selectionTable = filteredTableData.value;
-          const checkedIds = selectionsRowKeys.value.filter((id: any) =>
-            selectionTable.some((item: any) => item[tableRowKey] === id),
+          const checkedIds = selectionsRowKeys.value.filter((id: number | string) =>
+            selectionTable.some(item => item[tableRowKey] === id),
           );
           isAllSelection.value = checkedIds.length > 0 && checkedIds.length === selectionTable.length;
 
@@ -452,44 +461,104 @@ const { params: requestParams, loading, error, refresh, run } = useRequest(apiMe
   },
 });
 
-watch(tableSetting, () => {
-  if (!tableSetting.value && showSettings) {
-    // 过滤掉需要隐藏的列
-    const visibleColumn = tableColumns.value?.filter((tc: any) => !hiddenColumn.includes(tc.colKey));
-    tableSetting.value = {
-      size: 'medium',
-      rowSize: 'medium',
-      checked: visibleColumn.map((col: any) => col.colKey),
-      fields: visibleColumn.map((col: any) => {
-        return {
-          label: col.displayTitle ?? col.title,
-          field: col.colKey,
-        };
-      }),
-      // 默认禁用第一项展示文本的表列，不允许取消全部表列
-      disabled: [tableColumns.value?.filter((col: any) => !['row-select', 'serial-number'].includes(col.colKey))?.[0]?.colKey],
-    };
-  }
-}, { immediate: true });
+// 初始化表格配置项
+const initTableSettings = () => {
+  const columns = tableColumns.value || [];
+  const visibleColumn = columns.filter(tc => !hiddenColumn.includes(tc.colKey));
+  const allColKeys = visibleColumn.map(col => col.colKey);
 
-watch(tableData, (newTableData: any) => {
-  setTimeout(() => {
-    localTableData.value = cloneDeep(newTableData || []);
-    if (localPage) {
-      pagination.value.total = localTableData.value.length;
+  const baseConfig = {
+    fontSize: 'medium',
+    rowSize: 'medium',
+    disabled: [] as string[],
+    checked: [...allColKeys],
+    fields: visibleColumn.map(col => ({
+      label: col.displayTitle ?? col.title,
+      field: col.colKey,
+    })),
+  };
+
+  const filterCols = columns.filter(col => !['row-select', 'serial-number'].includes(col.colKey));
+  const firstValidKey = filterCols[0]?.colKey;
+  if (firstValidKey) baseConfig.disabled = [firstValidKey];
+
+  const tableSettingStorage = localStorage.getItem(localStorageKey.value);
+
+  if (!tableSettingStorage) return baseConfig;
+
+  let storageSettings = null;
+  try {
+    storageSettings = JSON.parse(tableSettingStorage);
+  }
+  catch {
+    return baseConfig;
+  }
+
+  let safeChecked = [...baseConfig.checked];
+  if (storageSettings && Array.isArray(storageSettings.checked)) {
+    safeChecked = storageSettings.checked.filter(key => allColKeys.includes(key));
+  }
+
+  return {
+    ...baseConfig,
+    fontSize: storageSettings?.fontSize ?? baseConfig.fontSize,
+    rowSize: storageSettings?.rowSize ?? baseConfig.rowSize,
+    checked: safeChecked,
+  };
+};
+
+watch(
+  tableSettings,
+  () => {
+    if (!tableSettings.value && showSettings) {
+      nextTick(() => {
+        tableSettings.value = initTableSettings();
+      });
     }
-  }, 0);
+  },
+  {
+    deep: true,
+    immediate: true,
+  },
+);
 
-  // 缓存清空仍同步执行，避免数据不一致
-  const rowKeys = (newTableData || []).map((item: any) => item?.[tableRowKey]);
-  if (rowKeys.length > 0) {
-    // @ts-ignore
-    memoizedFilter?.cache?.clear();
-  }
-}, {
-  immediate: true,
-  deep: true,
-});
+// 当cacheIdentifier发生变化时，清空表格设置缓存并重新渲染表格（使用场景，同路由下多表格复用）
+watch(
+  () => cacheIdentifier,
+  (newVal: string, oldVal: string) => {
+    if (newVal && newVal !== oldVal && showSettings) {
+      tableSettings.value = null;
+      nextTick(() => {
+        updateCacheIdentifier(newVal);
+        tableKey.value = +new Date();
+      });
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  tableData,
+  (newTableData: any) => {
+    setTimeout(() => {
+      localTableData.value = cloneDeep(newTableData || []);
+      if (localPage) {
+        pagination.value.total = localTableData.value.length;
+      }
+    }, 0);
+
+    // 缓存清空仍同步执行，避免数据不一致
+    const rowKeys = (newTableData || []).map(item => item?.[tableRowKey]);
+    if (rowKeys.length > 0) {
+      // @ts-ignore
+      memoizedFilter?.cache?.clear();
+    }
+  },
+  {
+    immediate: true,
+    deep: true,
+  },
+);
 
 watch([selections, selectedRowKeys], () => {
   emit('selection-change', {
@@ -528,8 +597,8 @@ const renderSelectionData = (selectList?: any[]) => {
   if (checkTableData?.length > 0 && tableData.value?.length > 0) {
     const selectionTable = filteredTableData.value;
     const checkedIds = selectionTable
-      .filter((item: any) => checkTableData.includes(item[tableRowKey]))
-      .map((check: any) => check[tableRowKey]);
+      .filter(item => checkTableData.includes(item[tableRowKey]))
+      .map(check => check[tableRowKey]);
     isAllSelection.value = checkedIds.length === selectionTable.length;
   }
   else {
@@ -626,29 +695,28 @@ const handlePageChange = ({ current, pageSize }: {
   });
 };
 
-const handleSettingChange = (setting: BkUiSettings) => {
-  // @ts-ignore
-  const isExistDiff = isDiffSize(setting);
-  // @ts-ignore
-  changeTableSetting(setting);
-  tableSetting.value = Object.assign(tableSetting.value, setting ?? {});
-  delete tableSetting.value.value;
-  if (!isExistDiff) {
-    // 这里处理高级设置事件回调后需要处理的业务
-    return;
-  }
+const handleSettingChange = (settings: ITableSettings) => {
+  // 事件回调偶尔会发生 columns 重复问题，这里做去重处理
+  const correctSettings = {
+    ...settings,
+    columns: uniq(settings.columns),
+  };
+  changeTableSettings(correctSettings);
 };
 
 // 处理自定义重置功能和点击单选直接关闭弹框
 const handleRadioFilterClick = () => {
+  // 获取filterPopup内容区域，没获取到代表已关闭弹框重置默认值
+  const popupWrapper = document.querySelector('.t-table__filter-pop-wrapper');
+  if (!popupWrapper) {
+    hasEmitFilterPopup = false;
+  }
+
   setTimeout(() => {
     const filterIconEl = document.querySelector('.need-filter-icon-handler .t-table__filter-icon-wrap');
     const filterPopup = document.querySelector('.t-table__filter-pop-content');
     radioEl.value = filterPopup?.querySelector('.t-radio-group');
-    if (filterIconEl && filterPopup) {
-      // 抛出filter Icon点击事件用于处理相关功能业务
-      emit('filter-icon-click');
-    }
+
     if (radioEl.value) {
       const confirmBtn = document.querySelector('.t-table__filter--bottom-buttons > .t-button--theme-primary');
       // @ts-ignore
@@ -663,6 +731,12 @@ const handleRadioFilterClick = () => {
       };
       radioEl.value.addEventListener('click', radioClickHandler);
     }
+
+    // 抛出filter Icon点击事件用于处理相关功能业务
+    if (filterIconEl && !hasEmitFilterPopup) {
+      hasEmitFilterPopup = true;
+      emit('filter-icon-click');
+    }
   }, 0);
 };
 
@@ -673,7 +747,7 @@ const handleSettingColumnClick = (e: MouseEvent) => {
   const isIconClick = e.target?.closest('.t-icon-setting');
   if (!isIconClick && settingColumnEl.value) {
     settingColumnEl.value?.querySelector('.column-settings-icon')?.click();
-  };
+  }
 };
 
 const handleListenerRadio = () => {
@@ -745,22 +819,11 @@ onMounted(() => {
   if (immediate && !localPage) {
     fetchData({ ...offsetAndLimit.value });
   }
-  const tableSet = localStorage.getItem(`table-setting-${locale.value}-${router?.currentRoute?.value?.name}`);
-  if (tableSet && tableSetting.value) {
-    const storageCache = JSON.parse(tableSet);
-    tableSetting.value = {
-      ...tableSetting.value,
-      ...storageCache,
-      size: storageCache.rowSize,
-    };
-    delete tableSetting.value.value;
-  }
   handleListenerRadio();
   handleListenerSetting();
 });
 
 onBeforeUnmount(() => {
-  // @ts-ignore
   memoizedFilter?.cache?.clear();
   document.removeEventListener('click', handleRadioFilterClick);
   radioEl.value?.removeEventListener('click', radioClickHandler);
@@ -768,6 +831,7 @@ onBeforeUnmount(() => {
   radioEl.value = null;
   radioClickHandler = null;
   settingColumnEl.value = null;
+  tableSettings.value = null;
 });
 
 defineExpose({

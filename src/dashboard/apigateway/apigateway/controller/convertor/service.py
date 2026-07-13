@@ -17,7 +17,7 @@
 #
 
 import base64
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from django.conf import settings
 from django.utils.encoding import force_bytes, force_str
@@ -45,7 +45,6 @@ from apigateway.controller.models.constants import (
     UpstreamSchemeEnum,
     UpstreamTypeEnum,
 )
-from apigateway.controller.release_data import ReleaseData
 from apigateway.controller.uri_render import URIRender
 from apigateway.core.constants import LoadBalanceTypeEnum
 from apigateway.core.models import Backend
@@ -54,10 +53,19 @@ from .base import GatewayResourceConvertor
 from .constants import LABEL_KEY_BACKEND_ID
 from .utils import UrlInfo, truncate_string
 
+if TYPE_CHECKING:
+    from apigateway.controller.release_data import ReleaseData
+
 
 class ServiceConvertor(GatewayResourceConvertor):
-    def __init__(self, release_data: ReleaseData, publish_id: int, revoke_flag: Optional[bool] = False):
-        super().__init__(release_data=release_data, publish_id=publish_id)
+    def __init__(
+        self,
+        release_data: ReleaseData,
+        publish_id: int,
+        apisix_version: str,
+        revoke_flag: Optional[bool] = False,
+    ):
+        super().__init__(release_data=release_data, publish_id=publish_id, apisix_version=apisix_version)
         self._revoke_flag = revoke_flag
 
     def convert(self) -> List[GatewayApisixModel]:
@@ -162,7 +170,7 @@ class ServiceConvertor(GatewayResourceConvertor):
                 Service(
                     # the previous id is: {gateway_name}.{stage_name}.{stage_id}-{backend_id}
                     # the stage_id + backend_id is unique, so we can make the prefix smaller enough to keep the id length < 64
-                    # example: bk-apigateway-inner.prod.6-7
+                    # example: bk-apigateway.prod.6-7
                     # 30 + 1 + 20 + 1 + x + 1 + y = 53 + x + y, so x + y <= 11 (almost no buffer)
                     # so we truncate the stage_name to 10
                     # 30 + 1 + 10 + 1 + x + 1 + y = 43 + x + y, so x + y <= 21 (enough buffer)

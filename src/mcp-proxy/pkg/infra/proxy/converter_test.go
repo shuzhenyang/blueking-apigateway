@@ -284,6 +284,80 @@ var _ = Describe("Converter", func() {
 			Expect(result[0].ParamSchema.Required).To(ContainElement("header_param"))
 		})
 
+		It("should skip invalid parameters without panicking", func() {
+			spec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
+				Servers: []*openapi3.Server{{URL: "https://api.example.com/v1"}},
+				Paths:   &openapi3.Paths{},
+			}
+
+			pathItem := &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "getUsers",
+					Summary:     "Get users",
+					Parameters: openapi3.Parameters{
+						nil,
+						&openapi3.ParameterRef{},
+						&openapi3.ParameterRef{
+							Value: &openapi3.Parameter{
+								Name: "limit",
+								In:   "query",
+							},
+						},
+						&openapi3.ParameterRef{
+							Value: &openapi3.Parameter{
+								Name:   "offset",
+								In:     "query",
+								Schema: &openapi3.SchemaRef{},
+							},
+						},
+					},
+					Responses: &openapi3.Responses{},
+				},
+			}
+			spec.Paths.Set("/users", pathItem)
+
+			var result []*ToolConfig
+			Expect(func() {
+				result = OpenapiToMcpToolConfig(spec, nil, nil)
+			}).NotTo(Panic())
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].ParamSchema.Properties).NotTo(HaveKey("query_param"))
+		})
+
+		It("should skip JSON request body without schema", func() {
+			spec := &openapi3.T{
+				OpenAPI: "3.0.0",
+				Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
+				Servers: []*openapi3.Server{{URL: "https://api.example.com/v1"}},
+				Paths:   &openapi3.Paths{},
+			}
+
+			pathItem := &openapi3.PathItem{
+				Post: &openapi3.Operation{
+					OperationID: "createUser",
+					Summary:     "Create a new user",
+					RequestBody: &openapi3.RequestBodyRef{
+						Value: &openapi3.RequestBody{
+							Content: openapi3.Content{
+								"application/json": &openapi3.MediaType{},
+							},
+						},
+					},
+					Responses: &openapi3.Responses{},
+				},
+			}
+			spec.Paths.Set("/users", pathItem)
+
+			var result []*ToolConfig
+			Expect(func() {
+				result = OpenapiToMcpToolConfig(spec, nil, nil)
+			}).NotTo(Panic())
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].ParamSchema.Properties).NotTo(HaveKey("body_param"))
+		})
+
 		It("should handle request body with JSON content", func() {
 			spec := &openapi3.T{
 				OpenAPI: "3.0.0",
@@ -357,6 +431,7 @@ var _ = Describe("Converter", func() {
 
 		It("should preserve request body schema with OpenAPI exclusive minimum", func() {
 			minimum := float64(0)
+			exclusiveMinimum := true
 			spec := &openapi3.T{
 				OpenAPI: "3.0.0",
 				Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
@@ -387,9 +462,11 @@ var _ = Describe("Converter", func() {
 														Type: &openapi3.Types{
 															"number",
 														},
-														Min:          &minimum,
-														ExclusiveMin: true,
-														Description:  "起量预算（单位元，必须大于 0）。",
+														Min: &minimum,
+														ExclusiveMin: openapi3.ExclusiveBound{
+															Bool: &exclusiveMinimum,
+														},
+														Description: "起量预算（单位元，必须大于 0）。",
 													},
 												},
 											},
@@ -424,6 +501,7 @@ var _ = Describe("Converter", func() {
 
 		It("should preserve request body schema with OpenAPI exclusive maximum", func() {
 			maximum := float64(100)
+			exclusiveMaximum := true
 			spec := &openapi3.T{
 				OpenAPI: "3.0.0",
 				Info:    &openapi3.Info{Title: "Test API", Version: "1.0.0"},
@@ -448,8 +526,10 @@ var _ = Describe("Converter", func() {
 														Type: &openapi3.Types{
 															"number",
 														},
-														Max:          &maximum,
-														ExclusiveMax: true,
+														Max: &maximum,
+														ExclusiveMax: openapi3.ExclusiveBound{
+															Bool: &exclusiveMaximum,
+														},
 													},
 												},
 											},
@@ -472,6 +552,60 @@ var _ = Describe("Converter", func() {
 			discount := bodyParam["properties"].(map[string]any)["discount"].(map[string]any)
 			Expect(discount).To(HaveKeyWithValue("maximum", float64(100)))
 			Expect(discount).To(HaveKeyWithValue("exclusiveMaximum", float64(100)))
+		})
+
+		It("should preserve loaded OpenAPI 3.1 numeric exclusive bounds in MCP tool schema", func() {
+			spec, err := openapi3.NewLoader().LoadFromData([]byte(`{
+				"openapi": "3.1.0",
+				"info": {"title": "Test API", "version": "1.0.0"},
+				"servers": [{"url": "https://api.example.com/v1"}],
+				"paths": {
+					"/qrcode/json": {
+						"post": {
+							"operationId": "createQRCode",
+							"summary": "Create QR code",
+							"requestBody": {
+								"required": true,
+								"content": {
+									"application/json": {
+										"schema": {
+											"type": "object",
+											"required": ["box_size"],
+											"properties": {
+												"box_size": {
+													"type": "integer",
+													"minimum": 0,
+													"exclusiveMinimum": 0,
+													"maximum": 100,
+													"exclusiveMaximum": 100
+												}
+											}
+										}
+									}
+								}
+							},
+							"responses": {
+								"200": {
+									"description": "OK"
+								}
+							}
+						}
+					}
+				}
+			}`))
+			Expect(err).NotTo(HaveOccurred())
+
+			result := OpenapiToMcpToolConfig(spec, nil, nil)
+			Expect(result).To(HaveLen(1))
+
+			inputSchema := buildInputSchemaForTest(result[0])
+			bodyParam := inputSchema["properties"].(map[string]any)["body_param"].(map[string]any)
+			boxSize := bodyParam["properties"].(map[string]any)["box_size"].(map[string]any)
+			Expect(boxSize).To(HaveKeyWithValue("type", "integer"))
+			Expect(boxSize).To(HaveKeyWithValue("minimum", float64(0)))
+			Expect(boxSize).To(HaveKeyWithValue("exclusiveMinimum", float64(0)))
+			Expect(boxSize).To(HaveKeyWithValue("maximum", float64(100)))
+			Expect(boxSize).To(HaveKeyWithValue("exclusiveMaximum", float64(100)))
 		})
 
 		It("should use resolved schema ref value instead of dangling ref", func() {

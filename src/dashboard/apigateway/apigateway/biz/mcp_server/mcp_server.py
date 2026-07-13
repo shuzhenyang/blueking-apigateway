@@ -16,9 +16,10 @@
 # to the current version of the project delivered to anyone in the future.
 #
 import base64
+import copy
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote
 
 from django.conf import settings
@@ -27,6 +28,7 @@ from django.db.models import Q, QuerySet
 from django.template.loader import render_to_string
 from django.utils.translation import gettext as _
 
+from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
     OFFICIAL_MCP_CATEGORY_NAME,
@@ -49,24 +51,35 @@ from apigateway.apps.mcp_server.models import (
 )
 from apigateway.apps.permission.constants import GrantTypeEnum
 from apigateway.apps.permission.models import AppResourcePermission
+from apigateway.biz.audit import Auditor
 from apigateway.biz.released_resource import ReleasedResourceData, ReleasedResourceHandler
 from apigateway.biz.released_resource_doc import DocGenerator, ReleasedResourceDocHandler
 from apigateway.biz.resource_doc import ResourceDocHandler
 from apigateway.common.django.translation import get_current_language_code
 from apigateway.common.error_codes import error_codes
-from apigateway.common.tenant.user_credentials import UserCredentials
 from apigateway.components import bkaidev
-from apigateway.core.constants import GatewayStatusEnum, GatewayTypeEnum, StageStatusEnum
+from apigateway.core.constants import GatewayStatusEnum, StageStatusEnum
 from apigateway.core.models import Gateway, Release, Resource, Stage
-from apigateway.service.contexts import GatewayAuthContext
-from apigateway.service.mcp import build_mcp_server_application_url, build_mcp_server_url
+from apigateway.service.mcp import build_mcp_server_application_url, build_mcp_server_url, validate_mcp_prompts_payload
 from apigateway.service.resource import get_resource_id_to_labels_by_label_ids
 from apigateway.service.resource_version import (
     get_resource_id_to_schema_by_resource_version,
     get_resource_names_set,
     get_resource_schema,
 )
+from apigateway.utils.django import get_model_dict
 from apigateway.utils.time import NeverExpiresTime
+
+from .audit import (
+    get_mcp_server_permission_sync_data_before_map,
+    get_mcp_server_sync_data_before_map,
+    record_mcp_server_permission_sync_audits,
+    record_mcp_server_sync_audits,
+)
+from .prompt import parse_prompts_content
+
+if TYPE_CHECKING:
+    from apigateway.common.tenant.user_credentials import UserCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +187,8 @@ class MCPServerHandler:
         stage_id: int,
         stage_name: str,
         mcp_servers_data: List[Dict[str, Any]],
+        username: str = "",
+        comment: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """批量创建或更新 MCP Server
 
@@ -187,6 +202,21 @@ class MCPServerHandler:
         Returns:
             操作结果列表，每项包含 name, action, id
         """
+        mcp_servers_data_for_audit = copy.deepcopy(mcp_servers_data)
+        permission_data_before_map: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        data_before_map = get_mcp_server_sync_data_before_map(
+            gateway_id=gateway_id,
+            gateway_name=gateway_name,
+            stage_name=stage_name,
+            mcp_servers_data=mcp_servers_data_for_audit,
+        )
+        permission_data_before_map = get_mcp_server_permission_sync_data_before_map(
+            gateway_id=gateway_id,
+            gateway_name=gateway_name,
+            stage_name=stage_name,
+            mcp_servers_data=mcp_servers_data_for_audit,
+        )
+
         results = []
         for mcp_data in mcp_servers_data:
             mcp_data["gateway_id"] = gateway_id
@@ -222,6 +252,22 @@ class MCPServerHandler:
             MCPServerHandler._sync_mcp_server_categories(instance, category_names)
 
             results.append({"name": instance.name, "action": action, "id": instance.id})
+
+        record_mcp_server_sync_audits(
+            username=username,
+            gateway_id=gateway_id,
+            results=results,
+            data_before_map=data_before_map or {},
+            comment=comment,
+        )
+        record_mcp_server_permission_sync_audits(
+            username=username,
+            gateway_id=gateway_id,
+            results=results,
+            mcp_servers_data=mcp_servers_data_for_audit,
+            data_before_map=permission_data_before_map,
+            comment=comment,
+        )
 
         return results
 
@@ -730,14 +776,12 @@ class MCPServerHandler:
             序列化所需的 context 字典
         """
         gateway_ids = list({ms.gateway.id for ms in mcp_servers})
-        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config(gateway_ids)
         gateways = {
             gw.id: {
                 "id": gw.id,
                 "name": gw.name,
                 "maintainers": gw.maintainers,
-                "is_official": gateway_auth_configs[gw.id].gateway_type
-                in (GatewayTypeEnum.SUPER_OFFICIAL_API.value, GatewayTypeEnum.OFFICIAL_API.value),
+                "is_official": gw.is_official,
             }
             for gw in Gateway.objects.filter(id__in=gateway_ids)
         }
@@ -825,14 +869,12 @@ class MCPServerHandler:
         ]
 
         # 构建 gateway/stage 上下文
-        gateway_auth_configs = GatewayAuthContext().get_gateway_id_to_auth_config([instance.gateway.id])
         gateways = {
             instance.gateway.id: {
                 "id": instance.gateway.id,
                 "name": instance.gateway.name,
                 "maintainers": instance.gateway.maintainers,
-                "is_official": gateway_auth_configs[instance.gateway.id].gateway_type
-                in (GatewayTypeEnum.SUPER_OFFICIAL_API.value, GatewayTypeEnum.OFFICIAL_API.value),
+                "is_official": instance.gateway.is_official,
             }
         }
         stages = {
@@ -856,7 +898,12 @@ class MCPServerHandler:
         }
 
     @staticmethod
-    def disable_servers(gateway_id: int, stage_id: int = 0) -> None:
+    def disable_servers(
+        gateway_id: int,
+        stage_id: int = 0,
+        username: str = "",
+        comment: str = "",
+    ) -> None:
         """set the status of the servers to inactive
         e.g. gateway inactivated, stage offline, etc.
 
@@ -868,7 +915,27 @@ class MCPServerHandler:
         if stage_id:
             queryset = queryset.filter(stage_id=stage_id)
 
+        data_before_map = {
+            instance.id: get_model_dict(instance)
+            for instance in queryset.filter(status=MCPServerStatusEnum.ACTIVE.value)
+        }
+
         queryset.update(status=MCPServerStatusEnum.INACTIVE.value)
+
+        if not data_before_map:
+            return
+
+        for instance in MCPServer.objects.filter(id__in=data_before_map.keys()):
+            Auditor.record_mcp_server_op_success(
+                op_type=OpTypeEnum.MODIFY,
+                username=username,
+                gateway_id=gateway_id,
+                instance_id=instance.id,
+                instance_name=instance.name,
+                data_before=data_before_map.get(instance.id, {}),
+                data_after=get_model_dict(instance),
+                comment=comment or _("停用 MCPServer"),
+            )
 
     # ========== Prompts 相关方法 ==========
 
@@ -902,11 +969,7 @@ class MCPServerHandler:
         if not extend or not extend.content:
             return []
 
-        try:
-            return json.loads(extend.content)
-        except json.JSONDecodeError:
-            logger.exception("Failed to parse prompts content for mcp_server_id=%s", mcp_server_id)
-            return []
+        return parse_prompts_content(extend.content, mcp_server_id)
 
     @staticmethod
     def save_prompts(mcp_server_id: int, prompts: List[Dict[str, Any]], username: str) -> None:
@@ -917,6 +980,7 @@ class MCPServerHandler:
             prompts: prompts 列表
             username: 操作用户名
         """
+        validate_mcp_prompts_payload(prompts)
         content = json.dumps(prompts, ensure_ascii=False)
 
         extend, created = MCPServerExtend.objects.get_or_create(
@@ -977,11 +1041,8 @@ class MCPServerHandler:
         prompts_count_map: Dict[int, int] = dict.fromkeys(mcp_server_ids, 0)
         for extend in extends:
             if extend.content:
-                try:
-                    prompts = json.loads(extend.content)
-                    prompts_count_map[extend.mcp_server_id] = len(prompts)
-                except json.JSONDecodeError:
-                    logger.exception("Failed to parse prompts content for mcp_server_id=%s", extend.mcp_server_id)
+                prompts = parse_prompts_content(extend.content, extend.mcp_server_id)
+                prompts_count_map[extend.mcp_server_id] = len(prompts)
 
         return prompts_count_map
 

@@ -129,7 +129,6 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
             context={
                 "resource_count": GatewayHandler.get_resource_count(gateway_ids),
                 "stages": GatewayHandler.get_stages_with_release_status(gateway_ids),
-                "gateway_auth_configs": GatewayAuthContext().get_gateway_id_to_auth_config(gateway_ids),
                 "operation_statuses": operation_statuses,
             },
         )
@@ -417,7 +416,11 @@ class GatewayUpdateStatusApi(generics.UpdateAPIView):
 
         # 网关停用时，将网关下所有 MCPServer 设置为停用
         if new_gateway_status == GatewayStatusEnum.INACTIVE.value:
-            MCPServerHandler.disable_servers(gateway_id=instance.id)
+            MCPServerHandler.disable_servers(
+                gateway_id=instance.id,
+                username=request.user.username,
+                comment=_("网关停用，同步停用其 MCP Server"),
+            )
 
         # 触发网关发布
         if is_need_publish:

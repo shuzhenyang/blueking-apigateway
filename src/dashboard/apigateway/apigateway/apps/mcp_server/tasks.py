@@ -21,8 +21,12 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from celery import shared_task
+from django.conf import settings
 
-from apigateway.biz.mcp_server import MCPServerHandler, MCPServerPromptHandler
+from apigateway.biz.mcp_server import (
+    MCPServerHandler,
+    MCPServerPromptHandler,
+)
 from apigateway.core.constants import ReleaseHistoryStatusEnum
 from apigateway.service.release import wait_release_done
 
@@ -149,7 +153,20 @@ def _fetch_updated_prompts(need_update_prompt_ids: Set[int]) -> Optional[Dict[in
     if not updated_prompts:
         return {}
 
-    return {p["id"]: p for p in updated_prompts if p.get("id")}
+    result: Dict[int, Dict[str, Any]] = {}
+    for prompt in updated_prompts:
+        if not isinstance(prompt, dict):
+            logger.warning("Skip invalid prompt payload item, expected dict, got type=%s", type(prompt).__name__)
+            continue
+
+        prompt_id = prompt.get("id")
+        if not prompt_id:
+            logger.warning("Skip invalid prompt payload item without id")
+            continue
+
+        result[prompt_id] = prompt
+
+    return result
 
 
 @shared_task(name="apigateway.apps.mcp_server.tasks.sync_mcp_server_prompts", ignore_result=True)
@@ -219,6 +236,8 @@ def sync_mcp_server_after_release(
     stage_name: str,
     release_history_id: int,
     mcp_servers_data: List[Dict[str, Any]],
+    username: str = "",
+    comment: Optional[str] = None,
 ):
     """等待发布完成后同步 MCP Server 数据到 DB
 
@@ -260,12 +279,15 @@ def sync_mcp_server_after_release(
     )
 
     try:
+        audit_username = username or settings.GATEWAY_DEFAULT_CREATOR
         results = MCPServerHandler.save_mcp_servers(
             gateway_id=gateway_id,
             gateway_name=gateway_name,
             stage_id=stage_id,
             stage_name=stage_name,
             mcp_servers_data=mcp_servers_data,
+            username=audit_username,
+            comment=comment,
         )
         logger.info(
             "sync_mcp_server_after_release: completed, %d mcp servers synced, gateway=%s(%d), stage=%s(%d)",

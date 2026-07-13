@@ -21,6 +21,7 @@ package mcp
 import (
 	"context"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"mcp_proxy/pkg/entity/model"
@@ -104,9 +105,41 @@ func NewConfig(resourceVersion int) *Config {
 	}
 }
 
+// NewConfigWithOpenAPISpec creates a Config with OpenAPI data for testing.
+func NewConfigWithOpenAPISpec(resourceVersion int, openapiFileData *openapi3.T) *Config {
+	return &Config{
+		resourceVersion: resourceVersion,
+		openapiFileData: openapiFileData,
+	}
+}
+
+// LoadOpenAPISpecForTest exposes loadOpenAPISpec for testing.
+func LoadOpenAPISpecForTest(schema string) (*openapi3.T, error) {
+	return loadOpenAPISpec(schema)
+}
+
+// GetOpenAPISpecVersionForTest exposes getOpenAPISpecVersion for testing.
+func GetOpenAPISpecVersionForTest(openapiFileData *openapi3.T) string {
+	return getOpenAPISpecVersion(openapiFileData)
+}
+
 // GetLoadStatsValues returns stats values for testing.
 func GetLoadStatsValues(stats *loadStats) (added, updated, skipped, errorCount int) {
 	return stats.addedCount, stats.updatedCount, stats.skippedCount, stats.errorCount
+}
+
+// GetServerLoadResultError returns the load result error for testing.
+func GetServerLoadResultError(result *serverLoadResult) error {
+	return result.err
+}
+
+// BuildReloadPanicReportForTest exposes buildReloadPanicReport for testing.
+func BuildReloadPanicReportForTest(
+	phase string,
+	serverName string,
+	panicErr any,
+) (string, map[string]string, map[string]any, error) {
+	return buildReloadPanicReport(phase, serverName, panicErr)
 }
 
 // PrefetchServerConfigsForTest exposes prefetchServerConfigs for benchmark testing.

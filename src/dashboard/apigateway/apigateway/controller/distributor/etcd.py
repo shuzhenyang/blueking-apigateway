@@ -18,10 +18,10 @@
 import logging
 from typing import TYPE_CHECKING, Tuple
 
-from apigateway.apps.data_plane.models import DataPlane
-
 if TYPE_CHECKING:
     import etcd3
+
+    from apigateway.apps.data_plane.models import DataPlane
 from apigateway.controller.distributor.base import BaseDistributor
 from apigateway.controller.registry.etcd import EtcdRegistry
 from apigateway.controller.release_logger import ReleaseProcedureLogger
@@ -63,7 +63,7 @@ class GlobalResourceDistributor(BaseDistributor):
         publish_id: int,
     ) -> Tuple[bool, str]:
         """将 release 发布到 global registry 中"""
-        transformer = GlobalApisixResourceTransformer()
+        transformer = GlobalApisixResourceTransformer(self.data_plane.apisix_version)
         registry = self._get_registry()
 
         gateway = Gateway(id=-1, name="global")
@@ -134,7 +134,8 @@ class GatewayResourceDistributor(BaseDistributor):
     ) -> Tuple[bool, str]:
         """将 release 发布到 micro-gateway 对应的 registry 中"""
         transformer = GatewayApisixResourceTransformer(
-            release=self.release,
+            self.release,
+            self.data_plane.apisix_version,
             publish_id=publish_id,
         )
         registry = self._get_registry(self.gateway, self.stage)
@@ -215,7 +216,8 @@ class GatewayResourceDistributor(BaseDistributor):
         #     return True, "ok"
 
         transformer = GatewayApisixResourceTransformer(
-            release=self.release,
+            self.release,
+            self.data_plane.apisix_version,
             publish_id=publish_id,
             revoke_flag=True,
         )

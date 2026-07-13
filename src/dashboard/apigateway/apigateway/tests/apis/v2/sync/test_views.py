@@ -17,26 +17,50 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
+import json
+
 import pytest
 from ddf import G
 from django.conf import settings
 
+from apigateway.apps.audit.constants import OpObjectTypeEnum, OpTypeEnum
+from apigateway.apps.audit.models import AuditEventLog
 from apigateway.apps.data_plane.models import DataPlane
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission, MCPServerCategory
 from apigateway.apps.permission.models import AppGatewayPermission, AppResourcePermission
 from apigateway.core.models import Backend, BackendConfig, GatewayRelatedApp, Resource, ResourceVersion, Stage
+from apigateway.service.gateway_jwt import GatewayJWTHandler
 from apigateway.service.resource_version import make_resource_schema_version
 
 
 @pytest.fixture()
 def disable_app_permission(mocker):
     mocker.patch(
-        "apigateway.apis.v2.sync.views.OpenAPIV2GatewayRelatedAppPermission.has_permission",
+        "apigateway.apis.v2.permissions.OpenAPIV2GatewayRelatedAppPermission.has_permission",
         return_value=True,
     )
 
 
 class TestSyncApi:
+    def test_gateway_public_key_retrieve_from_dashboard_backend(
+        self, settings, request_view, fake_gateway, disable_app_permission
+    ):
+        settings.JWT_ISSUER = "foo"
+        jwt = GatewayJWTHandler.create_jwt(fake_gateway)
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.sync.gateway.public_key.retrieve",
+            path_params={"gateway_name": fake_gateway.name},
+            gateway=fake_gateway,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == {
+            "issuer": "foo",
+            "public_key": jwt.public_key,
+        }
+
     def test_gateway_related_apps_add_records_related_app_codes_before_and_after(
         self, mocker, request_view, fake_admin_user, fake_gateway, disable_app_permission
     ):
@@ -143,6 +167,8 @@ class TestSyncApi:
         )
 
         assert resp.status_code == 200
+        stage = Stage.objects.get(gateway=fake_gateway, name="prod")
+        assert resp.json()["data"] == {"id": stage.id, "name": stage.name}
         assert not BackendConfig.objects.filter(backend=omitted_backend, stage__name="prod").exists()
 
     def test_stage_sync_with_empty_backends_returns_error(self, request_view, fake_gateway, disable_app_permission):
@@ -164,6 +190,80 @@ class TestSyncApi:
 
         assert resp.status_code == 400
         assert "backends" in str(resp.json()["error"])
+
+    def test_stage_sync_records_stage_backend_audit(
+        self, request_view, fake_admin_user, fake_gateway, fake_stage, fake_backend, disable_app_permission
+    ):
+        fake_gateway.name = "test-stage-sync-stage-backend-audit"
+        fake_gateway.save()
+        fake_stage.name = "prod"
+        fake_stage.save()
+        fake_backend.name = "default"
+        fake_backend.save()
+        backend_config = BackendConfig.objects.get(gateway=fake_gateway, stage=fake_stage, backend=fake_backend)
+        data_before = backend_config.config
+
+        resp = request_view(
+            method="POST",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.stages.sync",
+            path_params={"gateway_name": fake_gateway.name},
+            data={
+                "name": fake_stage.name,
+                "description": "desc",
+                "vars": {},
+                "backends": [
+                    {
+                        "name": fake_backend.name,
+                        "config": {
+                            "timeout": 60,
+                            "loadbalance": "roundrobin",
+                            "hosts": [{"host": "http://new.example.com"}],
+                        },
+                    }
+                ],
+            },
+            user=fake_admin_user,
+        )
+
+        assert resp.status_code == 200
+        audit_log = AuditEventLog.objects.get(
+            op_object_type=OpObjectTypeEnum.STAGE_BACKEND.value,
+            comment="OpenAPI 同步更新环境后端配置",
+        )
+        assert audit_log.username == "admin"
+        assert audit_log.op_type == OpTypeEnum.MODIFY.value
+        assert audit_log.op_object == "prod:default"
+        assert audit_log.op_object_id == str(backend_config.id)
+        assert json.loads(audit_log.data_before) == data_before
+        assert json.loads(audit_log.data_after) == {
+            "type": "node",
+            "timeout": 60,
+            "loadbalance": "roundrobin",
+            "hosts": [{"scheme": "http", "host": "new.example.com", "weight": 100}],
+        }
+
+    def test_resource_version_create_returns_created_info(
+        self, mocker, request_view, fake_gateway, fake_admin_user, disable_app_permission
+    ):
+        resource_version = mocker.Mock(id=123, version="1.1.0")
+        create_resource_version_with_artifacts = mocker.patch(
+            "apigateway.apis.v2.sync.views.ResourceVersionArtifactHandler.create_resource_version_with_artifacts",
+            return_value=resource_version,
+        )
+
+        resp = request_view(
+            method="POST",
+            view_name="openapi.v2.sync.resource_versions.list_create",
+            gateway=fake_gateway,
+            path_params={"gateway_name": fake_gateway.name},
+            data={"version": "1.1.0", "comment": "release comment"},
+            user=fake_admin_user,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == {"id": 123, "version": "1.1.0"}
+        create_resource_version_with_artifacts.assert_called_once()
 
     def test_resource_version_release_preserves_stage_id_order(
         self, faker, mocker, request_view, fake_admin_user, fake_gateway, disable_app_permission
@@ -295,6 +395,22 @@ class TestSyncApi:
         assert result["data"][0]["name"] == f"{fake_gateway.name}-{fake_stage.name}-server1"
         assert result["data"][0]["action"] == "created"
         assert MCPServerAppPermission.objects.filter(mcp_server_id=result["data"][0]["id"]).count() == 2
+        audit_log = AuditEventLog.objects.get(
+            op_object_type=OpObjectTypeEnum.MCP_SERVER.value,
+            op_object_id=result["data"][0]["id"],
+        )
+        assert audit_log.username == settings.GATEWAY_DEFAULT_CREATOR
+        assert audit_log.op_type == OpTypeEnum.CREATE.value
+        assert audit_log.comment == "同步 MCPServer"
+        assert json.loads(audit_log.data_before) == {}
+        assert json.loads(audit_log.data_after)["name"] == result["data"][0]["name"]
+        permission_audit_logs = AuditEventLog.objects.filter(
+            op_object_type=OpObjectTypeEnum.MCP_SERVER_PERMISSION.value,
+            comment="同步 MCPServer",
+        )
+        assert permission_audit_logs.count() == 2
+        assert set(permission_audit_logs.values_list("op_object", flat=True)) == {"app1", "app2"}
+        assert set(permission_audit_logs.values_list("op_type", flat=True)) == {OpTypeEnum.CREATE.value}
 
     def test_mcp_server_sync_with_update(
         self,
@@ -348,6 +464,23 @@ class TestSyncApi:
         assert result["data"][0]["action"] == "updated"
         assert MCPServerAppPermission.objects.filter(mcp_server_id=result["data"][0]["id"]).count() == 3
         assert MCPServer.objects.get(id=result["data"][0]["id"]).status == 1
+        audit_log = AuditEventLog.objects.get(
+            op_object_type=OpObjectTypeEnum.MCP_SERVER.value,
+            op_object_id=result["data"][0]["id"],
+        )
+        assert audit_log.username == settings.GATEWAY_DEFAULT_CREATOR
+        assert audit_log.op_type == OpTypeEnum.MODIFY.value
+        assert audit_log.comment == "同步 MCPServer"
+        assert json.loads(audit_log.data_before)["status"] == 0
+        assert json.loads(audit_log.data_after)["status"] == 1
+        permission_audit_logs = AuditEventLog.objects.filter(
+            op_object_type=OpObjectTypeEnum.MCP_SERVER_PERMISSION.value,
+            comment="同步 MCPServer",
+        )
+        assert permission_audit_logs.count() == 2
+        app_code_to_op_type = {log.op_object: log.op_type for log in permission_audit_logs}
+        assert app_code_to_op_type["app1"] == OpTypeEnum.MODIFY.value
+        assert app_code_to_op_type["app3"] == OpTypeEnum.CREATE.value
 
     def test_mcp_server_sync_with_no_schema_resource(
         self, request_view, fake_gateway, fake_stage, fake_resource, fake_release_v2, disable_app_permission

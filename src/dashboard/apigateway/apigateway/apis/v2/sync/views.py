@@ -50,13 +50,14 @@ from apigateway.common.constants import CallSourceTypeEnum
 from apigateway.common.error_codes import error_codes
 from apigateway.components.bkauth import get_app_tenant_info
 from apigateway.core.constants import ReleaseHistoryStatusEnum, ReleaseStatusEnum
-from apigateway.core.models import Gateway, Release, Resource, ResourceVersion, Stage
+from apigateway.core.models import JWT, Gateway, Release, Resource, ResourceVersion, Stage
 from apigateway.utils.django import get_model_dict, get_object_or_None
 from apigateway.utils.responses import FailJsonResponse, OKJsonResponse
 
 from . import serializers
 from .serializers import (
     DocImportByArchiveInputSLZ,
+    GatewayPublicKeyRetrieveOutputSLZ,
     GatewayResourceVersionLatestRetrieveOutputSLZ,
     GatewaySyncOutputSLZ,
     ReleaseInputSLZ,
@@ -64,6 +65,7 @@ from .serializers import (
     ResourceImportInputSLZ,
     ResourceSyncOutputSLZ,
     ResourceVersionCreateInputSLZ,
+    ResourceVersionCreateOutputSLZ,
     ResourceVersionListInputSLZ,
     ResourceVersionListOutputSLZ,
     SDKGenerateInputSLZ,
@@ -145,6 +147,28 @@ class GatewaySyncApi(generics.CreateAPIView):
 
 
 @method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="获取网关公钥",
+        responses={status.HTTP_200_OK: GatewayPublicKeyRetrieveOutputSLZ()},
+        tags=["OpenAPI.V2.Sync"],
+    ),
+)
+class GatewayPublicKeyRetrieveApi(generics.RetrieveAPIView):
+    permission_classes = [OpenAPIV2GatewayRelatedAppPermission]
+
+    def get(self, request, gateway_name: str, *args, **kwargs):
+        jwt = JWT.objects.get(gateway=request.gateway)
+        output_slz = GatewayPublicKeyRetrieveOutputSLZ(
+            {
+                "issuer": getattr(settings, "JWT_ISSUER", ""),
+                "public_key": jwt.public_key,
+            }
+        )
+        return OKJsonResponse(data=output_slz.data)
+
+
+@method_decorator(
     name="post",
     decorator=swagger_auto_schema(
         operation_description="同步网关stage",
@@ -183,7 +207,7 @@ class GatewayStageSyncViewSet(generics.CreateAPIView):
             data_before=data_before,
             data_after=get_model_dict(stage),
         )
-        output_slz = StageSyncOutputSLZ(instance=instance)
+        output_slz = StageSyncOutputSLZ(instance=stage)
         return OKJsonResponse(data=output_slz.data)
 
 
@@ -441,7 +465,7 @@ class GatewayAppPermissionGrantApi(generics.CreateAPIView):
     decorator=swagger_auto_schema(
         operation_description="创建网关资源版本",
         request_body=ResourceVersionCreateInputSLZ(),
-        responses={status.HTTP_201_CREATED: ""},
+        responses={status.HTTP_200_OK: ResourceVersionCreateOutputSLZ()},
         tags=["OpenAPI.V2.Sync"],
     ),
 )
@@ -466,12 +490,13 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
         slz = self.get_serializer(data=request.data, context={"request": request})
         slz.is_valid(raise_exception=True)
         data = slz.validated_data
-        ResourceVersionArtifactHandler.create_resource_version_with_artifacts(
+        resource_version = ResourceVersionArtifactHandler.create_resource_version_with_artifacts(
             gateway=request.gateway,
             data=data,
             username=request.user.username,
         )
-        return OKJsonResponse(status=status.HTTP_201_CREATED)
+        output_slz = ResourceVersionCreateOutputSLZ(resource_version)
+        return OKJsonResponse(data=output_slz.data)
 
 
 @method_decorator(
@@ -626,6 +651,8 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         mcp_servers_data = serializer.validated_data["mcp_servers"]
+        username = request.user.username or settings.GATEWAY_DEFAULT_CREATOR
+        audit_comment = _("同步 MCPServer")
 
         if is_releasing:
             sync_mcp_server_after_release.delay(
@@ -635,6 +662,8 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
                 stage_name=stage.name,
                 release_history_id=stage_status_info["publish_id"],
                 mcp_servers_data=mcp_servers_data,
+                username=username,
+                comment=audit_comment,
             )
 
             results = [
@@ -654,6 +683,8 @@ class GatewayMcpServerSyncViewSet(generics.CreateAPIView):
                 stage_id=stage.id,
                 stage_name=stage.name,
                 mcp_servers_data=mcp_servers_data,
+                username=username,
+                comment=audit_comment,
             )
 
         output_slz = StageMcpServersSyncOutputSLZ(results, many=True)

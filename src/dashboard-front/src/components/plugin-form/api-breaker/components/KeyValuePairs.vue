@@ -56,7 +56,7 @@
             color="#979BA5"
             name="minus-circle-shape"
             size="18"
-            @click="removePair(index)"
+            @click="() => removePair(index)"
           />
           <AgIcon
             v-if="index === internalValue.length - 1"

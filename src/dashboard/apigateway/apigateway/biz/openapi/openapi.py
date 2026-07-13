@@ -23,9 +23,9 @@ from openapi_spec_validator.validation.exceptions import UnresolvableParameterEr
 from openapi_spec_validator.versions import OPENAPIV2, get_spec_version
 from openapi_spec_validator.versions.exceptions import OpenAPIVersionNotFound
 from prance import ResolvingParser
+from prance.util.url import ResolutionError
 
 from apigateway.apps.support.constants import OpenAPIFormatEnum
-from apigateway.core.models import Gateway
 from apigateway.utils.yaml import yaml_loads
 
 from .constants import OpenAPIVersionKeyEnum
@@ -39,6 +39,7 @@ from .validate import ResourceImportValidator
 
 if TYPE_CHECKING:
     from apigateway.biz.resource import ResourceData
+    from apigateway.core.models import Gateway
 
 # 初始化openapi validator schema
 init_validator_schema()
@@ -119,7 +120,10 @@ class OpenAPIImportManager:
 
         # 进行逻辑校验
 
-        self.parse()
+        try:
+            self.parse()
+        except ResolutionError as err:
+            return [SchemaValidateErr(str(err), "$", [])]
 
         validator = ResourceImportValidator(
             gateway=self.gateway,

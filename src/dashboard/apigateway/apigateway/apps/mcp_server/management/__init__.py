@@ -15,10 +15,4 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-from apigateway.core.constants import GatewayTypeEnum
 
-
-class GatewayTypeHandler:
-    @staticmethod
-    def is_official(gateway_type: int) -> bool:
-        return gateway_type in [GatewayTypeEnum.SUPER_OFFICIAL_API.value, GatewayTypeEnum.OFFICIAL_API.value]
