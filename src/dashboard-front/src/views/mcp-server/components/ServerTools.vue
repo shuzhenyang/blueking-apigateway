@@ -194,7 +194,7 @@
                 </span>
               </section>
             </article>
-            <div class="pl-24px pr-24px mb-16px! text-14px">
+            <div class="pl-40px pr-24px mb-16px! text-14px">
               <div class="color-#4d4f56 font-700 mb-16px">
                 {{ t('描述') }}
               </div>
@@ -266,9 +266,8 @@ import { getMcpServerToolDoc } from '@/services/source/mcp-market';
 import { copy } from '@/utils';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
-import AgIcon from '@/components/ag-icon/Index.vue';
 import ResponseParams from '@/views/resource-management/components/response-params/Index.vue';
-import RequestParams from '@/views/resource-management/components/request-params/Index.vue';
+import RequestParams from '@/views/resource-management/components/request-params-v2/Index.vue';
 import AgDescription from '@/components/ag-description/Index.vue';
 import TableEmpty from '@/components/table-empty/Index.vue';
 
@@ -685,7 +684,7 @@ $code-color: #63656e;
     .tool-name,
     .tool-basics,
     .tool-detail-content {
-      margin: 24px;
+      margin: 24px 40px;
       background-color: #fff;
       border-radius: 2px;
     }
@@ -953,7 +952,7 @@ $code-color: #63656e;
 
     .title {
       padding: 0;
-      margin: 25px 0 17px;
+      margin: 24px 0 16px;
       font-size: 14px;
       font-weight: 700;
       line-height: 22px;

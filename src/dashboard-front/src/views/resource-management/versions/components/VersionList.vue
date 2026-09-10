@@ -53,6 +53,8 @@
         <BkInput
           v-model="filterData.keyword"
           :placeholder="t('搜索版本号')"
+          type="search"
+          class="w-380px"
         />
       </div>
     </div>
@@ -244,7 +246,6 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'version',
     title: t('版本号'),
-    width: 120,
     ellipsis: true,
     cell: (h: any, { row }: any) => (
       <bk-button
@@ -266,7 +267,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'created_time',
     title: t('生成时间'),
-    width: 180,
+    width: 200,
     ellipsis: true,
   },
   {
@@ -300,7 +301,6 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
             ? (
               <EditMember
                 mode="detail"
-                width="600px"
                 field="created_by"
                 content={[row?.created_by]}
               />
@@ -308,7 +308,6 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
             : (
               <TenantUserSelector
                 mode="detail"
-                width="600px"
                 field="created_by"
                 content={[row?.created_by]}
               />
@@ -320,7 +319,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   {
     colKey: 'actions',
     title: t('操作'),
-    width: 200,
+    width: 250,
     cell: (h: any, { row }: any) => (
       <div class="flex gap-10px">
         {

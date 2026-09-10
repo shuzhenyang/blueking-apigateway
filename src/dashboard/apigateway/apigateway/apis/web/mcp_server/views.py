@@ -47,6 +47,7 @@ from apigateway.apps.mcp_server.models import (
     MCPServerCategory,
     MCPServerExtend,
 )
+from apigateway.apps.permission.constants import OAUTH2_BUILTIN_APP_CODES
 from apigateway.biz.audit import Auditor
 from apigateway.biz.mcp_server import MCPServerHandler, MCPServerPromptHandler
 from apigateway.common.constants import CallSourceTypeEnum
@@ -215,7 +216,7 @@ class MCPServerListCreateApi(generics.ListCreateAPIView):
 
         slz.save()
 
-        # sync permissions (includes oauth2 public app permission based on oauth2_public_client_enabled)
+        # sync permissions (including OAuth2 built-in client permissions)
         MCPServerHandler.sync_permissions(slz.instance.id)
 
         # record audit log
@@ -322,7 +323,7 @@ class MCPServerRetrieveUpdateDestroyApi(MCPServerQuerySetMixin, generics.Retriev
         slz.is_valid(raise_exception=True)
         slz.save(updated_by=request.user.username)
 
-        # sync permissions (includes oauth2 public app permission based on oauth2_public_client_enabled)
+        # sync permissions (including OAuth2 built-in client permissions)
         MCPServerHandler.sync_permissions(instance.id)
 
         Auditor.record_mcp_server_op_success(
@@ -829,6 +830,11 @@ class MCPServerAppPermissionDestroyApi(MCPServerAppPermissionQuerySetMixin, gene
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if instance.bk_app_code in OAUTH2_BUILTIN_APP_CODES:
+            raise error_codes.FAILED_PRECONDITION.format(
+                _("OAuth2 内置客户端的 MCPServer 应用权限不允许删除。"), replace=True
+            )
+
         data_before = get_model_dict(instance)
         instance_id = instance.id
         bk_app_code = instance.bk_app_code

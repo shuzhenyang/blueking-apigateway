@@ -20,9 +20,10 @@ import logging
 
 import pytest
 from django.urls import get_resolver
+from django_dynamic_fixture import G
 
-from apigateway.core.constants import BackendKindEnum, GatewayKindEnum
-from apigateway.core.models import Backend, BackendConfig
+from apigateway.core.constants import BackendKindEnum, GatewayKindEnum, StageStatusEnum
+from apigateway.core.models import Backend, BackendConfig, Release, ResourceVersion, Stage
 
 
 def _ai_config(stage_id):
@@ -290,6 +291,32 @@ class TestBackendApi:
         data = response.json()
         assert data["data"]["count"] == 1
 
+    def test_list_counts_backend_referenced_only_by_released_resource(self, request_view, fake_stage):
+        backend = G(Backend, gateway=fake_stage.gateway, name="released-backend")
+        resource_version = G(ResourceVersion, gateway=fake_stage.gateway)
+        resource_version.data = [{"id": 1, "proxy": {"backend_id": backend.id}}]
+        resource_version.save()
+        G(Release, gateway=fake_stage.gateway, stage=fake_stage, resource_version=resource_version)
+        another_stage = G(
+            Stage,
+            gateway=fake_stage.gateway,
+            status=StageStatusEnum.ACTIVE.value,
+            name="another-stage",
+        )
+        G(Release, gateway=fake_stage.gateway, stage=another_stage, resource_version=resource_version)
+
+        response = request_view(
+            "GET",
+            "backend.list-create",
+            path_params={"gateway_id": fake_stage.gateway.id},
+            gateway=fake_stage.gateway,
+        )
+
+        assert response.status_code == 200
+        result = response.json()["data"]["results"][0]
+        assert result["resource_count"] == 1
+        assert result["deletable"] is False
+
     def test_retrieve(self, request_view, fake_stage):
         fake_gateway = fake_stage.gateway
 
@@ -430,24 +457,35 @@ class TestBackendConnectivityApi:
             allow_redirects=False,
         )
 
-    def test_openai_compatible_uses_custom_models_endpoint(self, mocker, request_view, fake_stage):
+    @pytest.mark.parametrize(
+        "endpoint, model_endpoint",
+        [
+            (
+                "https://models.example.com/v1/chat/completions?api-version=2026-01-01",
+                "https://catalog.example.com/custom/models?api-version=2026-01-01",
+            ),
+            ("https://apidemo/component", "https://apidemo/custom/models"),
+        ],
+    )
+    def test_openai_compatible_uses_custom_models_endpoint(
+        self, mocker, request_view, fake_stage, endpoint, model_endpoint
+    ):
         fake_stage.gateway.kind = GatewayKindEnum.AI.value
         fake_stage.gateway.save()
         config = _ai_config(fake_stage.id)
         config.update(
             {
                 "provider": "openai-compatible",
-                "endpoint": "https://models.example.com/v1/chat/completions?api-version=2026-01-01",
+                "endpoint": endpoint,
                 "auth_header": {"name": "X-Api-Key", "value": "secret"},
             }
         )
         config.pop("api_key")
         resolver = mocker.patch(
             "socket.getaddrinfo",
-            return_value=[(2, 1, 6, "", ("8.8.8.8", 443))],
+            return_value=[(2, 1, 6, "", ("10.0.0.10", 443))],
         )
         http_get = _mock_model_response(mocker, {"data": [{"id": "custom-model"}]})
-        model_endpoint = "https://catalog.example.com/custom/models?api-version=2026-01-01"
         config["model_endpoint"] = model_endpoint
 
         response = request_view(
@@ -459,6 +497,7 @@ class TestBackendConnectivityApi:
         )
 
         assert response.status_code == 200, response.json()
+        assert response.json()["data"] == {"models": ["custom-model"]}
         http_get.assert_called_once_with(
             model_endpoint,
             {},

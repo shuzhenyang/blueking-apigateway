@@ -25,6 +25,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
 from apigateway.apis.backend_config import validate_single_instance_ai_backend_config
+from apigateway.apis.v2.validators import validate_comma_separated_ints, validate_comma_separated_names
 from apigateway.apps.mcp_server.constants import (
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
@@ -43,6 +44,7 @@ from apigateway.biz.validators import (
     SchemeHostInputValidator,
     StageVarsValidator,
     UpstreamValidator,
+    UserManagedBKAppCodeValidator,
 )
 from apigateway.common.constants import (
     DOMAIN_PATTERN,
@@ -59,6 +61,7 @@ from apigateway.core.constants import (
     DEFAULT_LB_HOST_WEIGHT,
     STAGE_NAME_PATTERN,
     BackendKindEnum,
+    GatewayKindEnum,
     GatewayStatusEnum,
     GatewaySyncKindEnum,
     GatewayTypeEnum,
@@ -68,6 +71,7 @@ from apigateway.core.constants import (
     convert_gateway_kind_to_name,
 )
 from apigateway.core.models import Backend, Gateway, ResourceVersion, Stage
+from apigateway.service.gateway_name import validate_gateway_name_kind
 from apigateway.utils.time import NeverExpiresTime
 
 
@@ -159,15 +163,27 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        self._validate_name(data["name"], data.get("api_type"))
+        kind = convert_gateway_kind_name_to_value(data["kind"])
+        effective_kind = self.instance.kind if self.instance else kind
+        self._validate_name(data["name"], data.get("api_type"), effective_kind)
+
+        if self.instance is None:
+            validate_gateway_name_kind(data["name"], kind)
 
         data["gateway_type"] = data.pop("api_type", None)
-        data["kind"] = convert_gateway_kind_name_to_value(data["kind"])
+        data["kind"] = kind
 
         return data
 
-    def _validate_name(self, name: str, api_type: Optional[int]):
+    def _validate_name(self, name: str, api_type: Optional[int], kind: int = GatewayKindEnum.NORMAL.value):
         if api_type is None or api_type == GatewayTypeEnum.CLOUDS_API.value:
+            return
+
+        if kind == GatewayKindEnum.AI.value:
+            return
+
+        # 场景：某些官方网关名不是 bk-开头，但是需要标记为官方网关
+        if name in settings.IGNORE_GATEWAY_NAME_CHECK_WHITELIST:
             return
 
         for prefix in settings.OFFICIAL_GATEWAY_NAME_PREFIXES:
@@ -682,7 +698,9 @@ class GatewayAppPermissionGrantInputSLZ(serializers.Serializer):
     ]
 
     # 主动授权时，应用可能尚未创建，因此不校验 app_code 是否存在
-    target_app_code = serializers.CharField(label="", max_length=32, required=True)
+    target_app_code = serializers.CharField(
+        label="", max_length=32, required=True, validators=[UserManagedBKAppCodeValidator()]
+    )
     expire_days = serializers.IntegerField(required=False)
     grant_dimension = serializers.ChoiceField(choices=GRANT_DIMENSION_CHOICES)
     resource_names = serializers.ListField(
@@ -730,6 +748,41 @@ class ResourceVersionListOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.ResourceVersionListOutputSLZ"
+
+
+class ResourceVersionLookupInputSLZ(serializers.Serializer):
+    ids = serializers.CharField(allow_blank=True, required=False)
+    versions = serializers.CharField(allow_blank=True, required=False)
+
+    def validate_ids(self, value):
+        return validate_comma_separated_ints(
+            value,
+            invalid_error=_("资源版本 ID 必须为整数，多个以逗号分隔"),
+            max_count_error=_("资源版本 ID 列表最多支持 {max_count} 个"),
+        )
+
+    def validate_versions(self, value):
+        return validate_comma_separated_names(
+            value,
+            max_count_error=_("版本号列表最多支持 {max_count} 个"),
+        )
+
+    def validate(self, attrs):
+        if not attrs.get("ids") and not attrs.get("versions"):
+            raise serializers.ValidationError(_("ids 和 versions 不能同时为空"))
+        return attrs
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.ResourceVersionLookupInputSLZ"
+
+
+class ResourceVersionLookupOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    version = serializers.CharField(read_only=True)
+    comment = serializers.CharField(read_only=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.ResourceVersionLookupOutputSLZ"
 
 
 class GatewayResourceVersionLatestRetrieveOutputSLZ(serializers.Serializer):
@@ -806,6 +859,11 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         default=False,
         help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权",
     )
+    oauth2_personal_client_enabled = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="是否开启 OAuth2 个人客户端模式，开启后将会对 bk_app_code=personal 的应用进行授权",
+    )
     raw_response_enabled = serializers.BooleanField(
         required=False,
         default=False,
@@ -833,6 +891,7 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
             "protocol_type",
             "target_app_codes",
             "oauth2_public_client_enabled",
+            "oauth2_personal_client_enabled",
             "raw_response_enabled",
             "category_names",
         )

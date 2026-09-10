@@ -26,7 +26,7 @@
         {
           'primary-table-no-data': !localTableData.length,
           'primary-table-no-border': !bordered,
-          'primary-table-show-pagination': showPagination
+          'primary-table-show-pagination': showPagination && localTableData.length > 0
         }
       ]"
       :size="tableSettings?.rowSize ?? 'medium'"
@@ -35,7 +35,7 @@
       :pagination="showPagination ? pagination : null"
       :loading="loading"
       :filter-row="null"
-      :hover="false"
+      :hover="hover"
       :bordered="bordered"
       :table-layout="tableLayout"
       :row-key="isExistUniqueKey ? tableRowKey : 'tempUniqueId'"
@@ -67,7 +67,7 @@
           >
             <span class="normal-text">
               <span>{{ t('已选') }}</span>
-              <span class="count">{{ selections.length }}</span>
+              <span class="mx-4px count">{{ selections.length }}</span>
               <span>{{ t('条') }}</span>
               <span class="m-r4px">,</span>
             </span>
@@ -111,6 +111,7 @@
       <template #empty>
         <slot name="empty">
           <TableEmpty
+            class="py-24px"
             :error="error"
             :empty-type="tableEmptyType"
             :no-search-fields="noSearchFields"
@@ -129,7 +130,9 @@
 import {
   cloneDeep,
   isEqual,
+  isPlainObject,
   memoize,
+  some,
   sortBy,
   sortedUniq,
   throttle,
@@ -144,13 +147,15 @@ import {
 import { ConfigProvider } from 'tdesign-vue-next';
 import cnConfig from 'tdesign-vue-next/es/locale/zh_CN';
 import enConfig from 'tdesign-vue-next/es/locale/en_US';
-import { Checkbox, Loading } from 'bkui-vue';
+import { Checkbox, Loading, Popover } from 'bkui-vue';
 import { useRequest } from 'vue-request';
 import type { ITableMethod, ITableSettings } from '@/types/common';
 import { filterSimpleEmpty } from '@/utils/filterEmptyValues';
 import { useMaxTableLimit, useTDesignSelection, useTableSetting } from '@/hooks';
 import i18n from '@/locales';
 import TableEmpty from '@/components/table-empty/Index.vue';
+// tdesign 表格样式
+import '@blueking/tdesign-ui/vue3/index.css';
 
 interface IProps {
   apiMethod?: (params?: any) => Promise<unknown>
@@ -175,6 +180,7 @@ interface IProps {
   maxHeight?: string | number | undefined
   cacheSettingsInLocalStorage?: boolean
   cacheIdentifier?: string
+  hover?: boolean
 }
 
 const selectedRowKeys = defineModel<any[]>('selectedRowKeys', { default: () => [] });
@@ -225,6 +231,8 @@ const {
   cacheSettingsInLocalStorage = true,
   // 表格设置缓存唯一标识符，注意不是 LocalStorage 的 key，而是用于区分不同表格的标识符，不传的话会自动生成一个
   cacheIdentifier = undefined,
+  // 是否鼠标hover每行出现底色
+  hover = true,
 } = defineProps<IProps>();
 
 const emit = defineEmits<{
@@ -289,7 +297,6 @@ const pagination = ref<PrimaryTableProps['pagination']>({
   pageSize: 10,
   total: 0,
   theme: 'default',
-  showPageSize: true,
   pageSizeOptions: [10, 20, 50, 100],
 });
 const isAllSelection = ref(false);
@@ -370,37 +377,49 @@ const selectionColumns = computed(() => [{
     const isChecked = selections.value.map(item => item[tableRowKey]).includes(row[tableRowKey]);
 
     return (
-      <Checkbox
-        modelValue={isChecked}
-        v-bk-tooltips={{
-          content: row.selectionTip ?? '',
-          disabled: typeof disabledCheckSelection === 'undefined' ? true : !disabledCheckSelection?.(row),
-        }}
-        class="custom-ag-table-checkbox"
-        disabled={isDisabled}
-        onChange={(isCheck: boolean, e: MouseEvent) => {
-          e?.stopPropagation();
-          if (isDisabled) {
-            return;
-          }
-          // 这里可以增加disabled逻辑
-          handleCustomSelectChange({
-            isCheck,
-            tableRowKey,
-            row,
-          });
-          const selectionTable = filteredTableData.value;
-          const checkedIds = selectionsRowKeys.value.filter((id: number | string) =>
-            selectionTable.some(item => item[tableRowKey] === id),
-          );
-          isAllSelection.value = checkedIds.length > 0 && checkedIds.length === selectionTable.length;
+      <Popover
+        trigger="hover"
+        placement="top"
+        popoverDelay={100}
+        disabled={typeof disabledCheckSelection === 'undefined' ? true : !disabledCheckSelection?.(row)}
+      >
+        {{
+          default: () => (
+            <Checkbox
+              modelValue={isChecked}
+              class="custom-ag-table-checkbox"
+              disabled={isDisabled}
+              onChange={(isCheck: boolean, e: MouseEvent) => {
+                e?.stopPropagation();
 
-          emit('selection-change', {
-            selectionsRowKeys: checkedIds,
-            selections: selections.value,
-          });
+                if (isDisabled) return;
+
+                // 这里可以增加disabled逻辑
+                handleCustomSelectChange({
+                  isCheck,
+                  tableRowKey,
+                  row,
+                });
+                const selectionTable = filteredTableData.value;
+                const checkedIds = selectionsRowKeys.value.filter((id: number | string) =>
+                  selectionTable.some(item => item[tableRowKey] === id),
+                );
+                isAllSelection.value = checkedIds.length > 0 && checkedIds.length === selectionTable.length;
+
+                emit('selection-change', {
+                  selectionsRowKeys: checkedIds,
+                  selections: selections.value,
+                });
+              }}
+            />
+          ),
+          content: () => (
+            <div>
+              {slots?.selectionPopoverContent?.(row) ?? row.selectionTip}
+            </div>
+          ),
         }}
-      />
+      </Popover>
     );
   },
 }]);
@@ -616,9 +635,11 @@ const renderSelectionData = (selectList?: any[]) => {
   }
   const checkTableData = selectList || selectionsRowKeys.value;
   if (checkTableData?.length > 0 && tableData.value?.length > 0) {
+    const isArrayObject = some(checkTableData, isPlainObject);
+    const filterCheckTableData = isArrayObject ? checkTableData.map(check => check[tableRowKey]) : checkTableData;
     const selectionTable = filteredTableData.value;
     const checkedIds = selectionTable
-      .filter(item => checkTableData.includes(item[tableRowKey]))
+      .filter(item => filterCheckTableData.includes(item[tableRowKey]))
       .map(check => check[tableRowKey]);
     isAllSelection.value = checkedIds.length === selectionTable.length;
   }
@@ -875,6 +896,7 @@ defineExpose({
 
 <style lang="scss">
 .primary-table-wrapper {
+  border: 1px solid #dcdee5;
 
   .table-first-full-row {
     width: 100%;
@@ -955,17 +977,66 @@ defineExpose({
     background-color: transparent !important;
   }
 
+  &.t-table--hoverable {
+
+    .t-table__body tr:hover {
+      background-color: #f5f7fa !important;
+    }
+  }
+
+  &.t-size-m {
+
+    .t-table__header {
+
+      th {
+        padding-top: 10.5px;
+
+        &.t-table__th-row-select {
+          padding-top: 9.5px;
+        }
+      }
+    }
+  }
+
+  &.t-table--column-resizable:not(.t-table--bordered) {
+
+    thead.t-table__header {
+
+      &:hover {
+
+        th {
+
+          border-top: none;
+
+          &:not(:last-child):not([data-colkey="__col_setting__"]) {
+            border-right: none;
+          }
+        }
+      }
+
+      th {
+
+        border-top: none;
+
+        &:not(:last-child):not([data-colkey="__col_setting__"]) {
+          border-right: none;
+        }
+
+        &[data-colkey="__col_setting__"] {
+          border-left: 1px solid #dcdee5;
+        }
+      }
+    }
+  }
+
   &.primary-table-no-data {
 
     .t-table__row--full.t-table__first-full-row {
       height: 0;
     }
-  }
 
-  &.primary-table-no-border {
-
-    .t-table__header--fixed {
-      top: -1px;
+    .t-table__pagination-wrap {
+      display: none;
     }
   }
 

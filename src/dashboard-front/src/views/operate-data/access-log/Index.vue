@@ -21,7 +21,7 @@
     <div class="ag-top-header">
       <BkForm
         class="search-form"
-        form-type="vertical"
+        label-width="auto"
       >
         <BkFormItem
           :label="t('选择时间')"
@@ -32,7 +32,7 @@
             ref="datePickerRef"
             v-model="dateValue"
             type="datetimerange"
-            style="max-width: 310px;"
+            style="max-width: 300px;"
             :clearable="false"
             :placeholder="t('选择日期时间范围')"
             use-shortcut-text
@@ -48,7 +48,6 @@
           <BkSelect
             v-model="searchParams.stage_id"
             :clearable="false"
-            style="width: 150px;"
             @change="handleStageChange"
           >
             <BkOption
@@ -59,11 +58,30 @@
             />
           </BkSelect>
         </BkFormItem>
-        <BkFormItem :label="t('后端/模型服务')">
+        <BkFormItem
+          v-show="!isAIGateway"
+          :label="t('后端服务')"
+        >
           <BkSelect
             v-model="backend_id"
             clearable
-            style="width: 250px;"
+            @change="handleBackendChange"
+          >
+            <BkOption
+              v-for="option in backendList"
+              :id="option.id"
+              :key="option.id"
+              :name="option.name"
+            />
+          </BkSelect>
+        </BkFormItem>
+        <BkFormItem
+          v-show="isAIGateway"
+          :label="t('后端/模型服务')"
+        >
+          <BkSelect
+            v-model="backend_id"
+            clearable
             @change="handleBackendChange"
           >
             <BkOptionGroup
@@ -96,23 +114,24 @@
             :list="resourceList"
             :need-prefix="false"
             :placeholder="t('请输入资源名称或资源URL链接')"
-            style="min-width: 250px;"
             @change="handleResourceChange"
           />
         </BkFormItem>
-        <BkFormItem
-          :label="t('查询语句')"
-          class="ag-form-item-inline"
-        >
+        <BkFormItem class="ag-form-item-inline">
+          <template #label>
+            <span class="query-statement-label">
+              {{ t('查询语句') }}
+              <QueryUsagePopover @choose="handleChoose" />
+            </span>
+          </template>
           <SearchInput
             v-model:mode-value="keyword"
-            style="max-width: 466px; min-width: 340px;"
-            @choose="handleChoose"
+            style="min-width: 250px;"
             @search="handleSearch"
           />
         </BkFormItem>
         <BkFormItem label=" ">
-          <div style="display: flex;justify-content: center;align-items: center;">
+          <div class="flex justify-center items-center">
             <BkButton
               theme="primary"
               @click="() => handleSearch(keyword)"
@@ -248,7 +267,7 @@
                 ref="tableRef"
                 v-model:table-data="tableData"
                 v-model:settings="settings"
-                row-key="request_id"
+                table-row-key="request_id"
                 show-settings
                 expand-on-row-click
                 resizable
@@ -264,58 +283,61 @@
               >
                 <template #expandedRow="{ row }">
                   <dl class="details">
-                    <div
-                      v-for="({ label, field }, index) in expandedFields"
-                      :key="index"
-                      class="item"
-                    >
-                      <dt class="label">
-                        {{ label }}
-                        <span class="fields">
-                          ( <span
-                            v-bk-tooltips="t('复制')"
-                            class="fields-main"
-                            @click.stop="() => copy(field)"
+                    <template v-for="({ label, field }, index) in expandedFields">
+                      <div
+                        v-if="field !== 'llm_summary' || (field === 'llm_summary' && isAIGateway)"
+                        :key="index"
+                        class="item"
+                      >
+                        <dt class="label">
+                          {{ label }}
+                          <span class="fields">
+                            ( <span
+                              v-bk-tooltips="t('复制')"
+                              class="fields-main"
+                              @click.stop="() => copy(field)"
+                            >
+                              {{ field }}
+                            </span> ) :
+                          </span>
+                        </dt>
+                        <dd class="value">
+                          <span
+                            v-if="field === 'response_body' && row.status === '200'"
+                            class="respond"
                           >
-                            {{ field }}
-                          </span> ) :
-                        </span>
-                      </dt>
-                      <dd class="value">
-                        <span
-                          v-if="field === 'response_body' && row.status === '200'"
-                          class="respond"
-                        >
-                          <InfoLine class="respond-icon" /><span>{{ t('状态码为 200 时不记录响应正文') }}</span>
-                        </span>
-                        <span v-else>
-                          {{ formatValue(row[field], field) }}
-                        </span>
+                            <InfoLine class="respond-icon" /><span>{{ t('状态码为 200 时不记录响应正文') }}</span>
+                          </span>
+                          <span v-else>
+                            {{ formatValue(row[field], field) }}
+                          </span>
 
-                        <span
-                          v-if="row[field]"
-                          class="opt-btns"
-                        >
-                          <CopyShape
-                            v-bk-tooltips="t('复制')"
-                            class="opt-copy opt-icon"
-                            @click="() => handleRowCopy(field, row)"
-                          />
-                          <template v-if="showOpts(field)">
-                            <EnlargeLine
-                              v-bk-tooltips="t('添加到本次检索')"
-                              class="opt-icon"
-                              @click="() => handleInclude(field, row)"
+                          <span
+                            v-if="row[field]"
+                            class="opt-btns"
+                          >
+                            <CopyShape
+                              v-bk-tooltips="t('复制')"
+                              class="opt-copy opt-icon"
+                              @click="() => handleRowCopy(field, row)"
                             />
-                            <NarrowLine
-                              v-bk-tooltips="t('从本次检索中排除')"
-                              class="opt-icon"
-                              @click="() => handleExclude(field, row)"
-                            />
-                          </template>
-                        </span>
-                      </dd>
-                    </div>
+                            <template v-if="showOpts(field)">
+                              <EnlargeLine
+                                v-bk-tooltips="t('添加到本次检索')"
+                                class="opt-icon"
+                                @click="() => handleInclude(field, row)"
+                              />
+                              <NarrowLine
+                                v-bk-tooltips="t('从本次检索中排除')"
+                                class="opt-icon"
+                                @click="() => handleExclude(field, row)"
+                              />
+                            </template>
+                          </span>
+                        </dd>
+                      </div>
+                    </template>
+
                     <div class="share-btn">
                       <AiBluekingButton
                         v-if="featureFlagStore.isAIEnabled"
@@ -361,6 +383,7 @@ import {
 
 import { copy } from '@/utils';
 import { useChartIntervalOption, useDatePicker } from '@/hooks';
+import QueryUsagePopover from './components/QueryUsagePopover.vue';
 import SearchInput from './components/SearchInput.vue';
 import { useAccessLog, useFeatureFlag, useGateway } from '@/stores';
 import {
@@ -571,6 +594,7 @@ const {
 } = useDatePicker(searchParams);
 
 const apigwId = computed(() => gatewayStore.apigwId);
+const isAIGateway = computed(() => gatewayStore.isAIGateway);
 
 const searchConditions = computed(() => {
   const res: string[] = [];
@@ -596,6 +620,9 @@ const formatterValue = (params: Record<string, any>) => {
 const formatValue = (value: any, field: string) => {
   if (value && ['timestamp'].includes(field)) {
     return dayjs.unix(value).format('YYYY-MM-DD HH:mm:ss ZZ');
+  }
+  if (field === 'llm_summary') {
+    return JSON.stringify(value, null, 2);
   }
   return value || '--';
 };
@@ -962,7 +989,10 @@ const getSearchData = async () => {
 };
 
 const handleRowCopy = (field: string, row: any) => {
-  const copyStr = `${field}: ${row[field]}`;
+  let copyStr = `${field}: ${row[field]}`;
+  if (field === 'llm_summary') {
+    copyStr = `${field}: ${JSON.stringify(row[field], null, 2)}`;
+  }
   copy(copyStr);
 };
 
@@ -1220,15 +1250,16 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .access-log-wrapper {
   min-height: calc(100vh - 208px);
-  padding: 20px 24px;
+  padding: 24px;
 
   .collapse-panel {
     padding: 24px;
     background-color: #fff;
+    box-shadow: 0 2px 4px 0 #1919290d;
 
     .collapse-panel-header {
       display: flex;
-      margin-bottom: 24px;
+      margin-bottom: 0;
       cursor: pointer;
       align-items: center;
 
@@ -1273,6 +1304,10 @@ onBeforeUnmount(() => {
         transform: rotate(-90deg);
       }
     }
+
+    &.bk-collapse-item-active .collapse-panel-header {
+      margin-bottom: 24px;
+    }
   }
 
   .search-term {
@@ -1311,44 +1346,42 @@ onBeforeUnmount(() => {
   }
 
   .ag-top-header {
-    margin-bottom: 24px;
+    margin-bottom: 16px;
 
-    :deep(.search-form) {
+    .query-statement-label {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .search-form {
       display: flex;
+      align-items: center;
       flex-wrap: wrap;
-      gap: 0 16px;
+      gap: 16px;
+      flex: 1;
+      min-width: 0;
 
-      .bk-form-item {
-
-        &:first-child {
-          margin-left: 0;
-        }
+      :deep(.bk-form-item) {
+        display: flex;
+        max-width: fit-content;
+        min-width: 0;
+        margin: 0;
+        align-items: center;
+        flex: 1;
 
         .bk-form-label {
-          padding: 0 15px 0 0;
+          width: auto;
+          text-align: right;
+          white-space: nowrap;
+          padding-right: 8px !important;
+        }
 
-          span {
-            display: inline-block;
-            line-height: 20px;
+        .bk-form-content {
+          .bk-input,
+          .bk-user-selector,
+          .member-selector {
+            width: 100%;
           }
-        }
-
-        .bk-form-content {
-          margin-left: 0 !important;
-        }
-      }
-
-      .ag-form-item-inline {
-        margin-top: 0 !important;
-        margin-left: 0 !important;
-
-        .bk-form-content {
-          display: flex !important;
-          font-size: unset;
-        }
-
-        .suffix {
-          margin-left: 4px;
         }
       }
     }

@@ -20,12 +20,25 @@
   <div>
     <BkSideslider
       v-model:is-show="isShow"
-      :title="t('发布资源至环境【{stage}】', { stage: currentStage?.name })"
       :width="1100"
       class="release-sideslider"
       quick-close
       @animation-end="handleAnimationEnd"
     >
+      <template #header>
+        <div class="flex items-center">
+          <div class="text-14px color-#313238 font-700">
+            {{ t('发布资源到环境') }}
+          </div>
+          <Divider
+            direction="vertical"
+            type="solid"
+          />
+          <div class="text-14px color-#979ba5">
+            {{ currentStage?.name ?? '--' }}
+          </div>
+        </div>
+      </template>
       <template #default>
         <BkLoading :loading="isLoading">
           <div class="sideslider-content">
@@ -33,7 +46,7 @@
               <div class="main">
                 <BkAlert
                   v-if="currentStage?.status === 1"
-                  class="mt-15px"
+                  class="mt-16px"
                   theme="info"
                 >
                   <div class="alert-content">
@@ -44,14 +57,26 @@
                     <span class="pr-12px">{{ t('代码分支') }}: <span> {{ stageDetail.branch || '--' }}</span></span>
                     <span class="pr-12px">CommitID: <span> {{ stageDetail.commit_id || '--' }}</span></span>
                     <span class="pr-12px">
-                      {{
-                        `由 ${stageDetail.created_by || '--'}  于 ${dayjs(stageDetail.created_time)
-                          .format('YYYY-MM-DD HH:mm:ss') || '--'}  发布`
-                      }}
+                      <I18nT
+                        keypath="由 {user} 于 {time} 发布"
+                        tag="span"
+                        scope="global"
+                      >
+                        <template #user>
+                          <bk-user-display-name
+                            v-if="featureFlagStore.isEnableDisplayName"
+                            :user-id="stageDetail.created_by"
+                          />
+                          <span v-else>{{ stageDetail.created_by || '--' }}</span>
+                        </template>
+                        <template #time>
+                          {{ dayjs(stageDetail.created_time).format('YYYY-MM-DD HH:mm:ss') || '--' }}
+                        </template>
+                      </I18nT>
                     </span>
                   </div>
                 </BkAlert>
-                <div class="mt-15px">
+                <div class="mt-16px">
                   <BkForm
                     ref="formRef"
                     :model="formData"
@@ -163,6 +188,7 @@
               <BkButton
                 class="w-100px"
                 theme="primary"
+                :loading="publishLoading"
                 @click="showPublishDia"
               >
                 {{ t('确认发布') }}
@@ -209,9 +235,10 @@ import {
   useRouter,
 } from 'vue-router';
 import ReleaseProgrammableEvent from '../../components/ReleaseProgrammableEvent.vue';
-import { Message } from 'bkui-vue';
+import { Divider, Message } from 'bkui-vue';
 import { cloneDeep } from 'lodash-es';
 import { usePopInfoBox } from '@/hooks';
+import { useFeatureFlag } from '@/stores';
 
 interface FormData {
   stage_id: number
@@ -234,9 +261,11 @@ type IPaasInfo = Awaited<ReturnType<typeof getProgrammableStageDetail>>;
 
 interface ILocalStageItem extends IStageListItem { paasInfo?: IPaasInfo }
 
-interface IProps { currentStage: ILocalStageItem }
+interface IProps {
+  currentStage?: Partial<ILocalStageItem>
+}
 
-const { currentStage } = defineProps<IProps>();
+const { currentStage = {} } = defineProps<IProps>();
 
 const emit = defineEmits<{
   'release-success': [void]
@@ -248,6 +277,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const featureFlagStore = useFeatureFlag();
 
 const isShow = ref(false);
 const formRef = ref();
@@ -297,6 +327,7 @@ const currentCommitInfo = ref<ICommitInfo>({
   type: '',
 });
 const isLoading = ref(false);
+const publishLoading = ref(false);
 
 watch(() => formData.value.branch, () => {
   const commitInfo = stageDetail.value.repo_info.branch_commit_info[formData.value.branch];
@@ -334,7 +365,7 @@ watch(isShow, async (val: boolean) => {
     try {
       isLoading.value = true;
       await fetchStageList();
-      stageDetail.value = await getProgrammableStageDetail(apigwId.value, currentStage!.id);
+      stageDetail.value = await getProgrammableStageDetail(apigwId.value, currentStage?.id as number);
       const { version } = await getVersion();
       formData.value.version = version;
       formData.value.branch = stageDetail.value.branch || stageDetail.value.latest_deployment?.branch || '';
@@ -388,6 +419,7 @@ const showPublishDia = () => {
 };
 
 const handlePublish = async () => {
+  publishLoading.value = true;
   try {
     const params = {
       // stage_id: currentStage.id,
@@ -436,6 +468,9 @@ const handlePublish = async () => {
         message: msg,
       });
     }
+  }
+  finally {
+    publishLoading.value = false;
   }
 };
 
@@ -493,7 +528,7 @@ const getVersion = async (): Promise<{ version: string }> => {
   return await getStageNextVersion(
     apigwId.value,
     {
-      stage_name: currentStage.name,
+      stage_name: currentStage?.name as string,
       version_type: semVerType.value as 'patch' | 'minor' | 'major',
     },
   );
@@ -522,7 +557,7 @@ defineExpose({ showReleaseSideslider });
     width: 100%;
 
     .main {
-      padding: 0 40px;
+      padding: 0 24px;
 
       :deep(.bk-alert-wraper) {
         align-items: center;
@@ -539,7 +574,7 @@ defineExpose({ showReleaseSideslider });
     }
 
     .operate1 {
-      padding: 8px 40px 24px;
+      padding: 8px 24px 24px;
     }
 
     .operate2 {
@@ -660,73 +695,5 @@ defineExpose({ showReleaseSideslider });
     display: none !important;
     opacity: 0% !important;
   }
-}
-
-.custom-version-list {
-
-  .bk-select-content {
-
-    .bk-select-dropdown {
-
-      .bk-select-options {
-
-        .bk-select-option {
-          padding-inline: 0;
-
-          .version-options {
-            padding-inline: 12px;
-            width: 100%;
-
-            .cur-version {
-              margin-left: 6px;
-            }
-
-            &-disabled {
-              color: #c4c6cc;
-              cursor: not-allowed;
-
-              .bk-tag {
-                cursor: not-allowed;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  .extension-add {
-    margin: 0 auto;
-    cursor: pointer;
-
-    .extension-add-content {
-      display: flex;
-      font-size: 12px;
-      color: #63656e;
-      align-items: center;
-
-      .add-resource-btn {
-        margin-right: 5px;
-        font-size: 16px;
-        color: #979ba5;
-      }
-    }
-  }
-}
-
-.publish-version-tips {
-  margin-bottom: 8px;
-  font-size: 14px;
-  font-weight: 400;
-  color: #63656e;
-
-  span {
-    color: #ff9c01;
-  }
-}
-
-.version-tips {
-  margin-left: 4px;
-  color: #979ba5;
 }
 </style>

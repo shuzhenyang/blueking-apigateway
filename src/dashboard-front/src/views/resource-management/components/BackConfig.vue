@@ -22,6 +22,7 @@
     :model="backConfigData"
     :rules="rules"
     class="back-config-container"
+    label-width="180"
     @validate="setInvalidPropId"
   >
     <BkFormItem
@@ -56,6 +57,20 @@
               </template>
             </div>
           </BkOption>
+          <template #extension>
+            <div class="model-service-extension">
+              <div
+                class="model-service-extension-add"
+                @click="handleOpenService"
+              >
+                <AgIcon
+                  class="mr-6px color-#979ba5 text-16px"
+                  name="plus-circle"
+                />
+                <span>{{ t('去新建') }}</span>
+              </div>
+            </div>
+          </template>
         </BkSelect>
         <BkButton
           v-if="isEditService"
@@ -291,6 +306,7 @@ import { backendsPathCheck } from '@/services/source/resource.ts';
 import AddBackendService from '@/views/backend-services/components/AddBackendService.vue';
 import { HTTP_METHODS } from '@/constants';
 import type { IBackendListOutput, IStandardBackendConfigOutput } from '@/services/types/responses/gateways.ts';
+import type { IGatewaysBackendsListQuery } from '@/services/types/query/gateways.ts';
 
 interface IProps {
   detail?: any
@@ -315,6 +331,7 @@ const {
 const emit = defineEmits(['service-init']);
 
 const gatewayStore = useGateway();
+const router = useRouter();
 
 const backRef = ref();
 const frontPath = ref('');
@@ -352,7 +369,7 @@ const timeOutValue = ref('');
 const isShowPopConfirm = ref(false);
 const isTimeEmpty = ref(false);
 // const timeInputRef = ref(null);
-const addBackendServiceRef = ref(null);
+const addBackendServiceRef = ref<InstanceType <typeof AddBackendService>>();
 const isServiceInit = ref(false);
 
 const rules = {
@@ -384,6 +401,7 @@ const isPathValid = ref(false);
 const invalidFormElementIds = ref<string[]>([]);
 
 const gatewayId = computed(() => gatewayStore.apigwId);
+const isAIGateway = computed(() => gatewayStore.isAIGateway);
 
 const isEditService = computed(() => {
   let flag = false;
@@ -605,14 +623,14 @@ async function handleServiceChange(backendId: number) {
 }
 
 const handleEditService = () => {
-  const service = servicesData.value?.filter((item: any) => item.id === backConfigData.value.id)?.[0];
+  const service = servicesData.value?.filter((item: IBackendListOutput) => item.id === backConfigData.value.id)?.[0];
   if (service) {
     baseInfo.value = {
       name: service.name,
       description: service.description,
     };
 
-    (addBackendServiceRef.value as any)?.show();
+    addBackendServiceRef.value?.show();
   }
 };
 
@@ -691,6 +709,17 @@ const handleCheckPath = async () => {
 //   });
 // };
 
+const handleOpenService = () => {
+  const name = isModelProxy ? 'ModelService' : 'BackendService';
+  const routeData = router.resolve({
+    name,
+    query: {
+      mode: 'add',
+    },
+  });
+  window.open(routeData.href, '_blank');
+};
+
 const handleMouseEnter = (e: Event, row: Record<string, number | string | boolean>) => {
   setTimeout(() => {
     row.isTime = true;
@@ -704,10 +733,16 @@ const handleMouseLeave = (e: Event, row: Record<string, number | string | boolea
 };
 
 const init = async () => {
-  const res = await getBackendServiceList(gatewayId.value, {
+  const params: IGatewaysBackendsListQuery = {
     offset: 0,
     limit: 1000,
-  });
+  };
+
+  if (isAIGateway.value) {
+    params.kind = isModelProxy ? 'ai' : 'standard';
+  }
+
+  const res = await getBackendServiceList(gatewayId.value, params);
   servicesData.value = res.results;
   // 检查传进来的资源的 backend 有没有 id，没有的话用 name 匹配一下以正确获取服务数据
   if (!detail?.backend?.id) {
@@ -754,15 +789,10 @@ const validate = async () => {
   }
 };
 
-onMounted(() => {
-  setTimeout(() => {
-  // 事件总线监听重新获取环境列表
-  // mitt.on('front-config', (value: any) => {
-  //   frontPath.value = value.path;
-  //   backConfigData.value.config.match_subpath = value.match_subpath;
-  // });
-    init();
-  });
+watch(() => isAIGateway.value, () => {
+  init();
+}, {
+  immediate: true,
 });
 
 defineExpose({
@@ -778,14 +808,12 @@ defineExpose({
   .table-layout {
     width: auto !important;
     max-width: 700px !important;
-    margin: 0 0 20px 150px;
-
-    // width: 700px !important;
+    margin: 0 0 20px 180px;
   }
 
   .table-warning {
     max-width: 700px !important;
-    margin: 0 0 8px 150px;
+    margin: 0 0 8px 180px;
   }
 
   .public-switch {
@@ -917,5 +945,17 @@ defineExpose({
 
 .back-config-timeout-popover {
   padding: 16px !important;
+}
+
+.model-service-extension {
+  margin: 0 auto;
+  cursor: pointer;
+
+  .model-service-extension-add {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: #63656e;
+  }
 }
 </style>

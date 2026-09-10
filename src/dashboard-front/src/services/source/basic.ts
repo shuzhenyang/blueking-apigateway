@@ -56,9 +56,10 @@ export function getFeatureFlags(params: {
     ENABLE_RUN_DATA: boolean
     ENABLE_RUN_DATA_METRICS: boolean
     ENABLE_SDK: boolean
-    ENABLE_MCP_SERVER_OAUTH2_PUBLIC_CLIENT: boolean
     ENABLE_ITSM4_PERMISSION_APPLY: boolean
+    ENABLE_MCP_SERVER_OAUTH2_PUBLIC_CLIENT: boolean
     ENABLE_MCP_SERVER_OBSERVABILITY: boolean
+    ENABLE_MCP_SERVER_OAUTH2_PERSONAL_CLIENT: boolean
     GATEWAY_APP_BINDING_ENABLED: boolean
     MENU_ITEM_ESB_API: boolean
     MENU_ITEM_ESB_API_DOC: boolean
@@ -130,6 +131,7 @@ export function getEnv() {
       USER_API: string
       UPGRADE_TO_113_TIP: string
       MCP_SERVER_PERMISSION_APPLY: string
+      PERSONAL_TOKEN: string
       PLUGIN_AI_PROXY: string
       PLUGIN_AI_RATE_LIMITING: string
       PLUGIN_API_BREAKER: string
@@ -151,6 +153,7 @@ export function getEnv() {
       PLUGIN_BK_OAUTH2_PROTECTED_RESOURCE: string
       PLUGIN_BK_OAUTH2_VERIFY: string
       PLUGIN_BK_OAUTH2_AUDIENCE_VALIDATE: string
+      PLUGIN_BK_QUERY_STRING_REWRITE: string
     }
   }>(`${path}/settings/env-vars/`);
 }

@@ -17,7 +17,6 @@
  */
 import { defineStore } from 'pinia';
 import { getEnv } from '@/services/source/basic';
-import { locale } from '@/locales';
 
 export const useEnv = defineStore('useEnv', {
   state: () => ({
@@ -100,6 +99,8 @@ export const useEnv = defineStore('useEnv', {
         UPGRADE_TO_113_TIP: '',
         // mcp 权限申请指引
         MCP_SERVER_PERMISSION_APPLY: '',
+        // 个人令牌
+        PERSONAL_TOKEN: '',
         // 负载均衡帮助文档
         LOADBALANCE: '',
         PLUGIN_AI_PROXY: '',
@@ -123,15 +124,11 @@ export const useEnv = defineStore('useEnv', {
         PLUGIN_BK_OAUTH2_PROTECTED_RESOURCE: '',
         PLUGIN_BK_OAUTH2_VERIFY: '',
         PLUGIN_BK_OAUTH2_AUDIENCE_VALIDATE: '',
+        PLUGIN_BK_QUERY_STRING_REWRITE: '',
       },
     },
   }),
   getters: {
-    docsURLPrefix: (state) => {
-      const lang = locale.value === 'zh-cn' ? 'ZH' : 'EN';
-      const docVersion = (state.env.BK_APIGATEWAY_VERSION || '1.17.0').split('.').slice(0, 2).join('.');
-      return `${state.env.BK_DOCS_URL_PREFIX}/markdown/${lang}/APIGateway/${docVersion}`;
-    },
     userSelectorAPI: state => `${state.env.BK_COMPONENT_API_URL}/api/c/compapi/v2/usermanage/fs_list_users/`,
     tenantUserDisplayAPI: state => state.env.BK_USER_WEB_API_URL,
   },

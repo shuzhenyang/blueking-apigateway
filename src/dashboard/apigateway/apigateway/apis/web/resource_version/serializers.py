@@ -142,7 +142,7 @@ class ResourceInfoSLZ(serializers.Serializer):
 
     def _has_openapi_schema(self, obj) -> bool:
         schema = self.context["resource_id_with_schema_dict"].get(obj["id"])
-        return ResourceOpenAPISchemaHandler.has_openapi_schem(schema)
+        return ResourceOpenAPISchemaHandler.has_openapi_schema(schema)
 
     def get_openapi_schema(self, obj):
         if self._has_openapi_schema(obj):
@@ -177,7 +177,7 @@ class ResourceVersionListInputSLZ(serializers.Serializer):
 class ResourceVersionListOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(help_text="id")
     released_stages = serializers.SerializerMethodField(help_text="已发布的环境列表")
-    sdk_count = serializers.SerializerMethodField(help_text="生成skd数量")
+    sdk_count = serializers.SerializerMethodField(help_text="生成 SDK 数量")
     version = serializers.SerializerMethodField(help_text="版本号")
     schema_version = serializers.CharField(help_text="资源版本协议版本：1.0/2.0")
     comment = serializers.CharField(help_text="版本日志")

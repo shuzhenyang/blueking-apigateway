@@ -43,6 +43,10 @@ from apigateway.apps.mcp_server.models import (
     MCPServerCategory,
     MCPServerExtend,
 )
+from apigateway.apps.permission.constants import (
+    OAUTH2_PERSONAL_CLIENT_APP_CODE,
+    OAUTH2_PUBLIC_CLIENT_APP_CODE,
+)
 from apigateway.biz.bk_itsm import ITSM_PERMISSION_APPROVAL_HANDLER
 from apigateway.core.constants import StageStatusEnum
 from apigateway.core.models import Release, ResourceVersion, Stage
@@ -1357,6 +1361,47 @@ class TestMCPServerAppPermissionDestroyApi:
             comment="删除 MCPServer 应用权限",
         )
         assert audit_log.op_type == "delete"
+
+    @pytest.mark.parametrize(
+        "bk_app_code",
+        [
+            OAUTH2_PUBLIC_CLIENT_APP_CODE,
+            OAUTH2_PERSONAL_CLIENT_APP_CODE,
+        ],
+    )
+    def test_destroy_oauth2_builtin_client_permission_is_forbidden(
+        self,
+        mocker,
+        request_view,
+        fake_gateway,
+        fake_mcp_server,
+        bk_app_code,
+    ):
+        mock_sync_permissions = mocker.patch(
+            "apigateway.biz.mcp_server.MCPServerHandler.sync_permissions",
+            return_value=None,
+        )
+        permission = G(
+            MCPServerAppPermission,
+            mcp_server=fake_mcp_server,
+            bk_app_code=bk_app_code,
+            grant_type=MCPServerAppPermissionGrantTypeEnum.GRANT.value,
+        )
+
+        resp = request_view(
+            method="DELETE",
+            view_name="mcp_server.app-permission.destroy",
+            path_params={
+                "gateway_id": fake_gateway.id,
+                "mcp_server_id": fake_mcp_server.id,
+                "id": permission.id,
+            },
+            gateway=fake_gateway,
+        )
+
+        assert resp.status_code == 400
+        assert MCPServerAppPermission.objects.filter(id=permission.id).exists()
+        mock_sync_permissions.assert_not_called()
 
 
 class TestMCPServerAppPermissionApplyListApi:
@@ -3010,6 +3055,7 @@ class TestMCPServerOAuth2Enabled:
     def test_list_returns_oauth2_public_client_enabled(self, request_view, fake_gateway, fake_mcp_server):
         """测试列表接口返回 oauth2_public_client_enabled 字段"""
         fake_mcp_server.oauth2_public_client_enabled = True
+        fake_mcp_server.oauth2_personal_client_enabled = True
         fake_mcp_server.save()
 
         resp = request_view(
@@ -3027,6 +3073,7 @@ class TestMCPServerOAuth2Enabled:
         )
         assert mcp_server_data is not None
         assert mcp_server_data["oauth2_public_client_enabled"] is True
+        assert mcp_server_data["oauth2_personal_client_enabled"] is True
 
     def test_list_returns_oauth2_disabled(self, request_view, fake_gateway, fake_mcp_server):
         """测试列表接口返回 oauth2_public_client_enabled=False"""
@@ -3052,6 +3099,7 @@ class TestMCPServerOAuth2Enabled:
     def test_retrieve_returns_oauth2_public_client_enabled(self, request_view, fake_gateway, fake_mcp_server):
         """测试详情接口返回 oauth2_public_client_enabled 字段"""
         fake_mcp_server.oauth2_public_client_enabled = True
+        fake_mcp_server.oauth2_personal_client_enabled = True
         fake_mcp_server.save()
 
         resp = request_view(
@@ -3064,6 +3112,7 @@ class TestMCPServerOAuth2Enabled:
 
         assert resp.status_code == 200
         assert result["data"]["oauth2_public_client_enabled"] is True
+        assert result["data"]["oauth2_personal_client_enabled"] is True
 
     def test_retrieve_returns_oauth2_disabled(self, request_view, fake_gateway, fake_mcp_server):
         """测试详情接口返回 oauth2_public_client_enabled=False"""

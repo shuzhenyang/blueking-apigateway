@@ -68,6 +68,8 @@ from .serializers import (
     ResourceVersionCreateOutputSLZ,
     ResourceVersionListInputSLZ,
     ResourceVersionListOutputSLZ,
+    ResourceVersionLookupInputSLZ,
+    ResourceVersionLookupOutputSLZ,
     SDKGenerateInputSLZ,
     SDKGenerateOutputSLZ,
     StageMcpServersSyncInputSLZ,
@@ -257,7 +259,7 @@ class DocImportByArchiveApi(generics.CreateAPIView):
     @swagger_auto_schema(
         operation_description="根据 tgz/zip 归档文件，导入资源文档",
         request_body=DocImportByArchiveInputSLZ(),
-        responses={status.HTTP_200_OK: ""},
+        responses={status.HTTP_201_CREATED: ""},
         tags=["OpenAPI.V2.Sync"],
     )
     @transaction.atomic
@@ -457,7 +459,7 @@ class GatewayAppPermissionGrantApi(generics.CreateAPIView):
     decorator=swagger_auto_schema(
         operation_description="获取网关资源版本列表",
         query_serializer=ResourceVersionListInputSLZ(),
-        responses={status.HTTP_201_CREATED: ResourceVersionListOutputSLZ(many=True)},
+        responses={status.HTTP_200_OK: ResourceVersionListOutputSLZ(many=True)},
         tags=["OpenAPI.V2.Sync"],
     ),
 )
@@ -481,10 +483,10 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
         versions = ResourceVersion.objects.filter_objects_fields(
             gateway_id=self.request.gateway.id,
             version=slz.validated_data.get("version"),
-        )
+        ).order_by("id")
         page = self.paginate_queryset(versions)
         slz = ResourceVersionListOutputSLZ(page, many=True)
-        return OKJsonResponse(data=slz.data)
+        return self.get_paginated_response(slz.data)
 
     @transaction.atomic
     def create(self, request, gateway_name: str, *args, **kwargs):
@@ -497,6 +499,33 @@ class ResourceVersionListCreateApi(generics.ListCreateAPIView):
             username=request.user.username,
         )
         output_slz = ResourceVersionCreateOutputSLZ(resource_version)
+        return OKJsonResponse(data=output_slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=swagger_auto_schema(
+        operation_description="按 ID 或版本号查询网关资源版本",
+        query_serializer=ResourceVersionLookupInputSLZ(),
+        responses={status.HTTP_200_OK: ResourceVersionLookupOutputSLZ(many=True)},
+        tags=["OpenAPI.V2.Sync"],
+    ),
+)
+class ResourceVersionLookupApi(generics.ListAPIView):
+    permission_classes = [OpenAPIV2GatewayRelatedAppPermission]
+
+    def list(self, request, *args, **kwargs):
+        slz = ResourceVersionLookupInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        queryset = ResourceVersion.objects.filter(gateway=request.gateway)
+        if data.get("ids"):
+            queryset = queryset.filter(id__in=data["ids"])
+        if data.get("versions"):
+            queryset = queryset.filter(version__in=data["versions"])
+
+        output_slz = ResourceVersionLookupOutputSLZ(queryset.order_by("id"), many=True)
         return OKJsonResponse(data=output_slz.data)
 
 
@@ -526,7 +555,7 @@ class ResourceVersionLatestRetrieveApi(generics.RetrieveAPIView):
     decorator=swagger_auto_schema(
         operation_description="发布网关资源版本",
         request_body=ReleaseInputSLZ(),
-        responses={status.HTTP_201_CREATED: ReleaseOutputSLZ()},
+        responses={status.HTTP_200_OK: ReleaseOutputSLZ()},
         tags=["OpenAPI.V2.Sync"],
     ),
 )
@@ -565,7 +594,7 @@ class ResourceVersionReleaseApi(generics.CreateAPIView):
     name="post",
     decorator=swagger_auto_schema(
         operation_description="生成网关sdk",
-        request_body=ReleaseInputSLZ(),
+        request_body=SDKGenerateInputSLZ(),
         responses={status.HTTP_201_CREATED: SDKGenerateOutputSLZ(many=True)},
         tags=["OpenAPI.V2.Sync"],
     ),
@@ -591,7 +620,7 @@ class SDKGenerateApi(generics.CreateAPIView):
             version=data["version"],
         )
 
-        return OKJsonResponse(status=status.HTTP_201_CREATED, data={"results": results})
+        return OKJsonResponse(status=status.HTTP_201_CREATED, data=results)
 
 
 @method_decorator(

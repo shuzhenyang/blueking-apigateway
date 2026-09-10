@@ -55,12 +55,13 @@ class BaseParser:
 
                 extension_resource = operation.get(OpenAPIExtensionEnum.RESOURCE.value, {})
                 kind = extension_resource.get("kind", ResourceKindEnum.STANDARD.value)
-
-                backend = extension_resource.get("backend") or {
-                    "type": ProxyTypeEnum.HTTP.value,
-                    "method": method,
-                    "path": path,
-                }
+                backend = extension_resource.get("backend")
+                if kind != ResourceKindEnum.AI.value:
+                    backend = backend or {
+                        "type": ProxyTypeEnum.HTTP.value,
+                        "method": method,
+                        "path": path,
+                    }
 
                 resource = {
                     "kind": kind,
@@ -309,6 +310,8 @@ class BaseParser:
             "auth_verified_required": auth_config.get("userVerifiedRequired", True),
             "app_verified_required": auth_config.get("appVerifiedRequired", True),
             "resource_perm_required": auth_config.get("resourcePermissionRequired", True),
+            "oauth2_public_client_enabled": auth_config.get("oauth2PublicClientEnabled", False),
+            "oauth2_personal_client_enabled": auth_config.get("oauth2PersonalClientEnabled", False),
         }
 
         if config["app_verified_required"] is False:

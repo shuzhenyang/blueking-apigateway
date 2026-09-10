@@ -17,10 +17,10 @@
         @change="handleProviderChange"
       >
         <BkOption
-          v-for="provider in AI_BACKEND_PROVIDER_OPTIONS"
-          :id="provider"
-          :key="provider"
-          :name="provider"
+          v-for="provider in PROVIDER_OPTIONS"
+          :id="provider.value"
+          :key="provider.value"
+          :name="provider.label"
         />
       </BkSelect>
       <p class="help-text">
@@ -88,7 +88,7 @@
         :placeholder="t('请输入 API Key')"
       />
       <p class="help-text">
-        {{ t('内置 Provider 使用 API Key 进行认证') }}
+        {{ t('用于向上游 Provider 鉴权的 API Key') }}
       </p>
     </BkFormItem>
 
@@ -136,7 +136,7 @@
         />
       </BkSelect>
       <p class="help-text">
-        {{ t('留空时由调用方在请求体中指定 model') }}
+        {{ t('可留空，由调用方指定 model。') + t('填写后将强制覆盖调用方传入的 model。') }}
       </p>
     </BkFormItem>
 
@@ -207,8 +207,8 @@
         @input="handleOptionsTextInput"
       />
       <p class="help-text">
-        {{ t('附加到请求体的参数字典，JSON 格式，会合并到上游请求体') }}，
-        <span class="danger-text">{{ t('不包含 model 字段') }}</span>
+        {{ t('JSON 键值对，将合并到上游请求体，相同字段以此处为准覆盖调用方。') }}
+        <span class="danger-text">{{ t('请勿在此处配置 model（在上方 Model 字段配置）') }}</span>
       </p>
       <p
         v-if="config.optionsError"
@@ -259,14 +259,32 @@
         class="test-tip color-#299e56"
       ><AgIcon name="check-circle-shape" />{{ t('连通正常') }}</span>
       <span
-        v-else-if="config.testStatus === 'failed'"
-        class="test-tip color-#ea3636"
-      ><AgIcon name="close-circle-filled" />{{ t('连通失败') }}</span>
-      <span
-        v-else
+        v-else-if="config.testStatus === 'untested'"
         class="test-tip color-#979ba5"
       ><AgIcon name="info" />{{ t('配置变更后需重新测试') }}</span>
     </div>
+    <BkAlert
+      v-if="config.testStatus === 'failed'"
+      theme="danger"
+      class="mt-12px"
+    >
+      <template #icon>
+        <div class="line-height-20px">
+          <AgIcon
+            name="remind"
+            class="color-#ea3636"
+          />
+        </div>
+      </template>
+      <template #title>
+        <div class="ml-8px line-height-20px">
+          <div class="color-#ea3636">
+            {{ t('连通失败') }}
+          </div>
+          <div>{{ testFailMessage }}</div>
+        </div>
+      </template>
+    </BkAlert>
   </BkForm>
 </template>
 
@@ -284,7 +302,6 @@ import type { IBackendTestConnectionInputSLZ } from '@/services/types/body/post/
 import type { IFormMethod } from '@/types/common';
 import {
   type AIBackendOptionMode,
-  AI_BACKEND_PROVIDER_OPTIONS,
   AI_BACKEND_SCHEME_OPTIONS,
   type IAIBackendConfigFormData,
   buildAIBackendConfig,
@@ -311,7 +328,35 @@ const {
 
 const { t } = useI18n();
 
+const testFailMessage = ref('');
+
 const formRef = useTemplateRef<InstanceType<typeof Form> & IFormMethod>('formRef');
+
+const PROVIDER_OPTIONS = [
+  {
+    label: 'OpenAI',
+    value: 'openai',
+  },
+  {
+    label: 'DeepSeek',
+    value: 'deepseek',
+  },
+  {
+    label: 'openai-compatible',
+    value: 'openai-compatible',
+  },
+];
+
+const PROVIDER_ENDPOINT = {
+  openai: {
+    endpoint: 'api.openai.com/v1/chat/completions',
+    modelsEndpoint: 'https://api.openai.com/v1/models',
+  },
+  deepseek: {
+    endpoint: 'api.deepseek.com/chat/completions',
+    modelsEndpoint: 'https://api.deepseek.com/models',
+  },
+};
 
 const requiredRule = {
   required: true,
@@ -340,6 +385,7 @@ const formRules = {
 };
 
 const isBuiltinProvider = computed(() => isBuiltinAIBackendProvider(config.value.provider));
+
 const endpointRules = computed(() => {
   if (isBuiltinProvider.value) {
     return [];
@@ -355,6 +401,7 @@ const endpointRules = computed(() => {
     },
   ];
 });
+
 const modelOptions = computed(() => [...new Set([
   config.value.model,
   ...config.value.models,
@@ -381,7 +428,7 @@ const formatOptionValue = (value: unknown) => {
   return typeof value === 'string' ? value : JSON.stringify(value) ?? '';
 };
 
-const handleProviderChange = async () => {
+const handleProviderChange = async (provider: string) => {
   config.value.endpoint = '';
   config.value.modelsEndpoint = '';
   config.value.apiKey = '';
@@ -391,6 +438,18 @@ const handleProviderChange = async () => {
   config.value.models = [];
   await nextTick();
   formRef.value?.clearValidate();
+  if (provider === 'openai') {
+    const { endpoint, modelsEndpoint } = PROVIDER_ENDPOINT.openai;
+    config.value.endpoint = endpoint;
+    config.value.modelsEndpoint = modelsEndpoint;
+    config.value.endpointScheme = 'https';
+  }
+  else if (provider === 'deepseek') {
+    const { endpoint, modelsEndpoint } = PROVIDER_ENDPOINT.deepseek;
+    config.value.endpoint = endpoint;
+    config.value.modelsEndpoint = modelsEndpoint;
+    config.value.endpointScheme = 'https';
+  }
 };
 
 const handleOptionsTextInput = (value: string) => {
@@ -456,6 +515,7 @@ const handleTest = async () => {
     return;
   }
   const testSnapshot = cloneDeep(buildAIBackendConfig(config.value, stageId));
+  testFailMessage.value = '';
   config.value.testStatus = 'testing';
   config.value.testConfigSnapshot = testSnapshot;
   const params: IBackendTestConnectionInputSLZ = {
@@ -482,12 +542,10 @@ const handleTest = async () => {
       theme: 'success',
     });
   }
-  catch {
+  catch (e) {
     config.value.testStatus = 'failed';
-    Message({
-      message: t('连通测试失败'),
-      theme: 'error',
-    });
+    const _e = e as { error: { message: string } };
+    testFailMessage.value = _e?.error?.message ?? '';
   }
 };
 
@@ -559,7 +617,7 @@ defineExpose({ validate });
 }
 
 .danger-text {
-  color: #ea3636;
+  color: #F59500;
 }
 
 .timeout-item {

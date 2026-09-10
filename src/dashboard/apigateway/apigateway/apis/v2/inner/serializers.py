@@ -22,8 +22,15 @@ from typing import Dict, List
 
 from django.conf import settings
 from django.utils.translation import gettext as _
+from drf_yasg.utils import swagger_serializer_method
 from rest_framework import serializers
 
+from apigateway.apis.v2.validators import (
+    MAX_LOOKUP_NAMES,
+    validate_comma_separated_ints,
+    validate_comma_separated_names,
+    validate_output_fields,
+)
 from apigateway.apps.mcp_server.constants import (
     OFFICIAL_MCP_CATEGORY_NAME,
     MCPServerAppPermissionApplyStatusEnum,
@@ -42,7 +49,7 @@ from apigateway.apps.permission.constants import (
 from apigateway.apps.permission.models import AppPermissionRecord
 from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.biz.permission import ResourcePermissionHandler
-from apigateway.biz.validators import BKAppCodeValidator
+from apigateway.biz.validators import BKAppCodeValidator, UserManagedBKAppCodeValidator
 from apigateway.common.fields import TimestampField
 from apigateway.common.i18n.field import SerializerTranslatedField
 from apigateway.core.constants import GatewayKindNameEnum, GatewayStatusEnum, convert_gateway_kind_to_name
@@ -51,9 +58,47 @@ from apigateway.service.mcp import (
     build_mcp_server_detail_url,
     build_mcp_server_permission_approval_url,
 )
+from apigateway.service.oauth2_client_scope import OAUTH2_CLIENT_TYPES
 from apigateway.utils import time
 
 logger = logging.getLogger(__name__)
+RELEASED_RESOURCE_FIELDS = frozenset(
+    {
+        "id",
+        "name",
+        "description",
+        "is_public",
+        "oauth2_public_client_enabled",
+        "oauth2_personal_client_enabled",
+    }
+)
+MCP_SERVER_LIST_FIELDS = frozenset(
+    {
+        "id",
+        "name",
+        "title",
+        "description",
+        "is_public",
+        "labels",
+        "resource_names",
+        "tool_names",
+        "status",
+        "protocol_type",
+        "oauth2_public_client_enabled",
+        "oauth2_personal_client_enabled",
+        "categories",
+        "stage",
+        "gateway",
+        "tools_count",
+        "prompts_count",
+        "url",
+        "detail_url",
+        "updated_by",
+        "created_by",
+        "updated_time",
+        "created_time",
+    }
+)
 
 
 def _get_mcp_server_url_from_context(context, obj) -> str:
@@ -75,7 +120,7 @@ class GatewayListInputSLZ(serializers.Serializer):
         ref_name = "apigateway.apis.v2.inner.serializers.GatewayListInputSLZ"
 
 
-class GatewayListOutputSLZ(serializers.Serializer):
+class GatewayBaseOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
     description = SerializerTranslatedField(default_field="description_i18n", allow_blank=True, read_only=True)
@@ -97,30 +142,102 @@ class GatewayListOutputSLZ(serializers.Serializer):
         return convert_gateway_kind_to_name(obj.kind)
 
     class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.GatewayBaseOutputSLZ"
+
+
+class GatewayListOutputSLZ(GatewayBaseOutputSLZ):
+    class Meta:
         ref_name = "apigateway.apis.v2.inner.serializers.GatewayListOutputSLZ"
 
 
-class GatewayRetrieveOutputSLZ(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
-    name = serializers.CharField(read_only=True)
-    description = SerializerTranslatedField(default_field="description_i18n", allow_blank=True, read_only=True)
-    maintainers = serializers.SerializerMethodField()
-    doc_maintainers = serializers.SerializerMethodField()
-    kind = serializers.SerializerMethodField()
+class GatewayLookupInputSLZ(serializers.Serializer):
+    gateway_names = serializers.CharField()
+    fields = serializers.CharField(required=False, allow_blank=True)
 
-    def get_maintainers(self, obj):
-        return ResourcePermissionHandler.convert_gateway_maintainers_to_display_names(
-            obj.tenant_mode,
-            obj.tenant_id,
-            obj.maintainers,
+    def validate_gateway_names(self, value) -> list[str]:
+        return validate_comma_separated_names(
+            value,
+            required=True,
+            required_error=_("gateway_names 不能为空"),
+            max_count_error=_("gateway_names 最多支持 {max_count} 个"),
         )
 
-    def get_doc_maintainers(self, obj):
-        return obj.doc_maintainers
+    def validate_fields(self, value) -> set[str] | None:
+        return validate_output_fields(value, GATEWAY_LOOKUP_FIELDS)
 
-    def get_kind(self, obj):
-        return convert_gateway_kind_to_name(obj.kind)
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.GatewayLookupInputSLZ"
 
+
+class GatewayReleasedResourceListInputSLZ(serializers.Serializer):
+    fields = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_fields(self, value) -> set[str] | None:
+        return validate_output_fields(value, RELEASED_RESOURCE_FIELDS)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.GatewayReleasedResourceListInputSLZ"
+
+
+class GatewayReleasedResourceLookupInputSLZ(serializers.Serializer):
+    names = serializers.CharField()
+    fields = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_names(self, value) -> list[str]:
+        return validate_comma_separated_names(
+            value,
+            required=True,
+            required_error=_("names 不能为空"),
+            max_count_error=_("names 最多支持 {max_count} 个"),
+        )
+
+    def validate_fields(self, value) -> set[str] | None:
+        return validate_output_fields(value, RELEASED_RESOURCE_FIELDS)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.GatewayReleasedResourceLookupInputSLZ"
+
+
+class _SelectableFieldsOutputSLZMixin:
+    def __init__(self, *args, fields: set[str] | None = None, **kwargs):
+        self._output_fields = fields
+        super().__init__(*args, **kwargs)
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if self._output_fields is None:
+            return fields
+        return {name: field for name, field in fields.items() if name in self._output_fields}
+
+
+class GatewayLookupOutputSLZ(_SelectableFieldsOutputSLZMixin, GatewayBaseOutputSLZ):
+    is_official = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.GatewayLookupOutputSLZ"
+
+
+GATEWAY_LOOKUP_FIELDS = frozenset(GatewayLookupOutputSLZ._declared_fields)
+GATEWAY_LOOKUP_DEFAULT_FIELDS = GATEWAY_LOOKUP_FIELDS - {"maintainers"}
+
+
+class GatewayReleasedResourceOutputSLZ(_SelectableFieldsOutputSLZMixin, serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    is_public = serializers.BooleanField(read_only=True)
+    oauth2_public_client_enabled = serializers.BooleanField(read_only=True)
+    oauth2_personal_client_enabled = serializers.BooleanField(read_only=True)
+    description = SerializerTranslatedField(
+        translated_fields={"en": "description_en"},
+        allow_blank=True,
+        read_only=True,
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.GatewayReleasedResourceOutputSLZ"
+
+
+class GatewayRetrieveOutputSLZ(GatewayBaseOutputSLZ):
     class Meta:
         ref_name = "apigateway.apis.v2.inner.serializers.GatewayRetrieveOutputSLZ"
 
@@ -154,7 +271,9 @@ class GatewayAppPermissionApplyCreateInputSLZ(serializers.Serializer):
     - 应用页面申请授权，仅可申请限定有效期的权限，网关平台按规则主动续期权限
     """
 
-    target_app_code = serializers.CharField(label="", validators=[BKAppCodeValidator()])
+    target_app_code = serializers.CharField(
+        label="", validators=[BKAppCodeValidator(), UserManagedBKAppCodeValidator()]
+    )
     resource_ids = serializers.ListField(
         child=serializers.IntegerField(),
         # validators=[ResourceIDValidator()], PaaS中的列表资源本身获取的就是网关所有环境生效资源版本资源的并集，这里不需要再进行校验
@@ -232,7 +351,9 @@ class AppResourcePermissionListOutputSLZ(serializers.Serializer):
 
 
 class AppPermissionRenewInputSLZ(serializers.Serializer):
-    target_app_code = serializers.CharField(label="", validators=[BKAppCodeValidator()])
+    target_app_code = serializers.CharField(
+        label="", validators=[BKAppCodeValidator(), UserManagedBKAppCodeValidator()]
+    )
     resource_ids = serializers.ListField(
         child=serializers.IntegerField(),
         allow_empty=False,
@@ -315,9 +436,13 @@ class AppPermissionRecordBaseSLZ(serializers.ModelSerializer):
         return ApplyStatusEnum.get_choice_label(obj.status)
 
     def get_handled_by(self, obj):
-        if obj.handled_by:
-            return [obj.handled_by]
-        return obj.gateway.maintainers
+        """按网关租户将处理人转换为 display_name"""
+        handled_by = [obj.handled_by] if obj.handled_by else obj.gateway.maintainers
+        return ResourcePermissionHandler.convert_gateway_maintainers_to_display_names(
+            obj.gateway.tenant_mode,
+            obj.gateway.tenant_id,
+            handled_by,
+        )
 
     def get_comment(self, obj):
         return obj.comment or ""
@@ -397,7 +522,7 @@ class MCPServerBaseSLZ(serializers.Serializer):
     name = serializers.CharField(read_only=True, help_text="MCPServer 名称")
     title = serializers.SerializerMethodField(help_text="MCPServer 中文名/显示名称")
     description = serializers.CharField(read_only=True, help_text="MCPServer 描述")
-    tools_count = serializers.CharField(read_only=True, help_text="MCPServer 工具数量")
+    tools_count = serializers.IntegerField(read_only=True, help_text="MCPServer 工具数量")
     doc_link = serializers.SerializerMethodField(help_text="MCPServer 文档访问地址")
     tool_names = serializers.ListField(
         child=serializers.CharField(),
@@ -413,6 +538,9 @@ class MCPServerBaseSLZ(serializers.Serializer):
     is_official = serializers.SerializerMethodField(help_text="是否为官方")
     oauth2_public_client_enabled = serializers.BooleanField(
         read_only=True, help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权"
+    )
+    oauth2_personal_client_enabled = serializers.BooleanField(
+        read_only=True, help_text="是否开启 OAuth2 个人客户端模式，开启后将会对 bk_app_code=personal 的应用进行授权"
     )
 
     def get_title(self, obj) -> str:
@@ -440,28 +568,25 @@ class MCPServerPermissionBaseSLZ(serializers.Serializer):
     status = serializers.CharField(help_text="MCPServer 权限状态")
     action = serializers.CharField(help_text="MCPServer 权限操作")
     expires_in = serializers.IntegerField(help_text="MCPServer 权限过期时间")
-    handled_by = serializers.ListField(child=serializers.CharField(), help_text="处理人")
+    handled_by = serializers.SerializerMethodField(help_text="处理人")
     approval_url = serializers.SerializerMethodField(help_text="权限审批 URL")
+
+    @swagger_serializer_method(serializer_or_field=serializers.ListField(child=serializers.CharField()))
+    def get_handled_by(self, obj):
+        return ResourcePermissionHandler.convert_gateway_maintainers_to_display_names(
+            obj.get("tenant_mode", ""),
+            obj.get("tenant_id", ""),
+            obj.get("handled_by") or [],
+        )
 
     def get_approval_url(self, obj) -> str:
         """获取审批 URL"""
-        try:
-            if isinstance(obj, dict):
-                mcp_server_id = obj.get("mcp_server_id")
-                gateway_id = obj.get("gateway_id")
-                itsm_ticket_id = obj.get("itsm_ticket_id", "")
+        mcp_server_id = obj.get("mcp_server_id")
+        gateway_id = obj.get("gateway_id")
+        itsm_ticket_id = obj.get("itsm_ticket_id", "")
 
-                if gateway_id and mcp_server_id:
-                    return build_mcp_server_permission_approval_url(gateway_id, mcp_server_id, itsm_ticket_id)
-
-            # 如果是模型实例
-            if hasattr(obj, "mcp_server"):
-                return build_mcp_server_permission_approval_url(
-                    obj.mcp_server.gateway_id, obj.mcp_server_id, getattr(obj, "itsm_ticket_id", "")
-                )
-        except Exception:
-            # 记录错误但不中断响应
-            logger.warning("Failed to build approval URL for object: %s", obj)
+        if gateway_id and mcp_server_id:
+            return build_mcp_server_permission_approval_url(gateway_id, mcp_server_id, itsm_ticket_id)
 
         return ""
 
@@ -483,8 +608,8 @@ class MCPServerAppPermissionApplyCreateInputSLZ(serializers.Serializer):
         child=serializers.IntegerField(),
         allow_empty=False,
         required=True,
-        max_length=50,
-        help_text="MCPServer ID 列表，最多 50 个",
+        max_length=MAX_LOOKUP_NAMES,
+        help_text="MCPServer ID 列表，最多 {max_count} 个".format(max_count=MAX_LOOKUP_NAMES),
     )
     applied_by = serializers.CharField(required=True, help_text="申请人")
     reason = serializers.CharField(required=True, help_text="申请原因")
@@ -545,7 +670,7 @@ class MCPServerAppPermissionRecordBaseSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     applied_by = serializers.SerializerMethodField(help_text="申请人")
     applied_time = serializers.DateTimeField(read_only=True, help_text="申请时间")
-    handled_by = serializers.ListField(child=serializers.CharField(), help_text="处理人")
+    handled_by = serializers.SerializerMethodField(help_text="处理人")
     handled_time = serializers.DateTimeField(read_only=True, help_text="处理时间")
     apply_status = serializers.CharField(read_only=True, help_text="审批状态")
     apply_status_display = serializers.CharField(read_only=True)
@@ -558,52 +683,35 @@ class MCPServerAppPermissionRecordBaseSLZ(serializers.Serializer):
     def get_approval_url(self, obj) -> str:
         """获取审批 URL"""
         try:
-            if isinstance(obj, dict):
-                mcp_server_id = obj.get("mcp_server_id")
-                gateway_id = obj.get("gateway_id")
-                itsm_ticket_id = obj.get("itsm_ticket_id", "")
+            mcp_server_id = obj.get("mcp_server_id")
+            gateway_id = obj.get("gateway_id")
+            itsm_ticket_id = obj.get("itsm_ticket_id", "")
 
-                if gateway_id and mcp_server_id:
-                    return build_mcp_server_permission_approval_url(gateway_id, mcp_server_id, itsm_ticket_id)
-
-            # 如果是模型实例
-            if hasattr(obj, "mcp_server"):
-                return build_mcp_server_permission_approval_url(
-                    obj.mcp_server.gateway_id, obj.mcp_server_id, getattr(obj, "itsm_ticket_id", "")
-                )
+            if gateway_id and mcp_server_id:
+                return build_mcp_server_permission_approval_url(gateway_id, mcp_server_id, itsm_ticket_id)
         except Exception:
             # 记录错误但不中断响应
             logger.warning("Failed to build approval URL for object: %s", obj)
 
         return ""
 
+    @swagger_serializer_method(serializer_or_field=serializers.ListField(child=serializers.CharField()))
+    def get_handled_by(self, obj):
+        """获取处理人 display_name"""
+        return ResourcePermissionHandler.convert_gateway_maintainers_to_display_names(
+            obj.get("tenant_mode", ""),
+            obj.get("tenant_id", ""),
+            obj.get("handled_by") or [],
+        )
+
     def get_applied_by(self, obj):
         """获取申请人 display_name"""
-        if isinstance(obj, dict):
-            try:
-                return ResourcePermissionHandler.convert_applied_by_to_display_name(
-                    obj.get("bk_app_code", ""),
-                    obj.get("applied_by", ""),
-                    obj.get("tenant_mode", ""),
-                    obj.get("tenant_id", ""),
-                )
-            except Exception:
-                logger.warning("Failed to convert applied_by for dict object: %s", obj, exc_info=True)
-                return obj.get("applied_by", "")
-
-        if hasattr(obj, "mcp_server"):
-            try:
-                return ResourcePermissionHandler.convert_applied_by_to_display_name(
-                    obj.bk_app_code,
-                    obj.applied_by,
-                    obj.mcp_server.gateway.tenant_mode,
-                    obj.mcp_server.gateway.tenant_id,
-                )
-            except Exception:
-                logger.warning("Failed to convert applied_by for model object: %s", obj, exc_info=True)
-                return getattr(obj, "applied_by", "")
-
-        return getattr(obj, "applied_by", "")
+        return ResourcePermissionHandler.convert_applied_by_to_display_name(
+            obj.get("bk_app_code", ""),
+            obj.get("applied_by", ""),
+            obj.get("tenant_mode", ""),
+            obj.get("tenant_id", ""),
+        )
 
     class Meta:
         ref_name = "apigateway.apis.v2.inner.serializers.MCPServerAppPermissionRecordBaseSLZ"
@@ -636,32 +744,69 @@ class MCPServerListInputSLZ(serializers.Serializer):
     keyword = serializers.CharField(
         allow_blank=True, required=False, help_text="MCPServer 筛选条件，支持模糊匹配 MCPServer 名称或描述"
     )
-    order_by = serializers.CharField(
-        allow_blank=True,
+    order_by = serializers.ChoiceField(
+        choices=[
+            "id",
+            "-id",
+            "name",
+            "-name",
+            "updated_time",
+            "-updated_time",
+            "created_time",
+            "-created_time",
+        ],
         required=False,
         default="-updated_time",
         help_text="排序字段，支持 id, name, updated_time, created_time，前缀 - 表示降序，默认 -updated_time",
     )
-    mcp_server_ids = serializers.CharField(
-        allow_blank=True, required=False, help_text="MCPServer ID 列表，多个以逗号 , 分割"
+    fields = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        help_text="指定返回的字段列表，多个以逗号分割；不传时返回全部字段",
     )
 
     class Meta:
         ref_name = "apigateway.apis.v2.inner.serializers.MCPServerListInputSLZ"
 
-    def validate_mcp_server_ids(self, value):
-        if not value:
-            return []
-        try:
-            ids = [int(x.strip()) for x in value.split(",")]
-        except ValueError:
-            raise serializers.ValidationError(_("MCPServer ID 必须为整数，多个以逗号分割"))
-        if len(ids) > 50:
-            raise serializers.ValidationError(_("MCPServer ID 列表最多支持 50 个"))
-        return ids
+    def validate_fields(self, value) -> set[str] | None:
+        return validate_output_fields(value, MCP_SERVER_LIST_FIELDS)
 
 
-class MCPServerListOutputSLZ(serializers.Serializer):
+class MCPServerLookupInputSLZ(serializers.Serializer):
+    ids = serializers.CharField(allow_blank=True, required=False, help_text="MCPServer ID 列表，多个以逗号 , 分割")
+    names = serializers.CharField(allow_blank=True, required=False, help_text="MCPServer 名称列表，多个以逗号 , 分割")
+    fields = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        help_text="指定返回的字段列表，多个以逗号分割；不传时返回全部字段",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.MCPServerLookupInputSLZ"
+
+    def validate_ids(self, value):
+        return validate_comma_separated_ints(
+            value,
+            invalid_error=_("MCPServer ID 必须为整数，多个以逗号分割"),
+            max_count_error=_("MCPServer ID 列表最多支持 {max_count} 个"),
+        )
+
+    def validate_names(self, value):
+        return validate_comma_separated_names(
+            value,
+            max_count_error=_("MCPServer 名称列表最多支持 {max_count} 个"),
+        )
+
+    def validate_fields(self, value) -> set[str] | None:
+        return validate_output_fields(value, MCP_SERVER_LIST_FIELDS)
+
+    def validate(self, attrs):
+        if not attrs.get("ids") and not attrs.get("names"):
+            raise serializers.ValidationError(_("ids 和 names 不能同时为空"))
+        return attrs
+
+
+class MCPServerListOutputSLZ(_SelectableFieldsOutputSLZMixin, serializers.Serializer):
     id = serializers.IntegerField(read_only=True, help_text="MCPServer ID")
     name = serializers.CharField(read_only=True, help_text="MCPServer 名称")
     title = serializers.SerializerMethodField(help_text="MCPServer 中文名/显示名称")
@@ -683,6 +828,9 @@ class MCPServerListOutputSLZ(serializers.Serializer):
 
     oauth2_public_client_enabled = serializers.BooleanField(
         read_only=True, help_text="是否开启 OAuth2 公开客户端模式，开启后将会对 bk_app_code=public 的应用进行授权"
+    )
+    oauth2_personal_client_enabled = serializers.BooleanField(
+        read_only=True, help_text="是否开启 OAuth2 个人客户端模式，开启后将会对 bk_app_code=personal 的应用进行授权"
     )
 
     categories = serializers.SerializerMethodField(help_text="MCPServer 分类列表")
@@ -713,7 +861,8 @@ class MCPServerListOutputSLZ(serializers.Serializer):
         return self.context["gateways"][obj.gateway.id]
 
     def get_url(self, obj) -> str:
-        return _get_mcp_server_url_from_context(self.context, obj)
+        least_privileges = self.context.get("least_privileges_by_server", {})
+        return MCPServerHandler.get_mcp_server_url(obj, least_privileges.get(obj.id, ""))
 
     def get_detail_url(self, obj) -> str:
         return build_mcp_server_detail_url(obj.id)
@@ -884,9 +1033,88 @@ class AppRequestLogListOutputSLZ(serializers.Serializer):
     http_path = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="请求路径")
     status = serializers.IntegerField(required=False, allow_null=True, help_text="响应状态码")
     request_duration = serializers.IntegerField(required=False, allow_null=True, help_text="请求耗时")
+    llm_summary = serializers.DictField(required=False, allow_null=True, help_text="LLM 调用摘要")
     code_name = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="状态码名称")
     error = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="错误")
     response_desc = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="响应描述")
 
     class Meta:
         ref_name = "apigateway.apis.v2.inner.serializers.AppRequestLogListOutputSLZ"
+
+
+class AppRequestLogPaginatedOutputSLZ(serializers.Serializer):
+    count = serializers.IntegerField(read_only=True, help_text="数据总数")
+    results = AppRequestLogListOutputSLZ(many=True, read_only=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.AppRequestLogPaginatedOutputSLZ"
+
+
+class OAuth2MCPServerScopeListInputSLZ(serializers.Serializer):
+    oauth_client_type = serializers.ChoiceField(choices=OAUTH2_CLIENT_TYPES)
+    gateway_name = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    mcp_server_name = serializers.CharField(required=False, allow_blank=True, max_length=64)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.OAuth2MCPServerScopeListInputSLZ"
+
+
+class OAuth2ResourceScopeListInputSLZ(serializers.Serializer):
+    oauth_client_type = serializers.ChoiceField(choices=OAUTH2_CLIENT_TYPES)
+    gateway_name = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    resource_name = serializers.CharField(required=False, allow_blank=True, max_length=256)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.OAuth2ResourceScopeListInputSLZ"
+
+
+class OAuth2MCPServerScopeOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    title = serializers.CharField(read_only=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.OAuth2MCPServerScopeOutputSLZ"
+
+
+class OAuth2ResourceScopeOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = SerializerTranslatedField(
+        translated_fields={"en": "description_en"},
+        allow_blank=True,
+        read_only=True,
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.OAuth2ResourceScopeOutputSLZ"
+
+
+class OAuth2MCPServerScopeGatewayOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    is_official = serializers.BooleanField(read_only=True)
+    mcp_server_count = serializers.IntegerField(source="scope_count", read_only=True)
+    mcp_servers = serializers.SerializerMethodField()
+
+    def get_mcp_servers(self, obj):
+        mcp_servers = self.context["scope_map"].get(obj.id, [])
+        return OAuth2MCPServerScopeOutputSLZ(mcp_servers, many=True, context=self.context).data
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.OAuth2MCPServerScopeGatewayOutputSLZ"
+
+
+class OAuth2ResourceScopeGatewayOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    is_official = serializers.BooleanField(read_only=True)
+    resource_count = serializers.IntegerField(source="scope_count", read_only=True)
+    resources = serializers.SerializerMethodField()
+
+    def get_resources(self, obj):
+        resources = self.context["scope_map"].get(obj.id, [])
+        return OAuth2ResourceScopeOutputSLZ(resources, many=True, context=self.context).data
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.inner.serializers.OAuth2ResourceScopeGatewayOutputSLZ"

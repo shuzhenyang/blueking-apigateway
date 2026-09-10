@@ -37,6 +37,7 @@
         :placeholder="t('请输入后端服务、资源名称、前端请求路径搜索')"
       />
       <AgTable
+        ref="resourceTableRef"
         v-model:table-data="tableData"
         :columns="columns"
         table-row-key="id"
@@ -44,6 +45,7 @@
         :filter-row="null"
         :frontend-search="isSearching"
         local-page
+        hover
         resizable
         :row-class-name="getRowClassName"
         @filter-change="handleFilterChange"
@@ -99,8 +101,8 @@ type IVersionResource = IExtractApiReturn<typeof getVersionDetail>['resources'][
 interface IProps {
   stageAddress: string
   stageId: number
-  versionId: number
-  stage: Record<string, any>
+  versionId: number | undefined
+  stage: Record<string, any> | undefined
 }
 const {
   stageAddress,
@@ -114,6 +116,7 @@ const gatewayStore = useGateway();
 const stageStore = useStage();
 
 const filterValue = ref<Record<string, any>>({ keyword: '' });
+const resourceTableRef = ref();
 const currentStage = ref<any>(null);
 const currentResource = ref<any>({});
 const resourceDetailsRef = ref();
@@ -247,6 +250,9 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
       filter: {
         type: 'multiple',
         showConfirmAndReset: true,
+        popupProps: {
+          overlayInnerClassName: 'resource-info-filter-wrapper',
+        },
         resetValue: [],
         list: customMethodsList.value,
       },
@@ -262,6 +268,9 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
       filter: {
         type: 'multiple',
         showConfirmAndReset: true,
+        popupProps: {
+          overlayInnerClassName: 'resource-info-filter-wrapper',
+        },
         resetValue: [],
         list: labelsList.value,
       },
@@ -349,7 +358,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
           <bk-button
             text
             theme="primary"
-            class="mr-8px"
+            class="mr-12px"
             onClick={() => showDetails(row)}
           >
             { t('查看资源详情') }
@@ -441,6 +450,19 @@ const getTableData = async () => {
   });
   tableData.value = response.resources || [];
   initTableData.value = cloneDeep(response.resources) || [];
+  resetFilterAndPage();
+};
+
+// 数据源改变时，重置筛选与分页参数
+const resetFilterAndPage = () => {
+  filterValue.value = { keyword: '' };
+  nextTick(() => {
+    resourceTableRef.value?.TDesignTableRef?.clearFilter?.();
+    resourceTableRef.value?.setPagination({
+      current: 1,
+      pageSize: 10,
+    });
+  });
 };
 
 async function init() {
@@ -491,7 +513,6 @@ const handleClearQueries = () => {
 };
 
 const handleFilterChange: PrimaryTableProps['onFilterChange'] = (filters) => {
-  console.log(filters, 5555555555);
   Object.assign(
     filterValue.value,
     filters,
@@ -537,6 +558,13 @@ defineExpose({ reload: init });
 
   .btn-filter-save.disabled {
     display: none !important;
+  }
+}
+
+.resource-info-filter-wrapper {
+
+  .t-table__filter-pop-wrapper {
+    max-height: 300px !important;
   }
 }
 </style>

@@ -19,7 +19,37 @@
 
 from environ import Env
 
-from apigateway.conf.utils import get_frontend_env_vars
+from apigateway.conf.utils import (
+    get_default_feature_flags,
+    get_doc_links,
+    get_frontend_env_vars,
+    get_plugin_metadata_config,
+)
+
+
+def test_get_plugin_metadata_config_uses_local_concurrency_policy():
+    config = get_plugin_metadata_config(Env())
+
+    assert config["bk-concurrency-limit"]["policy"] == "local"
+
+
+def test_get_default_feature_flags_mcp_server_oauth2_personal_client(monkeypatch):
+    env = Env()
+    kwargs = {
+        "enable_bk_notice": False,
+        "enable_multi_tenant_mode": False,
+        "ai_open_api_base_url": "",
+        "enable_gateway_operation_status": False,
+        "enable_run_data_metrics": False,
+        "enable_itsm4_permission_apply": False,
+    }
+
+    flags = get_default_feature_flags(env, **kwargs)
+    assert flags["ENABLE_MCP_SERVER_OAUTH2_PERSONAL_CLIENT"] is True
+
+    monkeypatch.setenv("FEATURE_FLAG_ENABLE_MCP_SERVER_OAUTH2_PERSONAL_CLIENT", "false")
+    flags = get_default_feature_flags(env, **kwargs)
+    assert flags["ENABLE_MCP_SERVER_OAUTH2_PERSONAL_CLIENT"] is False
 
 
 def test_get_frontend_env_vars_includes_paas_developer_center_link(monkeypatch):
@@ -46,3 +76,18 @@ def test_get_frontend_env_vars_includes_paas_developer_center_link(monkeypatch):
     assert env_vars["PAAS_DEVELOPER_CENTER_LINK"] == "https://paas.example.com/developer-center"
     assert env_vars["PAAS_APP_CREATE_LINK"] == "https://paas.example.com/developer-center/app/create"
     assert env_vars["BK_USER_PERSONAL_CENTER_LINK"] == "https://user.example.com/personal-center"
+
+
+def test_get_doc_links_includes_personal_token():
+    links = get_doc_links("1.24.0", "https://docs.example.com", "ZH")
+
+    assert (
+        links["PERSONAL_TOKEN"]
+        == "https://docs.example.com/markdown/ZH/APIGateway/1.24/UserGuide/Explanation/personal-token.md"
+    )
+
+    en_links = get_doc_links("1.24.0", "https://docs.example.com", "EN")
+    assert (
+        en_links["PERSONAL_TOKEN"]
+        == "https://docs.example.com/markdown/EN/APIGateway/1.24/UserGuide/Explanation/personal-token.md"
+    )

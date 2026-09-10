@@ -75,7 +75,7 @@
     <AgTable
       ref="tableRef"
       v-model:table-data="tableData"
-      row-key="event_id"
+      table-row-key="event_id"
       show-settings
       resizable
       :max-limit-config="{ allocatedHeight: 260, mode: 'tdesign'}"
@@ -140,7 +140,7 @@ const defaultSearchData = ref<IAuditLog>({
 });
 
 const showDetails = ref<boolean>(false);
-const details = ref<IAuditEventLogOutput>();
+const details = ref<IAuditEventLogOutput>({});
 const tableData = ref([]);
 const tableRef = useTemplateRef<InstanceType<typeof AgTable> & ITableMethod>('tableRef');
 const filterData = ref<IAuditLog>(cloneDeep(defaultSearchData));

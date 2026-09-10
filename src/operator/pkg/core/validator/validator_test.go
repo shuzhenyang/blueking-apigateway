@@ -26,7 +26,7 @@ import (
 	"operator/pkg/constant"
 )
 
-func TestValidateAIServiceAndRouteForAPISIX316(t *testing.T) {
+func TestValidateAIServiceAndRoute(t *testing.T) {
 	service := []byte(`{
 		"id":"gateway.prod.1-10",
 		"name":"gateway.prod.model-service",
@@ -51,6 +51,81 @@ func TestValidateAIServiceAndRouteForAPISIX316(t *testing.T) {
 		"service_id":"gateway.prod.1-10"
 	}`)
 
-	require.NoError(t, ValidateApisixJsonSchema("3.16", constant.Service, service))
-	require.NoError(t, ValidateApisixJsonSchema("3.16", constant.Route, route))
+	for _, version := range []string{"3.16", "3.18"} {
+		t.Run(version, func(t *testing.T) {
+			require.NoError(t, ValidateApisixJsonSchema(version, constant.Service, service))
+			require.NoError(t, ValidateApisixJsonSchema(version, constant.Route, route))
+		})
+	}
+}
+
+func TestValidateRequiredPluginFieldsAreNotDefaulted(t *testing.T) {
+	route := []byte(`{
+		"id":"route-1",
+		"uris":["/"],
+		"plugins":{"jwe-decrypt":{}}
+	}`)
+
+	require.Error(t, ValidateApisixJsonSchema("3.16", constant.Route, route))
+}
+
+func TestValidatePluginMetadataConditionalPolicy(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		wantError string
+	}{
+		{
+			name: "missing policy uses local default",
+			config: `{
+				"id":"bk-concurrency-limit",
+				"conn":2000,
+				"burst":1000,
+				"default_conn_delay":1,
+				"key_type":"var",
+				"key":"bk_concurrency_limit_key",
+				"allow_degradation":true
+			}`,
+		},
+		{
+			name: "explicit redis still requires host",
+			config: `{
+				"id":"bk-concurrency-limit",
+				"conn":2000,
+				"burst":1000,
+				"default_conn_delay":1,
+				"key_type":"var",
+				"key":"bk_concurrency_limit_key",
+				"allow_degradation":true,
+				"policy":"redis"
+			}`,
+			wantError: "redis_host is required",
+		},
+		{
+			name: "explicit redis with host",
+			config: `{
+				"id":"bk-concurrency-limit",
+				"conn":2000,
+				"burst":1000,
+				"default_conn_delay":1,
+				"key_type":"var",
+				"key":"bk_concurrency_limit_key",
+				"allow_degradation":true,
+				"policy":"redis",
+				"redis_host":"redis.example.com"
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateApisixJsonSchema("3.18", constant.PluginMetadata, []byte(tt.config))
+			if tt.wantError != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantError)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

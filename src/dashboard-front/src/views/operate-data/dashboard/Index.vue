@@ -27,7 +27,7 @@
     <div class="ag-top-header">
       <BkForm
         class="search-form"
-        form-type="vertical"
+        label-width="auto"
       >
         <BkFormItem :label="t('选择时间')">
           <DatePicker
@@ -53,7 +53,28 @@
             />
           </BkSelect>
         </BkFormItem>
-        <BkFormItem :label="t('后端/模型服务')">
+        <BkFormItem
+          v-show="!isAIGateway"
+          :label="t('后端服务')"
+        >
+          <BkSelect
+            v-model="backend_id"
+            clearable
+            style="width: 300px;"
+            @change="handleBackendChange"
+          >
+            <BkOption
+              v-for="option in backendList"
+              :id="option.id"
+              :key="option.id"
+              :name="option.name"
+            />
+          </BkSelect>
+        </BkFormItem>
+        <BkFormItem
+          v-show="isAIGateway"
+          :label="t('后端/模型服务')"
+        >
           <BkSelect
             v-model="backend_id"
             clearable
@@ -281,6 +302,89 @@
           />
         </BkLoading>
       </div>
+
+      <template v-if="gatewayStore.isAIGateway">
+        <div class="ai-metrics-title">
+          {{ t('AI 模型代理') }}
+        </div>
+        <div class="full-line">
+          <BkLoading
+            :loading="chartLoading.llm_latency_95th"
+            class="full-box"
+          >
+            <LineChart
+              ref="llmLatency95thRef"
+              :chart-data="chartData.llm_latency_95th"
+              :title="t('LLM P95 延迟（非流式完整响应 / 流式首 Token）')"
+              instance-id="llm_latency_95th"
+              @clear-params="handleClearParams"
+              @report-init="handleReportInit"
+            />
+          </BkLoading>
+        </div>
+        <div class="full-line">
+          <BkLoading
+            :loading="chartLoading.llm_token_95th"
+            class="full-box"
+          >
+            <LineChart
+              ref="llmToken95thRef"
+              :chart-data="chartData.llm_token_95th"
+              :title="t('单请求 Token P95')"
+              instance-id="llm_token_95th"
+              @clear-params="handleClearParams"
+              @report-init="handleReportInit"
+            />
+          </BkLoading>
+        </div>
+        <div class="full-line">
+          <BkLoading
+            :loading="chartLoading.llm_latency_avg"
+            class="full-box"
+          >
+            <LineChart
+              ref="llmLatencyAvgRef"
+              :chart-data="chartData.llm_latency_avg"
+              :title="t('LLM 平均耗时趋势（非流式完整响应 / 流式首 Token）')"
+              instance-id="llm_latency_avg"
+              @clear-params="handleClearParams"
+              @report-init="handleReportInit"
+            />
+          </BkLoading>
+        </div>
+        <div class="secondary-panel line-container">
+          <div class="secondary-lf">
+            <BkLoading
+              :loading="chartLoading.llm_token_usage"
+              class="full-box"
+            >
+              <LineChart
+                ref="llmTokenUsageRef"
+                :chart-data="chartData.llm_token_usage"
+                :title="t('LLM Token 消耗趋势')"
+                instance-id="llm_token_usage"
+                @clear-params="handleClearParams"
+                @report-init="handleReportInit"
+              />
+            </BkLoading>
+          </div>
+          <div class="secondary-rg">
+            <BkLoading
+              :loading="chartLoading.llm_active_connections"
+              class="full-box"
+            >
+              <LineChart
+                ref="llmActiveConnectionsRef"
+                :chart-data="chartData.llm_active_connections"
+                :title="t('LLM 活跃连接数趋势')"
+                instance-id="llm_active_connections"
+                @clear-params="handleClearParams"
+                @report-init="handleReportInit"
+              />
+            </BkLoading>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -317,6 +421,7 @@ type InfoTypeItem = {
 type IStageItem = IExtractApiReturn<typeof getApigwStages>[number];
 type IBackendItem = IExtractListApiResults<typeof getBackendServiceList>;
 type IResourceItem = IExtractListApiResults<typeof getApigwResources>;
+type MetricsType = Parameters<typeof getApigwMetrics>[1]['metrics'];
 
 const { t } = useI18n();
 const gatewayStore = useGateway();
@@ -326,6 +431,7 @@ const stageList = ref<IStageItem[]>([]);
 const resourceList = ref<IResourceItem[]>([]);
 const backend_id = ref('');
 const backendList = ref<IBackendItem[]>([]);
+const isAIGateway = computed(() => gatewayStore.isAIGateway);
 const standardBackendList = computed(() => backendList.value.filter(item => item?.kind === 'standard'));
 const aiBackendList = computed(() => backendList.value.filter(item => item?.kind === 'ai'));
 const dateTime = ref<[string, string]>([
@@ -337,7 +443,7 @@ const formatTime = ref<(string | null)[]>([
     .format('YYYY-MM-DD HH:mm:ss'),
   dayjs().format('YYYY-MM-DD HH:mm:ss'),
 ]);
-const metricsList = ref<string[]>([
+const commonMetricsList = [
   'requests', // 总请求数趋势
   'non_20x_status', // 非 200 请求数趋势
   'app_requests', // app_code 维度请求数趋势
@@ -349,7 +455,17 @@ const metricsList = ref<string[]>([
   'response_time_50th',
   'response_time_95th',
   'response_time_99th',
-]);
+] as const;
+const aiMetricsList = [
+  'llm_latency_95th',
+  'llm_token_95th',
+  'llm_latency_avg',
+  'llm_token_usage',
+  'llm_active_connections',
+] as const;
+const metricsList = computed(() => gatewayStore.isAIGateway
+  ? [...commonMetricsList, ...aiMetricsList]
+  : commonMetricsList);
 const statisticsTypes = ref<string[]>([
   'requests_total', // 请求总数
   'health_rate', // 健康率
@@ -367,6 +483,11 @@ const egressRef = ref<InstanceType<typeof LineChart>>();
 const responseTime50Ref = ref<InstanceType<typeof LineChart>>();
 const responseTime95Ref = ref<InstanceType<typeof LineChart>>();
 const responseTime99Ref = ref<InstanceType<typeof LineChart>>();
+const llmLatency95thRef = ref<InstanceType<typeof LineChart>>();
+const llmToken95thRef = ref<InstanceType<typeof LineChart>>();
+const llmLatencyAvgRef = ref<InstanceType<typeof LineChart>>();
+const llmTokenUsageRef = ref<InstanceType<typeof LineChart>>();
+const llmActiveConnectionsRef = ref<InstanceType<typeof LineChart>>();
 const chartLoading = ref<IChartDataLoading>({});
 const searchParams = ref<ISearchParamsType & { step?: string }>({
   stage_id: 0,
@@ -447,7 +568,7 @@ const handleBackendChange = async () => {
 };
 
 // 请求数据
-const getData = async (params: ISearchParamsType & { step?: string }, type: string) => {
+const getData = async (params: ISearchParamsType & { step?: string }, type: MetricsType) => {
   chartLoading.value[type as keyof IChartDataLoading] = true;
   try {
     chartData.value[type as keyof IChartDataType] = await getApigwMetrics(
@@ -464,7 +585,7 @@ const getData = async (params: ISearchParamsType & { step?: string }, type: stri
 };
 
 const getPageData = (step?: string) => {
-  metricsList.value.forEach((type: string) => {
+  metricsList.value.forEach((type) => {
     getData({
       ...searchParams.value,
       step,
@@ -530,7 +651,31 @@ const syncParamsToCharts = () => {
   responseTime50Ref.value!.syncParams(params);
   responseTime95Ref.value!.syncParams(params);
   responseTime99Ref.value!.syncParams(params);
+  if (gatewayStore.isAIGateway) {
+    syncAIParamsToCharts();
+  }
 };
+
+const syncAIParamsToCharts = () => {
+  const params = { ...searchParams.value };
+  llmLatency95thRef.value?.syncParams(params);
+  llmToken95thRef.value?.syncParams(params);
+  llmLatencyAvgRef.value?.syncParams(params);
+  llmTokenUsageRef.value?.syncParams(params);
+  llmActiveConnectionsRef.value?.syncParams(params);
+};
+
+watch(() => gatewayStore.isAIGateway, async (isAIGateway) => {
+  if (!isAIGateway || !searchParams.value.stage_id) {
+    return;
+  }
+
+  await nextTick();
+  syncAIParamsToCharts();
+  aiMetricsList.forEach((type) => {
+    getData({ ...searchParams.value }, type);
+  });
+});
 
 const handleRefreshChange = (interval: string) => {
   clearInterval(timeId!);
@@ -594,25 +739,58 @@ onMounted(() => {
 <style lang="scss" scoped>
 
 .ag-top-header {
-  padding: 20px 24px 0;
+  padding: 24px 24px 0;
 }
 
 .search-form {
   display: flex;
-  width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
 
   :deep(.bk-form-item) {
-    margin-right: 16px;
+    display: flex;
+    max-width: fit-content;
+    min-width: 0;
+    margin: 0;
+    align-items: center;
+    flex: 1;
+
+    .bk-form-label {
+      width: auto;
+      text-align: right;
+      white-space: nowrap;
+      padding-right: 8px !important;
+    }
+
+    .bk-form-content {
+      line-height: normal;
+      .bk-input,
+      .bk-user-selector,
+      .member-selector {
+        width: 100%;
+      }
+    }
   }
 }
 
 .statistics {
-  padding: 20px 24px 32px;
+  padding: 24px 24px 32px;
+
+  .ai-metrics-title {
+    margin: 24px 0 16px;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 24px;
+    color: #313238;
+  }
 
   .line-container {
     display: flex;
-    align-items: center;
     margin-bottom: 16px;
+    align-items: stretch;
   }
 
   .requests {
@@ -645,7 +823,8 @@ onMounted(() => {
     }
 
     .success-requests {
-      width: 673px;
+      flex: 1;
+      min-width: 0;
       margin-right: 16px;
       background: #FFF;
       border-radius: 2px;
@@ -653,7 +832,8 @@ onMounted(() => {
     }
 
     .error-requests {
-      width: 673px;
+      flex: 1;
+      min-width: 0;
       background: #FFF;
       border-radius: 2px;
       box-shadow: 0 2px 4px 0 #1919290d;
@@ -663,7 +843,8 @@ onMounted(() => {
   .secondary-panel {
 
     .secondary-lf {
-      width: 808px;
+      flex: 1;
+      min-width: 0;
       padding-bottom: 6px;
       margin-right: 16px;
       background: #FFF;
@@ -672,7 +853,8 @@ onMounted(() => {
     }
 
     .secondary-rg {
-      width: 808px;
+      flex: 1;
+      min-width: 0;
       padding-bottom: 6px;
       background: #FFF;
       border-radius: 2px;

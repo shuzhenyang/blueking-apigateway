@@ -26,6 +26,7 @@ from rest_framework.exceptions import ValidationError
 from apigateway.apis.web.resource.serializers import (
     BackendPathCheckInputSLZ,
     HttpBackendConfigSLZ,
+    ResourceAuthConfigSLZ,
     ResourceDataImportSLZ,
     ResourceExportOutputSLZ,
     ResourceInputSLZ,
@@ -38,6 +39,32 @@ from apigateway.core.models import (
     Resource,
     Stage,
 )
+
+
+class TestResourceAuthConfigSLZ:
+    def test_omitted_fields_are_not_added(self):
+        slz = ResourceAuthConfigSLZ(data={})
+        slz.is_valid(raise_exception=True)
+
+        assert slz.validated_data == {}
+
+    @pytest.mark.parametrize(
+        "oauth2_config",
+        [
+            {"oauth2_public_client_enabled": True},
+            {"oauth2_personal_client_enabled": True},
+        ],
+    )
+    def test_oauth2_client_requires_user_authentication(self, oauth2_config):
+        slz = ResourceAuthConfigSLZ(
+            data={
+                "auth_verified_required": False,
+                **oauth2_config,
+            }
+        )
+
+        assert not slz.is_valid()
+        assert "non_field_errors" in slz.errors
 
 
 class TestResourceListOutputSLZ:
@@ -225,7 +252,7 @@ class TestResourceInputSLZ:
     )
     def test_validate_match_subpath__error(self, data):
         slz = ResourceInputSLZ()
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match="值必须相同"):
             slz._validate_match_subpath(data)
 
     def test_validate_backend_id(self, fake_gateway):
@@ -248,7 +275,7 @@ class TestResourceDataImportSLZ:
             (None, None),
         ],
     )
-    def validate_description_en(self, description_en, expected):
+    def test_validate_description_en(self, description_en, expected):
         slz = ResourceDataImportSLZ()
         result = slz.validate_description_en(description_en)
         assert result == expected

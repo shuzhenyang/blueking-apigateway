@@ -30,7 +30,7 @@
     />
     <div
       v-show="versionConfigs.needNewVersion && isCollapsed"
-      class="pt-20px"
+      class="pt-24px"
     >
       <BkAlert
         class="mx-24px"
@@ -66,7 +66,10 @@
         @collapse-change="handleCollapseChange"
       >
         <template #main>
-          <div class="px-24px py-20px flex-column h-100px">
+          <div
+            class="p-24px flex-column h-100px"
+            :class="{'pt-16px': versionConfigs.needNewVersion && isCollapsed}"
+          >
             <div
               class="operate flex justify-between mb-16px"
               :class="{'flex-col gap-y-16px': !isCollapsed}"
@@ -97,7 +100,7 @@
                       <div class="color-#313238 lh-20px font-700">
                         {{ item.label }}
                       </div>
-                      <div class="color-#4d4f56 lh-20px">
+                      <div class="color-#979ba5 lh-20px">
                         {{ item.description }}
                       </div>
                     </div>
@@ -142,9 +145,11 @@
                   </BkPopover>
                 </div>
                 <Divider
-                  v-show="isCollapsed"
+                  v-show="!showBatch && isCollapsed"
                   direction="vertical"
-                  class="h-12px"
+                  :width="1"
+                  class="h-14px color-#C4C6CC"
+                  type="solid"
                 />
                 <div
                   v-show="!showBatch && isCollapsed"
@@ -190,7 +195,9 @@
                 <Divider
                   v-show="isCollapsed"
                   direction="vertical"
-                  class="h-12px"
+                  :width="1"
+                  class="h-14px color-#C4C6CC"
+                  type="solid"
                 />
                 <AgDropdown
                   v-show="!isCollapsed"
@@ -257,13 +264,14 @@
                 />
               </div>
             </div>
-            <div class="flex-1 table-wrapper">
+            <div class="flex-1">
               <AgTable
                 ref="tableRef"
                 v-model:table-data="tableData"
                 show-settings
                 :api-method="getTableData"
                 :columns="columns"
+                :max-height="tableMaxHeight"
                 :hidden-column="hiddenColumns"
                 :show-selection="isShowSelection"
                 :show-first-full-row="selectedRows.length > 0"
@@ -311,7 +319,7 @@
                       @done="isComponentLoading = false"
                       @deleted-success="handleDeleteSuccess"
                       @updated="handleUpdated"
-                      @on-jump="(id: number | any) => handleShowInfo(id)"
+                      @on-jump="(id: number) => handleShowInfo(id)"
                       @on-update-plugin="handleUpdatePlugin"
                     />
                   </div>
@@ -457,6 +465,9 @@ import {
   useResourceVersion,
 } from '@/stores';
 import { usePopInfoBox, useTableFilterChange } from '@/hooks';
+import type { ICountAndResults } from '@/services/types/utils.ts';
+import type { IGatewaysResourcesListQuery } from '@/services/types/query/gateways.ts';
+import type { IResourceListPageOutput } from '@/services/types/responses/gateways.ts';
 import {
   exportDocs,
   getGatewayLabels,
@@ -483,6 +494,7 @@ import AgTable from '@/components/ag-table/Index.vue';
 import CreateResourceVersion from '@/components/create-resource-version/Index.vue';
 import VersionDiff from '@/components/version-diff/Index.vue';
 import RenderTagOverflow from '@/components/render-tag-overflow/Index.vue';
+import { useWindowSize } from '@vueuse/core';
 
 interface ApigwIDropList extends IDropList { tooltips?: string }
 
@@ -769,14 +781,17 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
           >
             { row.name || '--' }
           </div>
-          {(row.auth_config?.auth_verified_required && row.auth_config?.app_verified_required)
+          {(
+            row.auth_config?.auth_verified_required === false
+            && row.auth_config?.app_verified_required === false
+            && row.auth_config?.oauth2_personal_client_enabled === false
+          )
             ? (
               <ag-icon
                 v-bk-tooltips={{
-                  content:
-              t('该资源未配置认证方式，存在安全风险。')
-              + t('请点击"编辑"按钮为资源配置适当的认证方式。')
-              + t('如当前配置符合预期，可忽略该提示。'),
+                  content: t('该资源未配置认证方式，存在安全风险。')
+                    + t('请点击"编辑"按钮为资源配置适当的认证方式。')
+                    + t('如当前配置符合预期，可忽略该提示。'),
                 }}
                 name="exclamation-circle-fill"
                 class="min-w-14px flex-shrink-0 color-#f59500"
@@ -954,7 +969,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
           </bk-button>
           <div
             class="ml-12px"
-            onClick={(e: MouseEvent) => e?.preventDefault()}
+            onClick={(e: MouseEvent) => e.preventDefault()}
           >
             <bk-dropdown
               trigger="click"
@@ -966,7 +981,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
               {{
                 default: () => (
                   <ag-icon
-                    class="flex items-center justify-center w-16px h-16px color-#3a84ff cursor-pointer"
+                    class="flex items-center justify-center w-20px h-20px cursor-pointer rounded-2px  hover:bg-#EAEBF0"
                     name="more-fill"
                     size="16"
                   />
@@ -1003,6 +1018,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => {
 
   return cols;
 });
+
 const getFilterValue = computed(() => {
   const resultObj: Record<string, string | string[]> = {};
   Object.keys(tableQueries.value).forEach((key) => {
@@ -1018,6 +1034,37 @@ const getFilterValue = computed(() => {
   });
 
   return resultObj;
+});
+
+// 表格最大高度
+const { height: windowHeight } = useWindowSize();
+
+const tableMaxHeight = computed(() => {
+  const viewportHeight = windowHeight.value;
+  // 通知栏高度
+  const globalNoticeCompHeight = featureFlagStore.isEnabledNotice ? 40 : 0;
+  // 导航栏高度
+  const navBarHeight = 52;
+  // 路由标题高度
+  const routeTitleHeight = 52;
+  // 页面上下padding
+  const pageVerticalPadding = 40;
+  // 版本提示高度
+  const versionAlertHeight = (versionConfigs.needNewVersion && isCollapsed.value) ? 52 : 0;
+  // 操作栏高度
+  const operationBarHeight = 48;
+  // 分页器高度
+  const paginationHeight = 64;
+  // 获取表格的最大可视化区域
+  const usableHeight = viewportHeight
+    - globalNoticeCompHeight
+    - navBarHeight
+    - routeTitleHeight
+    - pageVerticalPadding
+    - versionAlertHeight
+    - operationBarHeight
+    - paginationHeight;
+  return usableHeight;
 });
 
 watch(
@@ -1447,6 +1494,7 @@ const handleShowBatch = () => {
 const handleOutBatch = () => {
   showBatch.value = false;
   handleClearSelection();
+  handleShowVersion();
   exportDropData.value = [
     {
       value: 'all',
@@ -1733,8 +1781,18 @@ onBeforeRouteLeave((to) => {
   }
 });
 
-const getTableData = async (params: Record<string, any> = {}) => {
-  return getResourceList(gatewayId, params);
+const getTableData = async (
+  params: IGatewaysResourcesListQuery,
+): Promise<ICountAndResults<IResourceListPageOutput>> => {
+  const requestParams = { ...params };
+  const fieldsToJoin = ['label_ids'] as const;
+  fieldsToJoin.forEach((field) => {
+    if (requestParams[field] && Array.isArray(requestParams[field])) {
+      requestParams[field] = requestParams[field].join(',');
+    }
+  });
+  const res = await getResourceList(gatewayId, requestParams as IGatewaysResourcesListQuery);
+  return res;
 };
 
 const handleClearSelection = () => {
@@ -1881,10 +1939,6 @@ onMounted(() => {
 
 .h-100px {
   height: 100%;
-}
-
-.table-wrapper {
-  overflow-y: auto;
 }
 
 .resource-setting-layout {

@@ -36,6 +36,7 @@
       <div class="header-search">
         <BkInput
           v-model="filterData.name"
+          type="search"
           class="search-input"
           :placeholder="t('请输入服务名称')"
           clearable
@@ -326,6 +327,19 @@ const handleBackendServiceAdded = () => {
 const getStageListData = async () => {
   stageList.value = await getStageList(apigwId.value);
 };
+
+watch(() => route.query.mode, (value) => {
+  if (value === 'add') {
+    nextTick(() => {
+      handleAdd();
+      const restQuery = { ...route.query };
+      delete restQuery.mode;
+      router.replace({ query: restQuery });
+    });
+  }
+}, {
+  immediate: true,
+});
 
 onBeforeMount(() => {
   getStageListData();

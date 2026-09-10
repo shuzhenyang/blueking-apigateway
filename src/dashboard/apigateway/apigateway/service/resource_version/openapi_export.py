@@ -140,6 +140,8 @@ class BaseExporter:
                 resource["none_schema"] = False
 
             operation.update(schema)
+            if "responses" not in operation:
+                operation["responses"] = {"default": {"description": ""}}
 
             if self.include_bk_apigateway_resource:
                 self._generate_bk_apigateway_resource(operation, resource)
@@ -270,6 +272,8 @@ class BaseExporter:
             "userVerifiedRequired": auth_config.get("auth_verified_required", True),
             "appVerifiedRequired": auth_config.get("app_verified_required", True),
             "resourcePermissionRequired": auth_config.get("resource_perm_required", True),
+            "oauth2PublicClientEnabled": auth_config.get("oauth2_public_client_enabled", False),
+            "oauth2PersonalClientEnabled": auth_config.get("oauth2_personal_client_enabled", False),
         }
 
         if config["appVerifiedRequired"] is False:
