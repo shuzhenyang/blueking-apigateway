@@ -24,9 +24,10 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
-from drf_yasg.utils import swagger_auto_schema
+from drf_spectacular.utils import extend_schema
 from rest_framework import generics, serializers, status
 
 from apigateway.apis.web.constants import ExportTypeEnum
@@ -34,11 +35,12 @@ from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.label.models import ResourceLabel
 from apigateway.apps.plugin.constants import PluginBindingScopeEnum
 from apigateway.apps.plugin.models import PluginBinding
+from apigateway.apps.rbac.constants import GatewayActionEnum
 from apigateway.apps.support.constants import DocLanguageEnum
 from apigateway.biz.audit import Auditor
 from apigateway.biz.openapi import OpenAPIImportManager, ResourceDataConvertor, ResourceImportValidator
 from apigateway.biz.plugin import PluginBindingHandler
-from apigateway.biz.resource import ResourceHandler, ResourcesSaver
+from apigateway.biz.resource import ResourceHandler, ResourcesSaver, find_resource_path_conflicts
 from apigateway.biz.resource.importer import ResourcesImporter
 from apigateway.biz.resource_doc import ResourceDocHandler
 from apigateway.biz.resource_doc.importer import DocImporter, OpenAPIParser
@@ -69,6 +71,9 @@ from .serializers import (
     ResourceLabelUpdateInputSLZ,
     ResourceListOutputSLZ,
     ResourceOutputSLZ,
+    ResourcePathConflictCheckInputSLZ,
+    ResourcePathConflictCheckOutputSLZ,
+    ResourcePathConflictListOutputSLZ,
     ResourceQueryInputSLZ,
     ResourceWithVerifiedUserRequiredOutputSLZ,
 )
@@ -85,19 +90,19 @@ class BackendHostIsEmpty(Exception):
 
 @method_decorator(
     name="get",
-    decorator=swagger_auto_schema(
-        operation_description="获取资源列表，分页",
-        query_serializer=ResourceQueryInputSLZ,
+    decorator=extend_schema(
+        description="获取资源列表，分页",
+        parameters=[ResourceQueryInputSLZ],
         responses={status.HTTP_200_OK: ResourceListOutputSLZ(many=True)},
         tags=["WebAPI.Resource"],
     ),
 )
 @method_decorator(
     name="post",
-    decorator=swagger_auto_schema(
-        operation_description="新建资源",
-        responses={status.HTTP_201_CREATED: ""},
-        request_body=ResourceInputSLZ,
+    decorator=extend_schema(
+        description="新建资源",
+        responses={status.HTTP_201_CREATED: {"type": "object", "additionalProperties": True}},
+        request=ResourceInputSLZ,
         tags=["WebAPI.Resource"],
     ),
 )
@@ -165,28 +170,30 @@ class ResourceListCreateApi(ResourceQuerySetMixin, generics.ListCreateAPIView):
 
 @method_decorator(
     name="get",
-    decorator=swagger_auto_schema(
-        operation_description="获取指定资源信息",
+    decorator=extend_schema(
+        description="获取指定资源信息",
         responses={status.HTTP_200_OK: ResourceOutputSLZ()},
         tags=["WebAPI.Resource"],
     ),
 )
 @method_decorator(
     name="put",
-    decorator=swagger_auto_schema(
-        operation_description="更新资源",
-        responses={status.HTTP_204_NO_CONTENT: ""},
-        request_body=ResourceInputSLZ,
+    decorator=extend_schema(
+        description="更新资源",
+        responses={status.HTTP_204_NO_CONTENT: None},
+        request=ResourceInputSLZ,
         tags=["WebAPI.Resource"],
     ),
 )
 @method_decorator(
     name="delete",
-    decorator=swagger_auto_schema(
-        operation_description="删除资源", responses={status.HTTP_204_NO_CONTENT: ""}, tags=["WebAPI.Resource"]
+    decorator=extend_schema(
+        description="删除资源", responses={status.HTTP_204_NO_CONTENT: None}, tags=["WebAPI.Resource"]
     ),
 )
+@extend_schema(tags=["WebAPI.Resource"])
 class ResourceRetrieveUpdateDestroyApi(ResourceQuerySetMixin, generics.RetrieveUpdateDestroyAPIView):
+    schema_request_partial = False
     serializer_class = ResourceInputSLZ
     lookup_field = "id"
 
@@ -318,23 +325,26 @@ class ResourceRetrieveUpdateDestroyApi(ResourceQuerySetMixin, generics.RetrieveU
 
 @method_decorator(
     name="put",
-    decorator=swagger_auto_schema(
-        operation_description="批量更新资源，如是否公开、是否允许申请资源权限",
-        responses={status.HTTP_204_NO_CONTENT: ""},
-        request_body=ResourceBatchUpdateInputSLZ,
+    decorator=extend_schema(
+        description="批量更新资源，如是否公开、是否允许申请资源权限",
+        responses={status.HTTP_204_NO_CONTENT: None},
+        request=ResourceBatchUpdateInputSLZ,
         tags=["WebAPI.Resource"],
     ),
 )
 @method_decorator(
     name="delete",
-    decorator=swagger_auto_schema(
-        operation_description="批量删除资源",
-        responses={status.HTTP_204_NO_CONTENT: ""},
-        request_body=ResourceBatchDestroyInputSLZ,
+    decorator=extend_schema(
+        description="批量删除资源",
+        responses={status.HTTP_204_NO_CONTENT: None},
+        request=ResourceBatchDestroyInputSLZ,
         tags=["WebAPI.Resource"],
     ),
 )
+@extend_schema(tags=["WebAPI.Resource"])
 class ResourceBatchUpdateDestroyApi(ResourceQuerySetMixin, generics.UpdateAPIView, generics.DestroyAPIView):
+    schema_request_partial = False
+    schema_delete_request_body = True
     serializer_class = ResourceBatchUpdateInputSLZ
 
     @transaction.atomic
@@ -402,14 +412,16 @@ class ResourceBatchUpdateDestroyApi(ResourceQuerySetMixin, generics.UpdateAPIVie
 
 @method_decorator(
     name="put",
-    decorator=swagger_auto_schema(
-        operation_description="更新资源标签",
-        responses={status.HTTP_204_NO_CONTENT: ""},
-        request_body=ResourceLabelUpdateInputSLZ,
+    decorator=extend_schema(
+        description="更新资源标签",
+        responses={status.HTTP_204_NO_CONTENT: None},
+        request=ResourceLabelUpdateInputSLZ,
         tags=["WebAPI.Resource"],
     ),
 )
+@extend_schema(tags=["WebAPI.Resource"])
 class ResourceLabelUpdateApi(ResourceQuerySetMixin, generics.UpdateAPIView):
+    schema_request_partial = False
     serializer_class = ResourceLabelUpdateInputSLZ
     lookup_url_kwarg = "resource_id"
     lookup_field = "id"
@@ -433,9 +445,9 @@ class ResourceLabelUpdateApi(ResourceQuerySetMixin, generics.UpdateAPIView):
 
 
 class ResourceImportCheckApi(generics.CreateAPIView):
-    @swagger_auto_schema(
-        operation_description="导入资源检查，导入资源前，检查资源配置是否正确",
-        request_body=ResourceImportCheckInputSLZ,
+    @extend_schema(
+        description="导入资源检查，导入资源前，检查资源配置是否正确",
+        request=ResourceImportCheckInputSLZ,
         responses={
             status.HTTP_200_OK: ResourceImportInfoSLZ(many=True),
             status.HTTP_400_BAD_REQUEST: ResourceImportCheckFailOutputSLZ(many=True),
@@ -484,10 +496,10 @@ class ResourceImportCheckApi(generics.CreateAPIView):
 
 
 class ResourceImportApi(generics.CreateAPIView):
-    @swagger_auto_schema(
-        operation_description="yaml/json check之后的标准化资源数据导入",
-        request_body=ResourceImportInputSLZ,
-        responses={status.HTTP_204_NO_CONTENT: ""},
+    @extend_schema(
+        description="yaml/json check之后的标准化资源数据导入",
+        request=ResourceImportInputSLZ,
+        responses={status.HTTP_204_NO_CONTENT: None},
         tags=["WebAPI.Resource"],
     )
     @transaction.atomic
@@ -543,9 +555,10 @@ class ResourceImportApi(generics.CreateAPIView):
 
 
 class ResourceImportDocPreviewApi(generics.CreateAPIView):
-    @swagger_auto_schema(
-        operation_description="导入文档预览",
-        request_body=ResourceImportDocPreviewInputSLZ,
+    @extend_schema(
+        responses={200: {"type": "object", "properties": {"doc": {"type": "string"}}}},
+        description="导入文档预览",
+        request=ResourceImportDocPreviewInputSLZ,
         tags=["WebAPI.Resource"],
     )
     @transaction.atomic
@@ -568,10 +581,10 @@ class ResourceImportDocPreviewApi(generics.CreateAPIView):
 
 
 class ResourceExportApi(generics.CreateAPIView):
-    @swagger_auto_schema(
-        operation_description="导出资源",
-        request_body=ResourceExportInputSLZ,
-        responses={status.HTTP_200_OK: ""},
+    @extend_schema(
+        description="导出资源",
+        request=ResourceExportInputSLZ,
+        responses={(200, "application/octet-stream"): bytes},
         tags=["WebAPI.Resource"],
     )
     def post(self, request, *args, **kwargs):
@@ -637,9 +650,9 @@ class ResourceExportApi(generics.CreateAPIView):
 class BackendPathCheckApi(ResourceQuerySetMixin, generics.RetrieveAPIView):
     serializer_class = BackendPathCheckInputSLZ
 
-    @swagger_auto_schema(
-        operation_description="资源后端地址检查，校验后端配置中的请求路径",
-        query_serializer=BackendPathCheckInputSLZ,
+    @extend_schema(
+        description="资源后端地址检查，校验后端配置中的请求路径",
+        parameters=[BackendPathCheckInputSLZ],
         responses={status.HTTP_200_OK: BackendPathCheckOutputSLZ(many=True)},
         tags=["WebAPI.Resource"],
     )
@@ -710,8 +723,8 @@ class BackendPathCheckApi(ResourceQuerySetMixin, generics.RetrieveAPIView):
 
 @method_decorator(
     name="get",
-    decorator=swagger_auto_schema(
-        operation_description="过滤出需要认证用户的资源列表，免用户认证应用白名单插件，需要使用此数据过滤资源",
+    decorator=extend_schema(
+        description="过滤出需要认证用户的资源列表，免用户认证应用白名单插件，需要使用此数据过滤资源",
         responses={status.HTTP_200_OK: ResourceWithVerifiedUserRequiredOutputSLZ(many=True)},
         tags=["WebAPI.Resource"],
     ),
@@ -728,4 +741,67 @@ class ResourcesWithVerifiedUserRequiredApi(ResourceQuerySetMixin, generics.ListA
         ]
         slz = ResourceWithVerifiedUserRequiredOutputSLZ(matched_resources, many=True)
 
+        return OKJsonResponse(data=slz.data)
+
+
+_RESOURCE_PATH_CONFLICT_DESCRIPTION = (
+    "检查同一请求方法下的常见路径冲突：\n"
+    "1. 路径相同，仅参数名不同，例如 /users/{id} 和 /users/{name}。"
+    "请合并重复资源，或修改路径；只改参数名不能消除冲突。\n"
+    "2. 参数可能匹配另一条路径中的固定文字，例如 /biz/{id}/batch 和 /biz/{id}/{name}。"
+    "请增加区分用途的路径段，例如将后者改为 /biz/{id}/items/{name}。"
+)
+
+
+@method_decorator(
+    name="get",
+    decorator=extend_schema(
+        description="检测资源编辑区全部资源的请求路径冲突，仅返回提示。\n" + _RESOURCE_PATH_CONFLICT_DESCRIPTION,
+        responses={status.HTTP_200_OK: ResourcePathConflictListOutputSLZ},
+        tags=["WebAPI.Resource"],
+    ),
+)
+class ResourcePathConflictListApi(ResourceQuerySetMixin, generics.ListAPIView):
+    gateway_action = GatewayActionEnum.MANAGE_GATEWAY.value
+    serializer_class = ResourcePathConflictListOutputSLZ
+
+    def list(self, request, *args, **kwargs):
+        resources = list(self.get_queryset().order_by("id").values("id", "name", "method", "path"))
+        conflicts, truncated = find_resource_path_conflicts(resources)
+        slz = ResourcePathConflictListOutputSLZ(
+            {"has_conflicts": bool(conflicts), "conflicts": conflicts, "truncated": truncated}
+        )
+        return OKJsonResponse(data=slz.data)
+
+
+@method_decorator(
+    name="post",
+    decorator=extend_schema(
+        description=(
+            "检测待新增或编辑资源与编辑区其他资源的请求路径冲突，仅返回提示。" + _RESOURCE_PATH_CONFLICT_DESCRIPTION
+        ),
+        request=ResourcePathConflictCheckInputSLZ,
+        responses={status.HTTP_200_OK: ResourcePathConflictCheckOutputSLZ},
+        tags=["WebAPI.Resource"],
+    ),
+)
+class ResourcePathConflictCheckApi(ResourceQuerySetMixin, generics.CreateAPIView):
+    gateway_action = GatewayActionEnum.MANAGE_GATEWAY.value
+    serializer_class = ResourcePathConflictCheckInputSLZ
+
+    def create(self, request, *args, **kwargs):
+        slz = ResourcePathConflictCheckInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+        queryset = self.get_queryset()
+        candidate = {"id": None, "name": "", "method": data["method"], "path": data["path"]}
+        if "resource_id" in data:
+            resource = get_object_or_404(queryset, id=data["resource_id"])
+            candidate.update(id=resource.id, name=resource.name)
+            queryset = queryset.exclude(id=resource.id)
+        resources = list(queryset.order_by("id").values("id", "name", "method", "path"))
+        conflicts, truncated = find_resource_path_conflicts(resources, candidate)
+        slz = ResourcePathConflictCheckOutputSLZ(
+            {"has_conflicts": bool(conflicts), "conflicts": conflicts, "truncated": truncated}
+        )
         return OKJsonResponse(data=slz.data)
