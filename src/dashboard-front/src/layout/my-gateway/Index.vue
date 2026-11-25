@@ -28,66 +28,101 @@
     >
       <!-- 左上角的网关选择器 -->
       <template #side-header>
-        <div class="h-34px">
+        <div ref="gatewaySelectContainerRef">
           <BkSelect
             v-show="!isMenuCollapsed"
+            :key="gatewaySelectVersion"
             v-model="gatewayId"
-            :clearable="false"
-            class="header-select h-full"
+            class="gateway-select"
             filterable
+            :clearable="false"
+            :scroll-height="408"
+            :search-placeholder="t('请搜索网关')"
+            :popover-options="{
+              extCls: 'gateway-select-popover',
+            }"
             @change="() => handleGoPage(activeMenuKey)"
           >
             <template #prefix>
               <div
-                v-if="isProgrammableGateway || isAIGateway"
-                class="gateway-selector-prefix"
-                :style="{ left: `${iconLeft}px` }"
+                class="gateway-selector-prefix gateway-kind-icon ml-8px my-4px"
+                :class="[getGatewayKind.color, getGatewayKind.bgColor]"
+                :style="{ '--gateway-kind-bg-hover': getGatewayKind.hoverBgColor }"
               >
                 <AgIcon
                   v-bk-tooltips="{
-                    content: isAIGateway ? t('AI 网关') : t('可编程网关'),
+                    content: getGatewayKind.name,
                     placement: 'right',
                   }"
-                  :name="isAIGateway ? 'AIwangguan' : 'square-program'"
-                  size="16"
+                  size="22"
+                  class="gateway-kind-icon"
+                  :name="getGatewayKind.icon"
+                  :class="[getGatewayKind.color, getGatewayKind.bgColor]"
+                  :style="{ '--gateway-kind-bg-hover': getGatewayKind.hoverBgColor }"
                 />
               </div>
             </template>
+            <template #extension>
+              <div class="m-auto cursor-pointer">
+                <div
+                  class="flex items-center color-#979ba5"
+                  @click.stop="handleCreateGateway"
+                >
+                  <AgIcon
+                    class="mr-8px color-#979ba5 b-rounded-2px"
+                    name="plus-circle"
+                    size="16"
+                  />
+                  <span class="text-12px color-#4d4f56">
+                    {{ t('新增任务') }}
+                  </span>
+                </div>
+              </div>
+            </template>
             <BkOption
-              v-for="item in gatewayList"
+              v-for="item of gatewayList"
               :id="item.id"
               :key="item.id"
-              :name="item.name"
+              :name="getGatewayFullName(item)"
+              :class="[{
+                'min-h-48px!': hasDistinctDisplayName(item)
+              }]"
             >
               <div class="w-full flex items-center justify-between">
                 <div class="flex items-center justify-center">
-                  <span
-                    class="text-ov"
-                    :style="{ maxWidth: getOptionTextWidth(item) }"
-                  >
-                    {{ item.name }}
-                  </span>
                   <BkPopover
-                    v-if="[1, 2].includes(item.kind)"
                     placement="right"
-                    :content="item.kind === 1 ? t('可编程网关') : t('AI 网关')"
+                    :content="getKindInfo(item.kind).name"
                     :popover-delay="0"
                   >
                     <AgIcon
-                      :name="item.kind === 1 ? 'square-program' : 'AIwangguan'"
-                      size="16"
-                      class="ml-6px color-#3a84ff"
-                      :class="[
-                        {
-                          'mr-4px': !item.status
-                        }
-                      ]"
+                      :name="getKindInfo(item.kind).icon"
+                      size="20"
+                      class="mr-8px b-rounded-2px gateway-kind-icon"
+                      :class="[getKindInfo(item.kind).color, getKindInfo(item.kind).bgColor]"
+                      :style="{ '--gateway-kind-bg-hover': getKindInfo(item.kind).hoverBgColor }"
                     />
                   </BkPopover>
+                  <div
+                    v-bk-tooltips="{
+                      placement: 'right',
+                      content: getGatewayFullName(item),
+                      disabled: !nameOverflowMap.get(item.id),
+                    }"
+                    class="min-w-0 max-w-178px flex flex-col color-#4d4f56 break-all"
+                    @mouseenter="handleNameMouseEnter($event, item)"
+                  >
+                    <span class="truncate">{{ getGatewayDisplayName(item) }}</span>
+                    <span
+                      v-if="hasDistinctDisplayName(item)"
+                      class="truncate text-12px color-#979ba5"
+                    >
+                      {{ item.name }}
+                    </span>
+                  </div>
                 </div>
                 <BkTag
-                  v-if="!item.status
-                    || gatewayStore?.currentGateway?.status === 0 && gatewayId === item.id"
+                  v-if="!item.status || gatewayStore?.currentGateway?.status === 0 && gatewayId === item.id"
                 >
                   {{ t('已停用') }}
                 </BkTag>
@@ -115,11 +150,13 @@
                       :name="menu.icon || ''"
                       size="18"
                     />
+                  </template>
+                  <template #title>
+                    {{ menu.title }}
                     <BkBadge
-                      v-if="['PermissionManage'].includes(menu.name) && permissionStore.count > 0"
+                      v-if="hasSubmenuPending(menu.name)"
                       dot
                       theme="danger"
-                      :class="{'en': locale !== 'zh-cn'}"
                     />
                   </template>
                   <template v-for="child in menu.children">
@@ -128,13 +165,18 @@
                       :key="child.name"
                       @click.stop="() => handleGoPage(child.name)"
                     >
-                      {{ child.title }}
+                      <span
+                        v-bk-tooltips="{
+                          content: child.title,
+                          disabled: !menuTitleOverflowMap[child.name],
+                        }"
+                        class="min-w-0 truncate"
+                        @mouseenter="handleMenuTitleMouseEnter($event, child.name)"
+                      >{{ child.title }}</span>
                       <BkBadge
-                        v-if="['PermissionApply'].includes(child.name ) && permissionStore.count > 0"
-                        :count="permissionStore.count"
-                        :max="99"
+                        v-if="getMenuItemPendingCount(child.name) > 0"
+                        :count="getMenuItemPendingCount(child.name)"
                         theme="danger"
-                        :class="{'en': locale !== 'zh-cn'}"
                       />
                     </BkMenuItem>
                   </template>
@@ -187,14 +229,14 @@
         </div>
         <div :class="routerViewWrapperClass">
           <RouterView
-            :key="route.params.id as string"
+            :key="(route.params.id as string)"
             :gateway-id="Number(route.params.id)"
           />
         </div>
       </div>
     </BkNavigation>
     <!-- 1.13 版本升级提示 -->
-    <Version113UpdateNotice ref="version113UpdateNoticeRef" />
+    <V113ReleaseNoteDialog ref="version113UpdateNoticeRef" />
   </div>
 </template>
 
@@ -207,20 +249,23 @@ import {
   useStage,
   useUserInfo,
 } from '@/stores';
-import { getGatewayList } from '@/services/source/gateway';
+import { getGatewayList } from '@/services/source/gateway/gateway';
+import { getStageList } from '@/services/source/gateway/stage';
+import { getPermissionApplyList } from '@/services/source/gateway/permission';
+import { getMcpAppPermissionApplyPendingCount } from '@/services/source/gateway/mcp-server/permission';
 import type { IExtractListApiResults } from '@/services/types/utils';
 import type { IMenu } from '@/types/common';
-import { getStageList } from '@/services/source/stage';
-import { getPermissionApplyList } from '@/services/source/permission';
-import Version113UpdateNotice from '@/components/version-113-update-notice/Index.vue';
+import V113ReleaseNoteDialog from './components/V113ReleaseNoteDialog.vue';
 import { useGatewayRole } from '@/hooks';
-import type { GatewayPermissionKey } from '@/constants/gateway-permission';
+import { canAccessByRole } from '@/utils/gateway-permission';
 import { isGatewayNavigationPending } from '@/router/gateway-role-guard';
 import { getGatewayErrorRoute } from '@/utils/gateway-access-error';
+import { getGatewayDisplayName, getGatewayFullName, hasDistinctDisplayName } from '@/utils/gateway-name';
 
 type GatewayItemType = IExtractListApiResults<typeof getGatewayList>;
+type PendingCountKey = 'count' | 'mcpCount';
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -235,12 +280,16 @@ const { currentRole, roleStatus, roleError, canAccess } = useGatewayRole();
 // 选中的菜单
 const activeMenuKey = ref('StageOverview');
 const gatewayList = ref<GatewayItemType[]>([]);
+// 网关名称是否溢出（用于决定是否显示 tooltip）
+const nameOverflowMap = ref(new Map<number, boolean>());
+const gatewaySelectContainerRef = ref<HTMLElement>();
 const openedKeys = ref<string[]>(['StageManagement', 'ResourceManagement']);
 const needMenu = ref(true);
 const pageName = ref('');
 // 当前网关Id
 const gatewayId = ref(0);
-const iconLeft = ref(6);
+// 选择器内部会缓存选中项文案，列表数据变更后通过变更 key 重建，确保展示最新名称
+const gatewaySelectVersion = ref(0);
 // 页面header名
 const headerTitle = ref('');
 
@@ -250,12 +299,18 @@ const version113UpdateNoticeRef = ref();
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
 const isAIGateway = computed(() => gatewayStore.isAIGateway);
 const isProgrammableGateway = computed(() => gatewayStore.isProgrammableGateway);
+// 只稳定当前网关的菜单展示；请求完成、身份变化或角色失效后立即采用新状态。
+// 页面访问与操作权限仍使用 currentRole，由守卫等待最新角色后决定是否放行。
+const menuRole = computed(() => {
+  const state = roleStore.roles[Number(route.params.id)];
+  return state?.status === 'loading' ? state.previousRole ?? '' : currentRole.value;
+});
 const menuList = computed<IMenu[]>(() => [
   {
     name: 'StageManagement',
     enabled: true,
     title: t('环境管理'),
-    icon: 'resource',
+    icon: 'setting',
     permission: 'stage',
     children: [
       {
@@ -276,7 +331,7 @@ const menuList = computed<IMenu[]>(() => [
     name: 'BackendService',
     enabled: true,
     title: t('后端服务'),
-    icon: 'fuwuguanli',
+    icon: 'backend',
     permission: 'backend',
   },
   {
@@ -290,7 +345,7 @@ const menuList = computed<IMenu[]>(() => [
     name: 'ResourceManagement',
     enabled: true,
     title: t('资源管理'),
-    icon: 'ziyuanguanli',
+    icon: 'resources',
     permission: 'resource',
     children: [
       {
@@ -313,7 +368,7 @@ const menuList = computed<IMenu[]>(() => [
     name: 'PermissionManage',
     enabled: true,
     title: t('权限管理'),
-    icon: 'quanxianguanli',
+    icon: 'permission-2',
     permission: 'permission',
     children: [
       {
@@ -360,7 +415,7 @@ const menuList = computed<IMenu[]>(() => [
   {
     name: 'MonitorAlarm',
     title: t('监控告警'),
-    icon: 'gaojingjilu',
+    icon: 'warning',
     enabled: featureFlagStore.flags.ENABLE_MONITOR,
     children: [
       {
@@ -381,13 +436,13 @@ const menuList = computed<IMenu[]>(() => [
     name: 'OnlineDebugging',
     enabled: true,
     title: t('在线调试'),
-    icon: 'zaixiandiaoshi',
+    icon: 'debugging',
     permission: 'debug',
   },
   {
     name: 'MCP',
     title: 'MCP',
-    icon: 'mcp-server',
+    icon: 'mcp',
     enabled: true,
     children: [
       {
@@ -414,7 +469,7 @@ const menuList = computed<IMenu[]>(() => [
     name: 'GatewaySettings',
     enabled: true,
     title: t('网关设置'),
-    icon: 'jibenxinxi',
+    icon: 'gateway-settings',
     children: [
       {
         name: 'BasicInfo',
@@ -455,16 +510,6 @@ const visibleMenuList = computed(() => menuList.value
     return isMenuVisible(menu);
   }));
 
-const firstVisibleRouteName = computed(() => {
-  for (const menu of visibleMenuList.value) {
-    if (menu.children?.length) {
-      return menu.children[0].name;
-    }
-    return menu.name;
-  }
-  return 'BasicInfo';
-});
-
 // 表格需要兼容的页面模块
 const needBkuiTablePage = computed(() => {
   return [
@@ -498,6 +543,39 @@ const routerViewWrapperClass = computed(() => {
   return `${initClass} ${displayBkuiTable}`;
 });
 
+const getKindInfo = (kind?: number | null) => {
+  if (kind === 1) {
+    return {
+      icon: 'wangguanleixing-biancheng',
+      name: t('可编程网关'),
+      color: 'color-#0e3377',
+      bgColor: 'bg-#e2e6ee',
+      hoverBgColor: '#bdc2ce',
+    };
+  }
+
+  if (kind === 2) {
+    return {
+      icon: 'wangguanleixing-ai',
+      name: t('AI 网关'),
+      color: 'color-#6228ff',
+      bgColor: 'bg-#ece5ff',
+      hoverBgColor: '#d6c7ff',
+    };
+  }
+
+  return {
+    icon: 'wangguanleixing-wangguan',
+    name: t('API 网关'),
+    color: 'color-#3a84ff',
+    bgColor: 'bg-#cddffe',
+    hoverBgColor: '#a3c5fd',
+  };
+};
+
+// 左上角前缀图标跟随当前选中网关的类型
+const getGatewayKind = computed(() => getKindInfo(gatewayStore.currentGateway?.kind));
+
 const setBreadcrumbTitle = (payload: typeof route) => {
   const { title, aiTitle = '', standardTitle = '' } = payload?.meta ?? {};
   if (isAIGateway.value && aiTitle) {
@@ -506,6 +584,16 @@ const setBreadcrumbTitle = (payload: typeof route) => {
   else {
     headerTitle.value = (title as string) ?? '';
   }
+};
+
+const handleNameMouseEnter = (e: MouseEvent, item: GatewayItemType) => {
+  const el = e.currentTarget as HTMLElement;
+  // 省略号作用在内部两个 .truncate 子元素上，父容器自身不会溢出，需要分别测量子元素
+  const isOverflow = Array
+    .from(el.querySelectorAll<HTMLElement>('.truncate'))
+    .some(span => span.scrollWidth > span.clientWidth);
+  nameOverflowMap.value.clear();
+  nameOverflowMap.value.set(item.id, isOverflow);
 };
 
 // 检查网关下的环境 schema 版本
@@ -552,9 +640,10 @@ watch(
     // 仅当网关数据存在，并且和当前页面网关id一致，才刷新标题
     if (newGateway && newGateway?.id === gatewayId.value) {
       setBreadcrumbTitle(route);
-      nextTick(() => {
-        getGatewayIconDistance(newGateway?.name ?? '');
-      });
+    }
+    // 基本信息保存后会刷新详情，这里同步左上角选择器中的网关名称
+    if (newGateway?.id) {
+      syncGatewayListItem(newGateway as Record<string, any>);
     }
   },
   { flush: 'post' },
@@ -638,12 +727,39 @@ watch(
 const getGatewayData = async () => {
   const response = await getGatewayList({ limit: 10000 });
   gatewayList.value = response.results || [];
-  const name = gatewayList.value.find(gw => gw.id === gatewayId.value)?.name ?? '';
-  getGatewayIconDistance(name);
 };
+
+// 网关基础信息（如展示名）修改成功后同步选择器列表，避免仍展示旧名称
+const syncGatewayListItem = (gateway: Record<string, any>) => {
+  const item = gatewayList.value.find(listItem => listItem.id === gateway.id) as Record<string, any>;
+  if (!item) {
+    return;
+  }
+  let isChanged = false;
+  ['name', 'display_name', 'kind', 'status'].forEach((key) => {
+    if (gateway[key] !== undefined && item[key] !== gateway[key]) {
+      item[key] = gateway[key];
+      isChanged = true;
+    }
+  });
+  if (isChanged) {
+    // 替换数组引用并重建选择器，驱动下拉选项重新渲染
+    gatewayList.value = [...gatewayList.value];
+    gatewaySelectVersion.value += 1;
+  }
+};
+
+// 待审批数量请求的批次序号：切换网关/角色后仅允许最新一批请求回写 store，旧响应直接丢弃
+let pendingCountBatchId = 0;
+// 组件卸载后不再回写全局 store
+let isLayoutUnmounted = false;
+onUnmounted(() => {
+  isLayoutUnmounted = true;
+});
 
 // 获取权限审批的数量
 const getPermissionData = async (id: number) => {
+  const batchId = pendingCountBatchId;
   const res = await getPermissionApplyList(
     id,
     {
@@ -651,16 +767,64 @@ const getPermissionData = async (id: number) => {
       limit: 10,
     },
   );
+  if (isLayoutUnmounted || batchId !== pendingCountBatchId) {
+    return;
+  }
   if (id === Number(route.params.id) && canAccess('permission')) {
     permissionStore.setCount(res.count);
   }
+};
+
+// 获取 MCP 权限管理的待审批数量
+const getMcpPermissionData = async (id: number) => {
+  const batchId = pendingCountBatchId;
+  const res = await getMcpAppPermissionApplyPendingCount(id);
+  if (isLayoutUnmounted || batchId !== pendingCountBatchId) {
+    return;
+  }
+  if (id === Number(route.params.id) && canAccess('mcp-perm')) {
+    permissionStore.setMcpCount(res?.count ?? 0);
+  }
+};
+
+// 菜单名 -> 全局待审批数量字段的映射，新增菜单时在此登记
+const menuItemPendingCountKeyMap: Record<string, PendingCountKey> = {
+  PermissionApply: 'count',
+  MCPServerPermission: 'mcpCount',
+};
+
+const submenuPendingCountKeyMap: Record<string, PendingCountKey> = {
+  PermissionManage: 'count',
+  MCP: 'mcpCount',
+};
+
+// 子菜单项上的待审批数量
+const getMenuItemPendingCount = (name: string) => {
+  const key = menuItemPendingCountKeyMap[name];
+  return key ? permissionStore[key] : 0;
+};
+
+// 子菜单标题是否溢出（溢出时 hover 展示 tooltip）
+const menuTitleOverflowMap = reactive<Record<string, boolean>>({});
+
+const handleMenuTitleMouseEnter = (e: MouseEvent, name: string) => {
+  const el = e.currentTarget as HTMLElement;
+  menuTitleOverflowMap[name] = el.scrollWidth > el.clientWidth;
+};
+
+// 子菜单收起时，父级菜单展示红点提示
+const hasSubmenuPending = (name: string) => {
+  const key = submenuPendingCountKeyMap[name];
+  return Boolean(key && permissionStore[key] > 0);
 };
 
 // 附加数据只能在目标网关角色就绪后查询，运营者不调用管理员的环境接口。
 watch(
   [() => route.params.id, currentRole, roleStatus],
   () => {
+    pendingCountBatchId += 1;
     permissionStore.setCount(0);
+    permissionStore.setMcpCount(0);
     const id = Number(route.params.id);
     if (!Number.isSafeInteger(id) || id <= 0 || roleStatus.value !== 'ready') {
       return;
@@ -671,6 +835,9 @@ watch(
     }
     if (canAccess('permission')) {
       requests.push(getPermissionData(id));
+    }
+    if (canAccess('mcp-perm')) {
+      requests.push(getMcpPermissionData(id));
     }
     Promise.all(requests).catch(() => {
       // 附加数据失败不影响导航，错误由统一 HTTP 封装提示。
@@ -686,63 +853,7 @@ const isMenuVisible = (menu: IMenu) => {
   if (menu.hideInProgrammable && isProgrammableGateway.value) {
     return false;
   }
-  return canAccess(menu.permission);
-};
-
-const findMenuPermission = (menus: IMenu[], routeName: string): GatewayPermissionKey | undefined => {
-  for (const menu of menus) {
-    if (menu.name === routeName) {
-      return menu.permission;
-    }
-    if (menu.children?.length) {
-      const childPermission = findMenuPermission(menu.children, routeName);
-      if (childPermission) {
-        return childPermission;
-      }
-    }
-  }
-  return undefined;
-};
-
-// 根据网关不同状态展示文案最大宽度
-const getOptionTextWidth = (gateway: GatewayItemType) => {
-  // 如果当前网关既是编辑网关且已停用
-  if (gateway.kind === 1) {
-    if (!gateway.status) {
-      return '100px';
-    }
-    return '180px';
-  }
-
-  // 如果当前网关既已停用
-  if (!gateway.status) {
-    return '120px';
-  }
-
-  return '200px';
-};
-
-const getGatewayTextWidth = (text: string) => {
-  const ctx = document.createElement('canvas').getContext('2d');
-  if (!ctx) return 0;
-  const platform = window.navigator.platform.toLowerCase();
-  const realFontFamily = platform.indexOf('win') === 0
-    ? 'Microsoft Yahei,Helvetica,Aria'
-    : getComputedStyle(document.body).fontFamily;
-  // 14px 和页面select输入框字号保持一致
-  ctx.font = `14px ${realFontFamily}`;
-  return ctx.measureText(text).width;
-};
-
-// 动态获取网关icon的边距
-const getGatewayIconDistance = (name: string) => {
-  if (name) {
-    const calcValue = getGatewayTextWidth(name) + 20;
-    // 最小不能小于 24px，防止canvas测不准得到很小的值，图标盖住文字
-    iconLeft.value = Math.max(calcValue, 24);
-    // 防止图标跑到输入框外面
-    iconLeft.value = Math.min(iconLeft.value, 176);
-  }
+  return canAccessByRole(menuRole.value, menu.permission);
 };
 
 const handleCollapse = (collapsed: boolean) => {
@@ -775,12 +886,16 @@ const handleGoPage = async (routeName: string) => {
     }
     return;
   }
-  const permission = findMenuPermission(menuList.value, nextRouteName);
+  // 刷新期间仍可选择菜单；保留点击目标，由守卫等待角色结果，避免用暂时为空的角色误回退。
   await router.push({
-    name: canAccess(permission) ? nextRouteName : firstVisibleRouteName.value,
+    name: nextRouteName,
     params: { id: gatewayId.value },
   });
-  getGatewayIconDistance(gatewayData?.name ?? '');
+};
+
+const handleCreateGateway = () => {
+  const routeData = router.resolve({ name: 'CreateGateway' });
+  window.open(routeData.href, '_blank');
 };
 
 const handleBack = () => {
@@ -808,6 +923,7 @@ onMounted(() => {
 
       .bk-navigation-title {
         flex-basis: 51px !important;
+        padding: 0 8px;
       }
 
       .nav-slider-list {
@@ -833,28 +949,30 @@ onMounted(() => {
 
       .bk-menu-item {
         margin: 0;
-        color: rgb(99 101 110);
+        color: #4d4f56;
 
         .item-icon {
+          color: #979ba5;
 
           .default-icon {
-            background-color: rgb(197 199 205);
+            background-color: #c5c7cd;
           }
         }
 
         &:hover {
           background: #f0f1f5;
         }
-      }
 
-      .bk-menu-item.is-active {
-        color: rgb(58 132 255);
-        background: rgb(225 236 255);
+        &.is-active {
+          color: #3a84ff;
+          background: #e1ecff;
 
-        .item-icon {
+          .item-icon {
+            color: inherit;
 
-          .default-icon {
-            background-color: rgb(58 132 255);
+            .default-icon {
+              background-color: #3a84ff;
+            }
           }
         }
       }
@@ -863,20 +981,20 @@ onMounted(() => {
     .submenu-header {
       position: relative;
 
-      .bk-badge-main {
-        position: absolute;
-        top: 1px;
-        left: 120px;
+      .submenu-header-content {
 
-        &.en {
-          left: 142px;
-        }
+        .bk-badge-main {
+          position: relative;
+          top: -6px;
+          left: 4px;
+          vertical-align: top;
 
-        .bk-badge {
-          width: 6px;
-          height: 6px;
-          min-width: 6px;
-          background-color: #ff5656;
+          .bk-badge {
+            width: 6px;
+            height: 6px;
+            min-width: 6px;
+            background-color: #ff5656;
+          }
         }
       }
     }
@@ -887,15 +1005,16 @@ onMounted(() => {
 
         .item-content {
           position: relative;
+          display: flex;
+          min-width: 0;
+          overflow: hidden;
+          align-items: center;
 
           .bk-badge-main {
-            position: absolute;
-            top: 6px;
-            left: 58px;
-
-             &.en {
-              left: 130px;
-            }
+            position: relative;
+            top: -6px;
+            margin-left: 4px;
+            flex-shrink: 0;
 
             .bk-badge {
               height: 18px;
@@ -911,11 +1030,11 @@ onMounted(() => {
     }
 
     .submenu-header-icon {
-      color: rgb(99 101 110);
+      color: #979ba5;
     }
 
     .submenu-header-content {
-      color: rgb(99 101 110);
+      color: #4d4f56;
     }
 
     .submenu-header-collapse {
@@ -928,11 +1047,11 @@ onMounted(() => {
     }
 
     .bk-menu-submenu .submenu-header.is-collapse {
-      color: rgb(58 132 255);
+      color: #3a84ff;
       background: rgb(225 236 255);
 
       .submenu-header-icon {
-        color: rgb(58 132 255);
+        color: #3a84ff;
       }
     }
   }
@@ -963,10 +1082,10 @@ onMounted(() => {
         font-size: 16px;
         color: #313238;
         background: #fff;
+        flex-basis: 52px;
         border-bottom: 1px solid #dcdee5;
         box-shadow: 0 3px 4px 0 #0000000a;
         box-sizing: border-box;
-        flex-basis: 52px;
 
         .icon-ag-return-small {
           font-size: 32px;
@@ -1034,46 +1153,79 @@ onMounted(() => {
   }
 }
 
-:deep(.header-select) {
-  width: 224px;
+:deep(.gateway-select) {
+  width: 240px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  box-sizing: border-box;
+
+  .bk-select-trigger {
+    display: flex;
+    height: 100%;
+  }
 
   .bk-input {
-    position: relative;
-    display: flex;
-    background-color: #f5f7fa;
+    height: 100%;
+    background-color: #f0f1f5;
     border: none;
     border-radius: 2px;
     box-shadow: none;
-    align-items: center;
+    box-sizing: border-box;
 
     .bk-input--text {
-      max-width: fit-content;
-      padding-right: 24px;
-      margin-left: 6px;
-      font-size: 14px;
-      color: #63656e;
+      font-size: 12px;
+      color: #4d4f56;
       background-color: transparent;
-      order: 1;
     }
 
     .gateway-selector-prefix {
-      position: absolute;
-      top: 50%;
-      width: 16px;
-      color: #3a84ff;
-      transform: translateY(-50%);
-      flex-shrink: 0;
-      order: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 2px;
+    }
+
+    &:hover {
+      background-color: #eaebf0;
+    }
+  }
+
+  &:hover {
+
+    .gateway-kind-icon {
+      background-color: var(--gateway-kind-bg-hover);
     }
   }
 
   &.is-focus {
-    border: 1px solid #3a84ff;
+    border-color: #699df4;
   }
 }
 </style>
 
 <style lang="scss">
+.bk-popover.bk-pop2-content.gateway-select-popover .bk-select-content-wrapper {
+
+  .bk-select-option {
+    padding: 0 8px;
+
+    &.is-hover,
+    &.is-selected,
+    &:hover {
+      background-color: #f0f1f5;
+
+      .gateway-kind-icon {
+        background-color: var(--gateway-kind-bg-hover);
+      }
+    }
+  }
+
+  .bk-select-extension {
+    height: 32px;
+  }
+}
+
 .custom-height-navigation {
 
   .content-header {

@@ -47,6 +47,7 @@
     <div class="backend-service-content">
       <AgTable
         ref="tableRef"
+        cache-identifier="BackendService"
         show-settings
         resizable
         :api-method="getTableData"
@@ -69,15 +70,12 @@
 import { Message } from 'bkui-vue';
 import { useGateway } from '@/stores';
 import { usePopInfoBox } from '@/hooks';
-import {
-  deleteBackendService,
-  getBackendServiceList,
-} from '@/services/source/backend-services.ts';
-import { getStageList } from '@/services/source/stage';
+import { deleteBackendService, getBackendServiceList } from '@/services/source/gateway/backend';
+import { getStageList } from '@/services/source/gateway/stage';
+import type { IBackendListOutput } from '@/services/types/gateway/backend.ts';
 import type { IExtractApiReturn } from '@/services/types/utils.ts';
 import AddBackendService from '@/views/backend-services/components/AddBackendService.vue';
-import AgTable from '@/components/ag-table/Index.vue';
-import type { PrimaryTableProps, TableRowData } from '@blueking/tdesign-ui';
+import AgTable, { type IAgTableInstance, type ITableColumn } from '@/components/base/ag-table';
 
 type IStageListItem = IExtractApiReturn<typeof getStageList>[number];
 
@@ -100,17 +98,17 @@ const filterData = ref({
 
 const stageList = ref<IStageListItem[]>([]);
 
-const tableRef = useTemplateRef('tableRef');
+const tableRef = useTemplateRef<IAgTableInstance<IBackendListOutput>>('tableRef');
 
-const columns = computed<PrimaryTableProps['columns']>(() => [
+const columns = computed<ITableColumn<IBackendListOutput>[]>(() => [
   {
     title: t('后端服务名称'),
     colKey: 'name',
-    cell: (h: any, { row }: { row: any }) => {
+    cell: (_h, { row }) => {
       return (
         <div
           v-bk-tooltips={{
-            content: row.name,
+            content: row.name ?? '',
             placement: 'top',
             disabled: !row.isOverflow,
             extCls: 'max-w-480px',
@@ -132,7 +130,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     title: t('描述'),
     colKey: 'description',
     ellipsis: true,
-    cell: (h: any, { row }: { row: any }) => {
+    cell: (_h, { row }) => {
       return (
         <span>
           { row.description || '--' }
@@ -142,6 +140,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   },
   {
     colKey: 'resource_count',
+    displayTitle: t('关联的资源'),
     title: () => (
       <span
         v-bk-tooltips={t('当前【资源配置编辑区】及所有【已发布环境】关联的资源数')}
@@ -150,7 +149,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
         {t('关联的资源')}
       </span>
     ),
-    cell: (h: any, { row }: { row: any }) => {
+    cell: (_h, { row }) => {
       return !row.resource_count || gatewayStore.isProgrammableGateway
         ? (
           <span>
@@ -173,7 +172,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     colKey: 'updated_time',
     width: 260,
     ellipsis: true,
-    cell: (h: any, { row }: { row: any }) => {
+    cell: (_h, { row }) => {
       return (
         <span>
           { row.updated_time }
@@ -186,7 +185,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
     colKey: 'operate',
     fixed: 'right',
     width: 150,
-    cell: (h: any, { row }: { row: any }) => {
+    cell: (_h, { row }) => {
       return (
         <div>
           <bk-button
@@ -282,7 +281,7 @@ const handleAdd = () => {
 };
 
 // 点击名称/编辑
-const handleEdit = (row: TableRowData) => {
+const handleEdit = (row: IBackendListOutput) => {
   baseInfo.value = Object.assign({}, {
     name: row.name,
     description: row.description,
@@ -301,7 +300,7 @@ const handleResource = (id: number) => {
   router.push(params);
 };
 
-const handleDelete = (row: TableRowData) => {
+const handleDelete = (row: IBackendListOutput) => {
   usePopInfoBox({
     isShow: true,
     type: 'warning',

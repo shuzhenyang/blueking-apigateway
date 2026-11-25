@@ -18,18 +18,31 @@
 
 <template>
   <div class="mcp-market-wrapper">
-    <img
-      ref="bannerRef"
-      :src="bannerImg"
-      alt="banner"
-      class="banner"
-      loading="lazy"
-      @error="bannerLoaded = true"
+    <div
+      v-if="isBannerVisible"
+      class="banner-wrapper"
     >
+      <img
+        ref="bannerRef"
+        :src="bannerImg"
+        alt="banner"
+        class="banner"
+        loading="lazy"
+        @load="handleBannerLoad"
+        @error="bannerLoaded = true"
+      >
+      <AgIcon
+        name="icon-close"
+        class="banner-close"
+        size="20"
+        @click="handleCloseBanner"
+      />
+    </div>
     <div class="flex gap-16px main">
       <div
         ref="mcpCategorizeRef"
         class="bg-white min-w-200px h-100% mcp-categorize"
+        :style="{ maxHeight: categorizeMaxHeight }"
       >
         <div
           class="mcp-categorize-item mcp-categorize-all"
@@ -39,7 +52,7 @@
           @click.stop="handleCategoryChange('all')"
         >
           <div class="mcp-categorize-content">
-            <svg class="icon svg-icon w-16px">
+            <svg class="icon svg-icon w-16px h-16px">
               <use xlink:href="#icon-ag-quanbu" />
             </svg>
             <div class="categorize-text">
@@ -67,7 +80,7 @@
             <div
               v-bk-tooltips="{
                 placement:'top',
-                content: categorize.display_name,
+                content: categorize.display_name ?? '',
                 disabled: !categorize.isOverflow,
               }"
               class="truncate categorize-text"
@@ -86,41 +99,43 @@
         class="right"
         :style="{ width: `calc(100% - ${mcpCategorizeWidth}px)` }"
       >
-        <AgMcpTopBar
-          v-model:publish-time="filterData.order_by"
-          class="mb-16px"
-          :selections="selections"
-          @batch-copy="handleBatchCopy"
-          @sort-change="handleSortChange"
-        >
-          <template #mcpServerTab>
-            <div class="flex mcp-server-tab">
-              <div
-                v-for="tab of mcpTabList"
-                :key="tab.id"
-                class="flex items-center mcp-server-tab-item min-w-48px!"
-                :class="[
-                  {
-                    'is-active': tab.id === activeStatusTab,
-                  },
-                ]"
-                @click.stop="handleTopTabChange(tab.id)"
-              >
-                <div>{{ tab.name }}</div>
+        <!-- 顶部操作栏：吸顶固定，不随卡片列表滚动 -->
+        <div class="mcp-market-top-bar">
+          <McpServerToolbar
+            v-model:publish-time="filterData.order_by"
+            :selections="selections"
+            @batch-copy="handleBatchCopy"
+            @sort-change="handleSortChange"
+          >
+            <template #mcpServerTab>
+              <div class="flex mcp-server-tab">
+                <div
+                  v-for="tab of mcpTabList"
+                  :key="tab.id"
+                  class="flex items-center mcp-server-tab-item min-w-48px!"
+                  :class="[
+                    {
+                      'is-active': tab.id === activeStatusTab,
+                    },
+                  ]"
+                  @click.stop="handleTopTabChange(tab.id)"
+                >
+                  <div>{{ tab.name }}</div>
+                </div>
               </div>
-            </div>
-          </template>
-          <template #customSearch>
-            <BkInput
-              v-model="filterData.keyword"
-              :placeholder="t('搜索 MCP 名称、展示名、描述')"
-              clearable
-            />
-          </template>
-        </AgMcpTopBar>
+            </template>
+            <template #customSearch>
+              <BkInput
+                v-model="filterData.keyword"
+                :placeholder="t('搜索 MCP 名称、展示名、描述')"
+                clearable
+              />
+            </template>
+          </McpServerToolbar>
+        </div>
         <!-- 卡片区域内容 -->
         <BkLoading
-          :loading="isLoading"
+          :loading="isLoading && !isLoadMore"
           :z-index="99"
           color="#f5f7fb"
           :class="[
@@ -128,9 +143,12 @@
             { 'min-h-200px': isLoading }
           ]"
         >
-          <div class="mcp-market-list">
+          <div
+            ref="mcpMarketListRef"
+            class="mcp-market-list"
+          >
             <template v-if="mcpMarketList.length < 1 && !isLoading">
-              <TableEmpty
+              <AgTableEmpty
                 background="#f5f7fa"
                 :empty-type="cardEmptyType"
                 @clear-filter="handleClearFilter"
@@ -138,7 +156,7 @@
               />
             </template>
             <template v-else>
-              <AgMcpCard
+              <McpServerCard
                 v-for="server of mcpMarketList"
                 :key="server.id"
                 :server="server"
@@ -169,29 +187,31 @@
                 <template #mcpCopyConfig>
                   <BkButton
                     text
-                    class="mr-24px color-#979ba5!"
+                    class="mr-16px color-#979ba5! copy-config-btn"
                     @click.stop="handleCopyConfig(server)"
                   >
                     <AgIcon
                       name="copy"
-                      class="mr-8px"
+                      class="mr-4px"
                       size="16"
                     />
                     {{ t("复制配置") }}
                   </BkButton>
                 </template>
-              </AgMcpCard>
+              </McpServerCard>
             </template>
           </div>
         </BkLoading>
         <!-- 复制 MCP 配置 -->
-        <AgMcpCopyConfigDialog
+        <McpAccessConfigDialog
           v-model:is-show="isShowConfig"
           :loading="copyConfigLoading"
           :list="mcpConfigList"
         />
-        <!-- 触底翻页触发器 -->
+        <!-- 触底翻页触发器（已无更多数据时不再占位，避免底部留白却仍出现滚动条） -->
         <div
+          v-if="!pagination.hasNoMore"
+          ref="bottomTriggerRef"
           v-intersection-observer="onIntersectionObserver"
           class="h-40px"
         />
@@ -201,63 +221,80 @@
 </template>
 
 <script lang="ts" setup>
-// @ts-nocheck
 import { debounce } from 'lodash-es';
 import {
-  type IMCPMarketCategory,
-  type IMarketplaceItemWithUIState,
-  getMcpBatchCopyConfigList,
+  getMarketplaceBatchConfigs,
   getMcpMarketplace,
   getMcpMarketplaceCategories,
-} from '@/services/source/mcp-market';
-import { type IPagination } from '@/types/common';
+} from '@/services/source/mcp-marketplace';
+import type { IMCPMarketCategory, IMarketplaceItemWithUIState } from '@/types/mcp-marketplace';
+import { type IPagination, type ITableEmptyType } from '@/types/common';
 import { vIntersectionObserver } from '@vueuse/components';
-import { useFeatureFlag } from '@/stores';
 import { useMcpBatchCopyConfig } from '@/hooks';
 import { filterSimpleEmpty } from '@/utils/filterEmptyValues';
 import mcpBanner from '@/images/mcp-banner.jpg';
 import mcpBannerEn from '@/images/mcp-banner-en.jpg';
-import TableEmpty from '@/components/table-empty/Index.vue';
-import AgMcpCard from '@/components/ag-mcp-card/Index.vue';
-import AgMcpTopBar from '@/components/ag-mcp-search-bar/Index.vue';
-import AgMcpCopyConfigDialog from '@/components/ag-mcp-card/components/CopyConfigDialog.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
+import McpServerCard from '@/components/mcp/mcp-server-card/Index.vue';
+import McpServerToolbar from '@/components/mcp/mcp-server-toolbar/Index.vue';
+import McpAccessConfigDialog from '@/components/mcp/mcp-access-config-dialog/Index.vue';
 
 const { t, locale } = useI18n();
 const router = useRouter();
-const featureFlagStore = useFeatureFlag();
 // 批量复制配置hooks
 const {
   copyConfigLoading,
   mcpConfigList,
   fetchMcpBatchCopyConfigList,
 } = useMcpBatchCopyConfig({
-  fetchApi: getMcpBatchCopyConfigList,
+  fetchApi: getMarketplaceBatchConfigs,
 });
 
-const bannerRef = ref<HTMLImageElement>(null);
-const mcpCategorizeRef = ref<HTMLDivElement>(null);
+// 顶部导航高度（bk-navigation-header 为 52px）
+const NAV_HEADER_HEIGHT = 52;
+// 卡片列表底部固定占位（main 的底部内边距），滚动到底时与视口底部保留 16px 间距
+const LIST_BOTTOM_RESERVE = 16;
+// 单个卡片高度、卡片间距、每行卡片数
+const CARD_HEIGHT = 238;
+const CARD_GAP = 16;
+const CARDS_PER_ROW = 3;
+
+const bannerRef = ref<HTMLImageElement | null>(null);
+const mcpCategorizeRef = ref<HTMLDivElement | null>(null);
+const mcpMarketListRef = ref<HTMLDivElement | null>(null);
 const isLoading = ref(false);
 const bannerLoaded = ref(false);
+// banner 渲染高度（随图片加载/关闭/窗口缩放变化）
+const bannerHeight = ref(0);
+// 标记 banner 是否展示（支持关闭）
+const isBannerVisible = ref(true);
 // 标记首次数据加载是否完成
 const isFirstLoad = ref(true);
 // 标记Banner加载完成后是否已初始化过分页
 const isBannerLoadedInit = ref(false);
 // 标记是否正在切换分类（用于冻结计数显示）
 const isSwitchingCategory = ref(false);
+// 触底触发器元素，重置分页后需要按真实位置重新校准就绪状态
+const bottomTriggerRef = ref<HTMLDivElement | null>(null);
+// 触底触发器是否已就绪：只有触发器离开过视口，再次进入视口才认为是用户滚动到底，
+// 用于忽略重置分页后因列表高度塌陷而补发的触底回调
+const isBottomTriggerArmed = ref(true);
 // 显示复制 MCP Server 接入配置
 const isShowConfig = ref(false);
 const mcpCategorizeWidth = ref(0);
 const cachedViewportHeight = ref(0);
 const activeStatusTab = ref('all');
 const activeCategoryName = ref('all');
-const cardEmptyType = ref<'empty' | 'searchEmpty' | 'error'>('');
+const cardEmptyType = ref<ITableEmptyType>('empty');
 const filterData = ref({
   order_by: '-updated_time',
   keyword: '',
 });
 const mcpMarketList = ref<IMarketplaceItemWithUIState[]>([]);
+// 标记当前是否为触底加载更多（翻页时避免展示全列表 loading 遮罩导致闪屏）
+const isLoadMore = ref(false);
 const categoriesList = ref<IMCPMarketCategory[]>([]);
-const pagination = ref<Omit<IPagination, 'hasNoMore'>>({
+const pagination = ref<IPagination & { hasNoMore?: boolean }>({
   current: 1,
   limit: 0,
   count: 0,
@@ -266,7 +303,12 @@ const pagination = ref<Omit<IPagination, 'hasNoMore'>>({
 // 批量复制内容
 const selections = ref<Map<number, IMarketplaceItemWithUIState>>(new Map());
 
-const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
+// 分类面板最大高度：分类过多时自身滚动，避免把整页撑高后列表明明没溢出却出现滚动条
+// 156px = 通知栏占位 40 + 导航头部 52 + banner 上边距 24 + main 上内边距 24 + 底部预留 16
+const categorizeMaxHeight = computed(() => {
+  const currentBannerHeight = isBannerVisible.value ? bannerHeight.value : 0;
+  return `calc(100vh - ${156 + currentBannerHeight}px)`;
+});
 const bannerImg = computed(() => {
   if (locale.value === 'zh-cn') {
     return mcpBanner;
@@ -283,7 +325,7 @@ const categoriesCount = computed(() => {
   }
 
   return categoriesList.value?.reduce((accumulator: number, current: IMCPMarketCategory) => {
-    return accumulator + current.mcp_server_count;
+    return accumulator + (current.mcp_server_count ?? 0);
   }, 0) ?? 0;
 });
 const mcpTabList = computed(() => [
@@ -318,67 +360,89 @@ const getFilterParams = computed(() => {
 
 const handleBannerLoad = () => {
   bannerLoaded.value = true;
-  // 图片加载完成后重新计算分页limit
+  bannerHeight.value = bannerRef.value?.offsetHeight ?? 0;
+  // 图片加载完成后重新计算分页limit（列表内容不变，保留已选中的 MCP Server）
   if (!isBannerLoadedInit.value) {
     isBannerLoadedInit.value = true;
-    resetPagination();
+    resetPagination(true);
   }
 };
 
-// 获取banner高度的方法，增加图片加载监听
-const getBannerHeight = () => {
-  if (!bannerRef.value) return 0;
+const handleCloseBanner = () => {
+  isBannerVisible.value = false;
+  bannerHeight.value = 0;
+  // banner 关闭后高度变化，重新计算可视区域卡片数（列表内容不变，保留已选中的 MCP Server）
+  nextTick(() => {
+    resetPagination(true);
+  });
+};
 
-  // 若图片已加载，直接返回高度
-  if (bannerLoaded.value) {
-    return bannerRef.value.offsetHeight;
-  }
+// 获取页面滚动容器（bk-navigation 的内容区）
+const getScrollContainer = () => document.querySelector<HTMLElement>(
+  '.McpMarket-navigation-content .container-content',
+);
 
-  // 监听图片加载事件
-  bannerRef.value.addEventListener('load', handleBannerLoad, { once: true });
+/**
+ * 量取卡片列表可用的可视高度
+ * @returns {number} 卡片列表可视高度
+ * @description 直接量取滚动容器与列表的真实位置，而不是用「视口高度 - 导航 - banner - 边距」估算：
+ *              估算值漏算了顶部操作栏、main 的上下内边距、触底触发器等占位，
+ *              会多渲染出一截内容，表现为「卡片已经全部可见，滚动条却还在」
+ */
+const getListViewportHeight = () => {
+  const container = getScrollContainer();
+  const containerTop = container?.getBoundingClientRect().top ?? NAV_HEADER_HEIGHT;
+  // 容器可视高度（92 = 通知栏占位 40 + 导航头部 52）
+  const containerHeight = container?.clientHeight || window.innerHeight - 92;
+  // 容器被通知栏等元素挤压时，以窗口下边界为准，避免把看不见的区域算进来
+  const visibleHeight = Math.min(containerHeight, window.innerHeight - containerTop);
+  const listEl = mcpMarketListRef.value;
 
-  // 加载中先返回默认高度（或图片的固有高度）
-  return bannerRef.value.naturalHeight || 0;
+  if (!listEl) return visibleHeight;
+
+  // 列表顶部到滚动容器顶部的距离（只由 banner、顶部操作栏、内边距决定，与列表内容无关，空列表时同样可量取）
+  const listOffsetTop = listEl.getBoundingClientRect().top - containerTop + (container?.scrollTop ?? 0);
+
+  // 扣掉列表下方的固定占位（main 的底部内边距）；向下取整，避免小数像素导致内容恰好高出容器 1px 出现滚动条
+  return Math.floor(visibleHeight - listOffsetTop - LIST_BOTTOM_RESERVE);
+};
+
+/**
+ * 量取单个卡片的真实渲染高度
+ * @returns {number} 卡片高度
+ * @description 卡片高度由内容决定（标题行数、标签等），写死常量会和真实渲染高度有偏差，
+ *              导致行数被多算、列表被撑出滚动条
+ */
+const getCardHeight = () => {
+  const firstCard = mcpMarketListRef.value?.querySelector<HTMLElement>('.ag-mcp-card-wrapper');
+  return firstCard?.offsetHeight || CARD_HEIGHT;
 };
 
 /**
  * 计算可视区域可展示的最大卡片数量
- * @returns {number} 最大卡片数（预留一行用于加载更多）
- * @description 计算逻辑：页面可用高度 = 视口高度 - 页面边距 - 导航栏高度 - banner高度 - 通知栏高度
- *              最大行数 = 页面可用高度 / 单卡片高度（含间距）
+ * @returns {number} 最大卡片数（预留一行用于触发加载更多）
+ * @description 计算逻辑：可视高度 = 滚动容器可视高度 - 列表顶部偏移 - 底部固定占位
+ *              最大行数 = (可视高度 + 卡片间距) / (单卡片高度 + 卡片间距)
  *              最大卡片数 = 行数 * 每行卡片数 + 预留行卡片数
  */
 const calculateMaxVisibleCards = () => {
-  // 通知栏高度40px
-  const noticeH = isShowNoticeAlert.value ? 40 : 0;
-  // banner图高度
-  const bannerH = getBannerHeight();
-  // 获取页面可用高度（排除顶部导航/内边距）, 40px=页面边距(24+16)，52px=导航栏高度
-  const pageH = window.innerHeight - 40 - 52 - bannerH - noticeH;
+  const viewportHeight = getListViewportHeight();
+  const cardHeight = getCardHeight();
+  // r 行卡片高度 = r * 单卡片高度 + (r - 1) * 卡片间距，至少渲染一行
+  const maxRows = Math.max(Math.floor((viewportHeight + CARD_GAP) / (cardHeight + CARD_GAP)), 1);
 
-  // 获取单卡片最小高度和每行卡片数
-  const singleCardHeight = 238 + 16;
-  const cardsPerRow = 3;
-
-  // 计算可展示行数
-  const maxRows = Math.floor(pageH / singleCardHeight);
-
-  // 计算最大可展示卡片数
-  const maxCards = Math.max(maxRows * cardsPerRow, 3);
-
-  // 预留一行空间用于触发加载更多
-  return maxCards + cardsPerRow;
+  // 预留一行，保证触底触发器落在首屏之外，滚动时才能触发加载更多
+  return maxRows * CARDS_PER_ROW + CARDS_PER_ROW;
 };
 
 const getList = async () => {
-  const { hasNoMore, current, limit } = pagination.value;
+  const { hasNoMore = false, current = 1, limit = 0 } = pagination.value;
+  // 并发保护：加载中或已无更多数据时直接返回，
+  // 防止滚动过程中 IntersectionObserver 连续回调导致同一页被重复请求、重复拼接
+  if (isLoading.value || hasNoMore) return;
+  isLoadMore.value = current > 1;
   isLoading.value = true;
   cardEmptyType.value = Object.keys(filterSimpleEmpty(filterData.value)).length > 0 ? 'searchEmpty' : 'empty';
-
-  if (hasNoMore) {
-    isLoading.value = false;
-    return;
-  };
 
   try {
     const params = {
@@ -388,11 +452,22 @@ const getList = async () => {
     };
     const res = await getMcpMarketplace(params);
     const { results = [], count = 0 } = res ?? {};
-    mcpMarketList.value = current === 1 ? results : [...mcpMarketList.value, ...results];
+    // 只有翻页追加时才需要按 id 去重（避免分页交界处重复渲染）；
+    // 重置分页（第一页）必须直接用接口返回的列表整体替换，否则切换分类时
+    // 新分类里已在旧列表中展示过的项会被过滤掉，列表高度骤变、触底触发器被带进视口，
+    // 进而又补发一次第二页请求（表现为切换分类调用两次接口）
+    const list = current === 1
+      ? results as unknown as IMarketplaceItemWithUIState[]
+      : (results as unknown as IMarketplaceItemWithUIState[])
+        .filter(item => !mcpMarketList.value.some(exist => exist.id === item.id));
+    mcpMarketList.value = current === 1 ? list : [...mcpMarketList.value, ...list];
+    // 翻页没有返回任何新数据时（count 与实际可返回条数不一致），视为已全部加载，
+    // 避免触底触发器一直占位并反复补发请求
+    const noMoreItems = current > 1 && list.length === 0;
     pagination.value = {
       ...pagination.value,
       count,
-      hasNoMore: mcpMarketList.value.length >= count,
+      hasNoMore: noMoreItems || mcpMarketList.value.length >= count,
       current: current + 1,
     };
     // 处理每个分类下官方/精选筛选结果
@@ -404,13 +479,14 @@ const getList = async () => {
     }
   }
   catch {
-    cardEmptyType.value = 'error';
+    // 仅首屏加载失败时展示错误空态，翻页失败保留已有列表，避免整页内容被替换造成闪屏
+    if (current === 1) {
+      cardEmptyType.value = 'error';
+    }
   }
   finally {
     isFirstLoad.value = false;
-    setTimeout(() => {
-      isLoading.value = false;
-    }, 100);
+    isLoading.value = false;
   }
 };
 
@@ -418,7 +494,7 @@ const fetchCategoryList = async () => {
   const extraCategories = ['Official', 'Featured'] as const;
   // 如果右侧选择了全部，分类接口的categories不需要传
   const params = { ...getFilterParams.value };
-  if (extraCategories.includes(activeStatusTab.value)) {
+  if ((extraCategories as readonly string[]).includes(activeStatusTab.value)) {
     params.categories = activeStatusTab.value;
   }
   else {
@@ -426,12 +502,31 @@ const fetchCategoryList = async () => {
   }
   const res = await getMcpMarketplaceCategories(params);
   categoriesList.value = (res ?? []).filter(cg => !['Official', 'Featured'].includes(cg.name));
-  mcpCategorizeWidth.value = mcpCategorizeRef.value?.offsetWidth;
+  mcpCategorizeWidth.value = mcpCategorizeRef.value?.offsetWidth ?? 0;
 };
 
-const resetPagination = async () => {
+/**
+ * 重新校准触底触发器的就绪状态
+ */
+const syncBottomTriggerArmedState = () => {
+  // 无更多数据时触发器已卸载，无需校准
+  if (!bottomTriggerRef.value) return;
+
+  const rect = bottomTriggerRef.value.getBoundingClientRect();
+
+  // getBoundingClientRect 会强制刷新布局，此处读到的即为列表渲染后的最终位置
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight || 0;
+  isBottomTriggerArmed.value = rect.top >= viewportHeight || rect.bottom <= 0;
+};
+
+/**
+ * 重置分页并重新拉取列表
+ * @param keepSelections 是否保留已勾选的 MCP Server：默认保留并回填，
+ *                       仅切换分类（以及列表为空展示 AgTableEmpty 时）清空
+ */
+const resetPagination = async (keepSelections = true) => {
   // 重置分页后，滚动距离重置
-  const mcpEl = document.querySelector('.McpMarket-navigation-content .container-content') as HTMLElement | null;
+  const mcpEl = getScrollContainer();
   if (mcpEl && mcpEl.scrollTop > 0) {
     mcpEl.scrollTop = 0;
   }
@@ -440,8 +535,41 @@ const resetPagination = async () => {
     limit: calculateMaxVisibleCards(),
     hasNoMore: false,
   });
-  selections.value.clear();
-  await getList();
+  // getList 会用接口返回的新对象整体替换列表，重新渲染时卡片 is_checked 由 true 变 false，
+  // BkCheckbox 会因此 emit change(false) 把 selections 删空，且该 flush 发生在 await 之后的同步代码之前，
+  // 所以必须在请求前先快照选中项，请求完成后再回填
+  const selectionsSnapshot = keepSelections ? new Map(selections.value) : null;
+  if (!keepSelections) {
+    selections.value.clear();
+  }
+  try {
+    await getList();
+  }
+  finally {
+    // 列表渲染完成后重新校准触底触发器，避免列表塌陷补发的回调再发一次请求
+    nextTick(syncBottomTriggerArmedState);
+  }
+  // 保留选中时，刷新后的列表需要同步卡片勾选态
+  if (selectionsSnapshot) {
+    // 列表为空（展示 AgTableEmpty）时没有卡片可回显，不清空选中，
+    // 否则搜索无结果会把已勾选项清掉，导致后续搜索无法回显
+    if (mcpMarketList.value.length < 1) {
+      return;
+    }
+    selections.value.clear();
+    mcpMarketList.value.forEach((item) => {
+      item.is_checked = selectionsSnapshot.has(item.id);
+      if (item.is_checked) {
+        selections.value.set(item.id, item);
+      }
+    });
+    // 不在当前列表中的已选项（翻页未加载、搜索未命中等）继续保留
+    selectionsSnapshot.forEach((item, id) => {
+      if (!selections.value.has(id)) {
+        selections.value.set(id, item);
+      }
+    });
+  }
 };
 
 const fetchInitData = () => {
@@ -455,7 +583,8 @@ const handleCategoryChange = async (value: string) => {
   activeCategoryName.value = value;
 
   try {
-    await resetPagination();
+    // 切换分类会更换列表内容，清空已勾选的 MCP Server
+    await resetPagination(false);
   }
   finally {
     isSwitchingCategory.value = false;
@@ -473,17 +602,14 @@ const handleSortChange = (sort: string) => {
   resetPagination();
 };
 
-const handleMouseenter = (
-  e: MouseEvent & { target: HTMLElement },
-  row: IMarketplaceItem & { isOverflow?: boolean },
-) => {
-  const cell = e.target.closest('.truncate') as HTMLElement | null;
+const handleMouseenter = (e: MouseEvent, row: IMCPMarketCategory) => {
+  const cell = (e.target as HTMLElement)?.closest('.truncate') as HTMLElement | null;
   if (cell) {
     row.isOverflow = cell.scrollWidth > cell.offsetWidth;
   }
 };
 
-const handleMouseleave = (_: MouseEvent, row: IMarketplaceItem & { isOverflow?: boolean }) => {
+const handleMouseleave = (_: MouseEvent, row: IMCPMarketCategory) => {
   row.isOverflow = false;
 };
 
@@ -499,6 +625,7 @@ const handleClearFilter = () => {
     order_by: '-updated_time',
     keyword: '',
   };
+  selections.value.clear();
 };
 
 const handleRefresh = () => {
@@ -506,10 +633,18 @@ const handleRefresh = () => {
 };
 
 const onIntersectionObserver = ([entry]: IntersectionObserverEntry[]) => {
-  // 首次加载未完成 → 不触发；仅加载更多时触发
-  if (entry?.isIntersecting && !isFirstLoad.value) {
-    getList();
+  if (!entry?.isIntersecting) {
+    // 触发器离开视口
+    isBottomTriggerArmed.value = true;
+    return;
   }
+
+  // 首屏未完成、正在加载中，或触发器未就绪（列表高度塌陷补发的回调）→ 不触发；
+  // 仅用户滚动到底部时才加载更多
+  if (isFirstLoad.value || isLoading.value || !isBottomTriggerArmed.value) return;
+
+  isBottomTriggerArmed.value = false;
+  getList();
 };
 
 const handleChecked = (isChecked: boolean, row: IMarketplaceItemWithUIState) => {
@@ -532,7 +667,7 @@ const handleBatchCopy = () => {
   fetchMcpBatchCopyConfigList({ selections: selections.value });
 };
 
-const handleSelectionChange = (selection: IMarketplaceItemWithUIState) => {
+const handleSelectionChange = (selection: IMarketplaceItemWithUIState[]) => {
   selections.value.clear();
   selection.forEach(item => selections.value.set(item.id, item));
 };
@@ -542,14 +677,17 @@ const handleResize = debounce(() => {
   // 仅当视口高度变化超过 30px 时才重新计算
   if (Math.abs(newViewportHeight - (cachedViewportHeight.value || 0)) > 30) {
     cachedViewportHeight.value = newViewportHeight;
+    // 窗口变化会改变 banner 渲染高度，先同步再计算
+    bannerHeight.value = bannerRef.value?.offsetHeight ?? 0;
     const newLimit = calculateMaxVisibleCards();
     if (pagination.value.limit !== newLimit) {
       pagination.value.limit = newLimit || 3;
-      resetPagination();
+      resetPagination(true);
     }
   }
 }, 500);
 
+// 搜索只过滤展示，保留已勾选项并回填当前列表中命中的数据
 const handleSearch = debounce(() => fetchInitData(), 300);
 
 watch(
@@ -561,42 +699,75 @@ watch(
 
 onMounted(() => {
   window.addEventListener('resize', handleResize);
+  // 图片命中缓存时不会触发 load 事件，需手动同步一次 banner 高度
+  if (bannerRef.value?.complete && bannerRef.value.naturalHeight > 0) {
+    handleBannerLoad();
+  }
   fetchInitData();
 });
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize);
   handleResize?.cancel();
-  bannerRef.value?.removeEventListener('load', handleBannerLoad);
   bannerRef.value = null;
 });
 </script>
 
 <style lang="scss" scoped>
 .mcp-market-wrapper {
+  width: 80%;
+  min-width: 1200px;
+  margin: 0 auto;
+  padding-top: 24px;
   box-sizing: border-box;
 
-  .banner {
-    width: 100%;
-    min-width: 1280px;
+  .banner-wrapper {
+    position: relative;
+
+    .banner {
+      display: block;
+      width: 100%;
+      border-radius: 2px;
+      box-shadow: 0 2px 4px 0 #1919290d;
+    }
+
+    .banner-close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      color: #979ba5;
+      background-color: #f0f1f5;
+      border-radius: 50%;
+
+      &:hover {
+        background-color: #dcdee5;
+        cursor: pointer;
+      }
+    }
   }
 
   .main {
-    padding: 24px;
+    width: 100%;
+    padding: 24px 0 16px;
 
     .mcp-categorize {
       position: sticky;
       top: 24px;
+      align-self: flex-start;
+      overflow: hidden auto;
+      background-color: #ffffff;
+      border-radius: 2px;
+      box-shadow: 0 2px 4px 0 #1919290d;
 
       .mcp-categorize-item {
         display: flex;
-        height: 36px;
-        padding: 0 12px;
-        cursor: pointer;
-        box-sizing: border-box;
-        transition: background-color 0.2s;
         align-items: center;
         justify-content: space-between;
+        height: 36px;
+        padding: 0 12px;
+        box-sizing: border-box;
+        transition: background-color 0.2s;
+        cursor: pointer;
 
         .mcp-categorize-content {
           display: flex;
@@ -631,7 +802,7 @@ onUnmounted(() => {
         }
 
         &.active {
-          color: #3a84Ff;
+          color: #3a84ff;
           background-color: #e1ecff;
         }
 
@@ -649,7 +820,16 @@ onUnmounted(() => {
       position: relative;
       box-sizing: border-box;
 
-      :deep(.mcp-market-list) {
+      .mcp-market-top-bar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        padding: 24px 0 16px;
+        margin-top: -24px;
+        background-color: #f5f7fb;
+      }
+
+      .mcp-market-list {
         display: flex;
         flex-wrap: wrap;
         gap: 16px;
@@ -657,6 +837,13 @@ onUnmounted(() => {
 
         .ag-mcp-card-wrapper {
           width: calc(33.3333% - 10.6667px);
+
+          &:hover {
+
+            .copy-config-btn {
+              color: #1768ef !important;
+            }
+          }
         }
       }
 

@@ -23,6 +23,8 @@ from django.utils.functional import cached_property
 
 from apigateway.common.env import Env
 
+BK_CLI_REPO_URL = "https://github.com/TencentBlueKing/bk-cli"
+
 
 def get_default_keepalive_options() -> Optional[dict]:
     """Mac OS's socket module does not has below attrs, return empty options instead"""
@@ -56,6 +58,10 @@ def get_plugin_metadata_config(env: Env) -> dict:
                 # "headers": "-",
                 "params": "$args",
                 "body": "$bk_log_request_body",
+                # 请求总长度（字节），包含请求行、请求头和已接收的请求体
+                "request_size": "$request_length",
+                # Content-Length 变量（字节），不保证等于实际完整接收的请求体大小
+                "content_length": "$content_length",
                 "app_code": "$bk_app_code",
                 "client_ip": "$remote_addr",
                 "request_id": "$bk_request_id",
@@ -179,13 +185,6 @@ def get_default_feature_flags(
         "ENABLE_RUN_DATA": env.bool("FEATURE_FLAG_ENABLE_RUN_DATA", False),
         # 是否展示 "运行数据" => 仪表盘 子菜单
         "ENABLE_RUN_DATA_METRICS": enable_run_data_metrics,
-        # 是否展示"组件管理"菜单项，企业版展示，上云版不展示
-        "MENU_ITEM_ESB_API": env.bool("FEATURE_FLAG_MENU_ITEM_ESB_API", True),
-        # TODO: remove in the future, and remove in the helm-chart and te repo
-        # 是否展示"组件 API 文档"菜单项
-        "MENU_ITEM_ESB_API_DOC": env.bool("FEATURE_FLAG_MENU_ITEM_ESB_API_DOC", True),
-        # 是否将 ESB 数据同步到网关。需要考虑这个是否还需要
-        "SYNC_ESB_TO_APIGW_ENABLED": env.bool("FEATURE_FLAG_SYNC_ESB_TO_APIGW_ENABLED", True),
         # 网关编辑页，是否支持填写网关"绑定应用"
         "GATEWAY_APP_BINDING_ENABLED": env.bool("FEATURE_FLAG_GATEWAY_APP_BINDING_ENABLED", False),
         # FIXME: 为什么有两个 SDK 特性变量，并且容器化版本有 bkrepo 配置的话，默认应该都是 true?
@@ -226,7 +225,7 @@ def get_default_feature_flags(
             "FEATURE_FLAG_ENABLE_MCP_SERVER_OAUTH2_PERSONAL_CLIENT", True
         ),
         # 是否开启 BK CLI 展示
-        "ENABLE_BK_CLI": env.bool("FEATURE_FLAG_ENABLE_BK_CLI", False),
+        "ENABLE_BK_CLI": True,
         # 是否开启 ITSM 权限申请
         "ENABLE_ITSM4_PERMISSION_APPLY": enable_itsm4_permission_apply,
     }
@@ -284,16 +283,14 @@ def get_frontend_env_vars(
         "BK_SHARED_RES_URL": env.str("BK_SHARED_RES_URL", default=""),
         "BK_SDK_LANGUAGES": bk_sdk_languages,
         "CLI": {
-            "DETAIL_URL": env.str("CLI_DETAIL_URL", default="https://github.com/TencentBlueKing/bk-cli"),
+            "DETAIL_URL": BK_CLI_REPO_URL,
             "USER_KEY": env.str("CLI_USER_KEY", default="bk_token"),
             "USER_KEY_EXPIRE_DAYS": env.int("CLI_USER_KEY_EXPIRE_DAYS", default=1),
             "ACCESS_TOKEN_EXPIRE_DAYS": env.int("CLI_ACCESS_TOKEN_EXPIRE_DAYS", default=1),
             "BK_API_URL_TMPL": bk_api_url_tmpl.replace("{api_name}", "{gateway_name}"),
-            "GIT_REPO_URL": env.str("CLI_GIT_REPO_URL", default="https://github.com/TencentBlueKing/bk-cli.git"),
-            "NPM_INSTALL_CMD": env.str("CLI_NPM_INSTALL_CMD", default="npm install -g @blueking/bk-cli"),
-            "SKILL_NPM_INSTALL_CMD": env.str(
-                "CLI_SKILL_NPM_INSTALL_CMD", default="npx skills add TencentBlueKing/bk-cli -y -g"
-            ),
+            "GIT_REPO_URL": BK_CLI_REPO_URL,
+            "NPM_INSTALL_CMD": "npm i -g @blueking/bk-cli",
+            "SKILL_NPM_INSTALL_CMD": f"npx skills add {BK_CLI_REPO_URL}",
         },
     }
 
@@ -371,14 +368,6 @@ def get_doc_links(bk_apigw_version: str, bk_docs_url_prefix: str, lang: str = "Z
         "JWT": env.str("DOC_LINK_JWT", default=f"{doc_link_prefix}/UserGuide/Explanation/jwt.md"),
         # API 网关错误码
         "ERROR_CODE": env.str("DOC_LINK_ERROR_CODE", default=f"{doc_link_prefix}/UserGuide/FAQ/error-response.md"),
-        # 组件频率控制
-        "COMPONENT_RATE_LIMIT": env.str(
-            "DOC_LINK_COMPONENT_RATE_LIMIT", default=f"{doc_link_prefix}/component/reference/rate-limit.md"
-        ),
-        # 如何开发和发布组件
-        "COMPONENT_CREATE_API": env.str(
-            "DOC_LINK_COMPONENT_CREATE_API", default=f"{doc_link_prefix}/component/quickstart/create-api.md"
-        ),
         # 文档导入详情
         "IMPORT_RESOURCE_DOCS": env.str(
             "DOC_LINK_IMPORT_RESOURCE_DOCS", default=f"{doc_link_prefix}/UserGuide/HowTo/Connect/manage-document.md"
@@ -442,6 +431,63 @@ def get_doc_links(bk_apigw_version: str, bk_docs_url_prefix: str, lang: str = "Z
         # bk-query-string-rewrite
         "PLUGIN_BK_QUERY_STRING_REWRITE": f"{doc_link_prefix}/UserGuide/HowTo/Plugins/bk-query-string-rewrite.md",
     }
+
+
+def get_cli_function_overview(lang: str = "ZH") -> list[dict]:
+    if lang == "EN":
+        return [
+            {"service": "API Gateway", "title": "Discover All Gateways and Interfaces, Query Logs"},
+            {
+                "service": "Monitor",
+                "title": "Log search, metric queries, alerts and events, traces and profiling, dashboards",
+            },
+            {
+                "service": "AIDev",
+                "title": (
+                    "Spaces, Skills, MCP, Prompts, agents, knowledge bases and documents, "
+                    "credentials and artifact upload"
+                ),
+            },
+            {
+                "service": "CMDB",
+                "title": (
+                    "Host management, business topology, cluster modules, dynamic groups, "
+                    "attribute management, association queries"
+                ),
+            },
+            {
+                "service": "Job",
+                "title": (
+                    "Script execution, file distribution, job templates, scheduled tasks, execution history queries"
+                ),
+            },
+            {
+                "service": "SOPS",
+                "title": "Process templates, task execution, task queries, parameter filling, periodic tasks",
+            },
+            {
+                "service": "NodeMan",
+                "title": "Agent installation, Agent status, plugin management, task history, cloud area management",
+            },
+            {
+                "service": "Developer Center",
+                "title": "Create Application, Deploy Application, View Access Address",
+            },
+        ]
+
+    return [
+        {"service": "API 网关", "title": "发现所有网关及接口，查询日志"},
+        {"service": "监控平台", "title": "日志检索、指标查询、告警与事件、调用链与性能剖析、仪表盘"},
+        {
+            "service": "AIDev",
+            "title": "空间、Skill、MCP、Prompt、智能体、知识库与知识文档、凭证与制品上传",
+        },
+        {"service": "配置平台", "title": "主机管理、业务拓扑、集群模块、动态分组、属性管理、关联查询"},
+        {"service": "作业平台", "title": "脚本执行、文件分发、作业模板、定时任务、执行历史查询"},
+        {"service": "标准运维", "title": "流程模板、任务执行、任务查询、参数填充、周期任务"},
+        {"service": "节点管理", "title": "Agent 安装、Agent 状态、插件管理、任务历史、云区域管理"},
+        {"service": "开发者中心", "title": "创建应用、部署应用、查看访问地址"},
+    ]
 
 
 def get_esb_board_configs(env: Env, *, bk_component_api_url: str) -> dict:

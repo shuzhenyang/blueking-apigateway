@@ -16,9 +16,10 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
-import os
-
 from celery.schedules import crontab
+
+from apigateway.common.env import Env
+from apigateway.conf.esb import is_esb_enabled
 
 # celery configuration
 CELERY_TIMEZONE = "Asia/Shanghai"
@@ -35,11 +36,12 @@ CELERY_IMPORTS = [
     "apigateway.apps.metrics.tasks",
     "apigateway.apps.permission.tasks",
     "apigateway.apps.gateway.tasks",
+    "apigateway.apps.rbac.tasks",
     "apigateway.apps.mcp_server.tasks",
     "apigateway.controller.tasks",
 ]
 
-if os.getenv("ENABLE_MULTI_TENANT_MODE", "False").lower() not in ("true", "on", "ok", "y", "yes", "1"):
+if is_esb_enabled(Env()):
     CELERY_IMPORTS.append("apigateway.apps.esb.component.tasks")
 
 CELERY_BEAT_SCHEDULE = {
@@ -50,6 +52,9 @@ CELERY_BEAT_SCHEDULE = {
     "delete_old_publish_events": {
         "task": "apigateway.controller.tasks.clean_task.delete_old_publish_events",
         "schedule": crontab(day_of_week="*", hour=1, minute=0),
+        # Publish events still determine historical status and duration.
+        # Revisit cleanup after release results are stored independently of events.
+        "enabled": False,
     },
     "apigateway.apps.permission.tasks.alert_app_permission_expiring_soon": {
         "task": "apigateway.apps.permission.tasks.alert_app_permission_expiring_soon",
@@ -86,6 +91,10 @@ CELERY_BEAT_SCHEDULE = {
     "apigateway.apps.mcp_server.tasks.refresh_official_mcp_server_category": {
         "task": "apigateway.apps.mcp_server.tasks.refresh_official_mcp_server_category",
         "schedule": crontab(minute=0),
+    },
+    "apigateway.apps.rbac.tasks.renew_gateway_member_iam_authorizations": {
+        "task": "apigateway.apps.rbac.tasks.renew_gateway_member_iam_authorizations",
+        "schedule": crontab(day_of_week="*", hour=2, minute=10),
     },
 }
 

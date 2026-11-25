@@ -24,21 +24,46 @@ from .views import (
     WorkbenchHandledMCPPermissionListApi,
     WorkbenchMCPGatewayFilterOptionListApi,
     WorkbenchMCPServerFilterOptionListApi,
+    WorkbenchMyApplyGatewayPermissionCancelApi,
+    WorkbenchMyApplyGatewayPermissionDestroyApi,
     WorkbenchMyApplyGatewayPermissionListApi,
+    WorkbenchMyApplyMCPPermissionCancelApi,
+    WorkbenchMyApplyMCPPermissionDestroyApi,
     WorkbenchMyApplyMCPPermissionListApi,
     WorkbenchPendingGatewayPermissionListApi,
     WorkbenchPendingMCPPermissionListApi,
+    WorkbenchPendingPermissionCountApi,
 )
 
 gateway_permission_patterns = [
     path("pending/", WorkbenchPendingGatewayPermissionListApi.as_view(), name="workbench.permissions.gateway.pending"),
     path("applied/", WorkbenchMyApplyGatewayPermissionListApi.as_view(), name="workbench.permissions.gateway.applied"),
+    path(
+        "applied/<int:record_id>/",
+        WorkbenchMyApplyGatewayPermissionDestroyApi.as_view(),
+        name="workbench.permissions.gateway.applied.destroy",
+    ),
+    path(
+        "applied/<int:record_id>/cancel/",
+        WorkbenchMyApplyGatewayPermissionCancelApi.as_view(),
+        name="workbench.permissions.gateway.applied.cancel",
+    ),
     path("handled/", WorkbenchHandledGatewayPermissionListApi.as_view(), name="workbench.permissions.gateway.handled"),
 ]
 
 mcp_permission_patterns = [
     path("pending/", WorkbenchPendingMCPPermissionListApi.as_view(), name="workbench.permissions.mcp.pending"),
     path("applied/", WorkbenchMyApplyMCPPermissionListApi.as_view(), name="workbench.permissions.mcp.applied"),
+    path(
+        "applied/<int:apply_id>/",
+        WorkbenchMyApplyMCPPermissionDestroyApi.as_view(),
+        name="workbench.permissions.mcp.applied.destroy",
+    ),
+    path(
+        "applied/<int:apply_id>/cancel/",
+        WorkbenchMyApplyMCPPermissionCancelApi.as_view(),
+        name="workbench.permissions.mcp.applied.cancel",
+    ),
     path("handled/", WorkbenchHandledMCPPermissionListApi.as_view(), name="workbench.permissions.mcp.handled"),
 ]
 
@@ -57,6 +82,11 @@ urlpatterns = [
         "filter-options/mcp-gateways/",
         WorkbenchMCPGatewayFilterOptionListApi.as_view(),
         name="workbench.filter_options.mcp_gateways",
+    ),
+    path(
+        "permissions/pending-count/",
+        WorkbenchPendingPermissionCountApi.as_view(),
+        name="workbench.permissions.pending_count",
     ),
     path("permissions/gateway/", include(gateway_permission_patterns)),
     path("permissions/mcp/", include(mcp_permission_patterns)),

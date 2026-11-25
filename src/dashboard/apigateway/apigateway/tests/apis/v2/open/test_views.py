@@ -21,6 +21,7 @@ from datetime import datetime
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+import pytest
 from django_dynamic_fixture import G
 
 import apigateway.apis.v2.open.serializers as open_serializers
@@ -29,11 +30,14 @@ from apigateway.apps.audit.constants import OpObjectTypeEnum
 from apigateway.apps.audit.models import AuditEventLog
 from apigateway.apps.label.models import APILabel, ResourceLabel
 from apigateway.apps.mcp_server.constants import (
+    UNCATEGORIZED_MCP_CATEGORY_NAME,
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
 )
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermissionApply, MCPServerCategory
+from apigateway.apps.openapi.models import OpenAPIResourceSchema
+from apigateway.apps.permission.models import AppGatewayPermission, AppResourcePermission
 from apigateway.apps.rbac.constants import GatewayRoleEnum
 from apigateway.apps.rbac.models import GatewayMember
 from apigateway.biz.released_resource import ReleasedResourceData
@@ -155,6 +159,137 @@ class TestGatewayRetrieveApi:
         assert response.status_code == 200
         assert result["data"]["name"] == fake_gateway.name
         assert result["data"]["kind"] == "ai"
+
+
+@pytest.fixture
+def app_permissions(fake_gateway):
+    """
+    应用 test：fake_gateway 网关权限永久有效、other_gateway 网关权限已过期；
+    fake_gateway r1、r2 资源权限永久有效、other_gateway r3 资源权限已过期
+    应用 other：fake_gateway 网关权限、r1 资源权限
+    """
+    other_gateway = G(Gateway, is_public=True, tenant_mode="global")
+    r1 = G(Resource, gateway=fake_gateway, name="r1")
+    r2 = G(Resource, gateway=fake_gateway, name="r2")
+    r3 = G(Resource, gateway=other_gateway, name="r3")
+    expired = datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+
+    G(AppGatewayPermission, gateway=fake_gateway, bk_app_code="test", expires=None)
+    G(AppGatewayPermission, gateway=other_gateway, bk_app_code="test", expires=expired)
+    G(AppGatewayPermission, gateway=fake_gateway, bk_app_code="other", expires=None)
+    G(AppResourcePermission, gateway=fake_gateway, resource_id=r1.id, bk_app_code="test", expires=None)
+    G(AppResourcePermission, gateway=fake_gateway, resource_id=r2.id, bk_app_code="test", expires=None)
+    G(AppResourcePermission, gateway=other_gateway, resource_id=r3.id, bk_app_code="test", expires=expired)
+    G(AppResourcePermission, gateway=fake_gateway, resource_id=r1.id, bk_app_code="other", expires=None)
+    return other_gateway
+
+
+class TestCurrentAppPermissionListApi:
+    def test_list_gateway_dimension(self, request_view, fake_gateway, app_permissions):
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.app.permissions.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"grant_dimension": "gateway"},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert result["data"]["count"] == 2
+        results = {item["gateway_name"]: item for item in result["data"]["results"]}
+        assert set(results) == {fake_gateway.name, app_permissions.name}
+        assert results[fake_gateway.name]["bk_app_code"] == "test"
+        assert results[fake_gateway.name]["resource_name"] == ""
+        assert results[fake_gateway.name]["expires"] is None
+        assert results[app_permissions.name]["expires"] is not None
+
+    def test_list_resource_dimension(self, request_view, app_permissions):
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.app.permissions.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"grant_dimension": "resource"},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        results = {item["resource_name"]: item for item in result["data"]["results"]}
+        assert set(results) == {"r1", "r2", "r3"}
+        assert results["r1"]["expires"] is None
+        assert results["r3"]["expires"] is not None
+
+    @pytest.mark.parametrize(
+        "params, expected_resource_names",
+        [
+            ({"resource_name": "r2"}, ["r2"]),
+            ({"gateway_name": "not-exist"}, []),
+        ],
+    )
+    def test_list_filter(self, request_view, app_permissions, params, expected_resource_names):
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.app.permissions.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"grant_dimension": "resource", **params},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert [item["resource_name"] for item in result["data"]["results"]] == expected_resource_names
+
+    def test_list_filter_by_gateway_name(self, request_view, app_permissions):
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.app.permissions.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"grant_dimension": "resource", "gateway_name": app_permissions.name},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert [item["resource_name"] for item in result["data"]["results"]] == ["r3"]
+
+    def test_list_filter_by_tenant(self, mocker, request_view, fake_gateway, app_permissions):
+        tenant_gateway = G(Gateway, is_public=True, tenant_mode="single", tenant_id="other-tenant")
+        G(AppGatewayPermission, gateway=tenant_gateway, bk_app_code="test", expires=None)
+        mocker.patch("apigateway.apis.v2.open.views.get_request_tenant_id", return_value="default")
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.app.permissions.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"grant_dimension": "gateway"},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert {item["gateway_name"] for item in result["data"]["results"]} == {
+            fake_gateway.name,
+            app_permissions.name,
+        }
+
+
+class TestGatewayAppPermissionListApi:
+    @pytest.mark.parametrize(
+        "grant_dimension, expected_resource_names",
+        [
+            ("gateway", [""]),
+            ("resource", ["r1"]),
+        ],
+    )
+    def test_list(self, request_view, fake_gateway, app_permissions, grant_dimension, expected_resource_names):
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.gateway.app.permissions.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"target_app_code": "other", "grant_dimension": grant_dimension},
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        assert [item["resource_name"] for item in result["data"]["results"]] == expected_resource_names
+        assert {item["bk_app_code"] for item in result["data"]["results"]} == {"other"}
+        assert {item["gateway_name"] for item in result["data"]["results"]} == {fake_gateway.name}
 
 
 class TestMCPServerAppPermissionApplyCreateApi:
@@ -378,6 +513,64 @@ class TestMCPServerAppPermissionRecordListApi:
         assert len(result["data"]["results"]) == 1
         assert result["data"]["results"][0]["id"] == second_record.id
         assert latest_first_record.id != second_record.id
+
+    def test_list_filters_by_status_of_latest_record(self, request_view, fake_gateway, settings):
+        settings.BK_MCP_SERVER_PERMISSION_APPROVAL_URL_TMPL = (
+            "http://dashboard.example.com/{gateway_id}/mcp/permission?serverId={mcp_server_id}"
+        )
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        reapplied_mcp_server = G(MCPServer, gateway=fake_gateway, stage=stage)
+        pending_mcp_server = G(MCPServer, gateway=fake_gateway, stage=stage)
+        # 先被驳回，重新申请后通过：当前状态为 approved
+        G(
+            MCPServerAppPermissionApply,
+            bk_app_code="test_app",
+            mcp_server=reapplied_mcp_server,
+            status=MCPServerAppPermissionApplyStatusEnum.REJECTED.value,
+            applied_time=datetime(2025, 1, 1, tzinfo=ZoneInfo("UTC")),
+        )
+        approved_record = G(
+            MCPServerAppPermissionApply,
+            bk_app_code="test_app",
+            mcp_server=reapplied_mcp_server,
+            status=MCPServerAppPermissionApplyStatusEnum.APPROVED.value,
+            applied_time=datetime(2025, 1, 3, tzinfo=ZoneInfo("UTC")),
+        )
+        pending_record = G(
+            MCPServerAppPermissionApply,
+            bk_app_code="test_app",
+            mcp_server=pending_mcp_server,
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+            applied_time=datetime(2025, 1, 2, tzinfo=ZoneInfo("UTC")),
+        )
+
+        def list_record_ids(status):
+            resp = request_view(
+                method="GET",
+                view_name="openapi.v2.open.mcp_server.app.permissions.apply-records.list",
+                app=mock.MagicMock(app_code="test"),
+                data={"bk_app_code": "test_app", "status": status},
+            )
+            assert resp.status_code == 200
+            data = resp.json()["data"]
+            assert data["count"] == len(data["results"])
+            return [item["id"] for item in data["results"]]
+
+        assert list_record_ids("approved") == [approved_record.id]
+        assert list_record_ids("pending") == [pending_record.id]
+        # 历史的驳回记录不是最新记录，不返回
+        assert list_record_ids("rejected") == []
+        assert list_record_ids("") == [approved_record.id, pending_record.id]
+
+    def test_list_rejects_invalid_status(self, request_view):
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.app.permissions.apply-records.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"bk_app_code": "test_app", "status": "invalid"},
+        )
+
+        assert resp.status_code == 400
 
 
 class TestMCPServerAppPermissionRecordLookupApi:
@@ -1743,6 +1936,93 @@ class TestGatewayResourceListApiFields:
         assert set(result["data"][0].keys()) == {"id", "name"}
 
 
+class TestGatewayResourceListApiOpenAPISchema:
+    @pytest.mark.parametrize(
+        "has_openapi_schema, expected_name",
+        [
+            ("true", "get_user_info"),
+            ("false", "create_order"),
+        ],
+    )
+    def test_list_with_has_openapi_schema(
+        self, request_to_view, request_factory, fake_gateway, has_openapi_schema, expected_name
+    ):
+        resource_with_schema = G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+        G(OpenAPIResourceSchema, resource=resource_with_schema, schema={"none_schema": True})
+
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="create_order",
+            description="创建订单",
+            method="POST",
+            path="/api/v1/orders/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"has_openapi_schema": has_openapi_schema})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert len(result["data"]) == 1
+        assert result["data"][0]["name"] == expected_name
+
+    def test_list_with_fields_has_openapi_schema(self, request_to_view, request_factory, fake_gateway):
+        resource_with_schema = G(
+            Resource,
+            gateway=fake_gateway,
+            name="get_user_info",
+            description="获取用户信息",
+            method="GET",
+            path="/api/v1/users/",
+            is_public=True,
+        )
+        G(OpenAPIResourceSchema, resource=resource_with_schema, schema={"none_schema": True})
+
+        G(
+            Resource,
+            gateway=fake_gateway,
+            name="create_order",
+            description="创建订单",
+            method="POST",
+            path="/api/v1/orders/",
+            is_public=True,
+        )
+
+        request = request_factory.get("", data={"fields": "name,has_openapi_schema"})
+        request.gateway = fake_gateway
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.open.gateway.resources.list",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert {item["name"]: item["has_openapi_schema"] for item in result["data"]} == {
+            "get_user_info": True,
+            "create_order": False,
+        }
+
+
 class TestMCPServerListApiCategory:
     def test_list_with_category_filter(self, request_view, fake_gateway):
         stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
@@ -1779,6 +2059,44 @@ class TestMCPServerListApiCategory:
         names = [item["name"] for item in result["data"]["results"]]
         assert "mcp-with-category" in names
         assert "mcp-without-category" not in names
+
+    def test_list_with_uncategorized_filter(self, request_view, fake_gateway):
+        MCPServerCategory.objects.all().delete()
+        stage = G(Stage, gateway=fake_gateway, status=StageStatusEnum.ACTIVE.value)
+        uncategorized_cat = G(MCPServerCategory, name=UNCATEGORIZED_MCP_CATEGORY_NAME, is_active=True)
+        devops_cat = G(MCPServerCategory, name="DevOps", is_active=True)
+
+        G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="mcp-without-category",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+
+        mcp2 = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=stage,
+            name="mcp-uncategorized-devops",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
+        )
+        mcp2.categories.add(uncategorized_cat, devops_cat)
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.open.mcp_server.list",
+            app=mock.MagicMock(app_code="test"),
+            data={"category": UNCATEGORIZED_MCP_CATEGORY_NAME},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()
+        names = [item["name"] for item in result["data"]["results"]]
+        assert "mcp-without-category" in names
+        assert "mcp-uncategorized-devops" not in names
 
 
 class TestMCPServerBatchQueryApi:

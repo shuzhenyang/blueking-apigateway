@@ -111,7 +111,7 @@
           </template>
         </BkCollapse>
         <template v-else-if="keyword">
-          <TableEmpty
+          <AgTableEmpty
             empty-type="search-empty"
             @clear-filter="keyword = ''"
           />
@@ -283,7 +283,7 @@
                             v-model="appAuthorization.bk_app_code"
                             class="auth-value"
                             prefix="bk_app_code"
-                            :placeholder="t('请输入蓝鲸应用ID')"
+                            :placeholder="t('请输入蓝鲸应用 ID')"
                           />
                           <BkInput
                             v-model="appAuthorization.bk_app_secret"
@@ -313,13 +313,11 @@
                   {{ t('用户认证') }}：
                 </div>
                 <div class="request-setting-main">
-                  <span>
-                    ({{ formData.useUserFromCookies ? t('默认用户认证') : t('自定义用户认证') }})
-                    {{ authField }}：{{ formData.useUserFromCookies ? '******' : formData.authorization[authField] }}
-                  </span>
+                  <span>{{ userAuthSummary }}</span>
                   <BkPopConfirm
-                    width="470"
+                    width="480"
                     trigger="click"
+                    placement="bottom"
                     @confirm="saveUserAuthEdit"
                     @cancel="cancelUserAuthEdit"
                   >
@@ -334,41 +332,70 @@
                           {{ t('用户认证') }}<span>*</span>
                         </div>
                         <BkRadioGroup
-                          v-model="userCookies.useUserFromCookies"
+                          v-model="userAuth.userAuthType"
                           class="auth-type"
                         >
-                          <BkRadioButton label>
-                            {{ t('默认用户认证') }}
+                          <BkRadioButton label="use_cookies">
+                            {{ t('当前登录用户') }}
                           </BkRadioButton>
-                          <BkRadioButton :label="false">
-                            {{ t('自定义用户认证') }}
+                          <BkRadioButton label="ticket">
+                            {{ t('登录态票据') }}
+                          </BkRadioButton>
+                          <BkRadioButton label="access_token">
+                            access_token
+                          </BkRadioButton>
+                          <BkRadioButton label="personal_token">
+                            {{ t('个人令牌') }}
                           </BkRadioButton>
                         </BkRadioGroup>
-                        <template v-if="userCookies.useUserFromCookies">
+                        <!-- 当前登录用户 -->
+                        <template v-if="userAuth.userAuthType === 'use_cookies'">
                           <BkInput
                             class="auth-value"
                             :prefix="authField"
-                            :value="'******'"
+                            value="******"
                             disabled
                           />
                         </template>
-                        <template v-else>
-                          <BkInput
-                            v-model="userCookies[authField]"
-                            class="auth-value"
-                            :prefix="authField"
-                            :placeholder="t('请输入 Cookies 中，字段 {name} 的值', { name: authField })"
-                          />
-                        </template>
+                        <!-- 登录态票据 -->
+                        <BkInput
+                          v-else-if="userAuth.userAuthType === 'ticket'"
+                          v-model="userAuth.ticketValue"
+                          class="auth-value"
+                          :prefix="authField"
+                          :placeholder="t('请输入 Cookies 中，字段 {name} 的值', { name: authField })"
+                        />
+                        <!-- access_token -->
+                        <BkInput
+                          v-else-if="userAuth.userAuthType === 'access_token'"
+                          v-model="userAuth.accessToken"
+                          class="auth-value"
+                          type="password"
+                          prefix="access_token"
+                          :placeholder="t('请输入 access_token')"
+                        />
+                        <!-- 个人令牌 -->
+                        <BkInput
+                          v-else
+                          v-model="userAuth.personalToken"
+                          class="auth-value"
+                          type="password"
+                          :placeholder="t('请输入个人令牌')"
+                        >
+                          <template #prefix>
+                            <div class="personal-token-prefix">
+                              <span class="key">Authorization</span>
+                              <span class="bearer">Bearer</span>
+                            </div>
+                          </template>
+                        </BkInput>
 
-                        <div class="edit-user-tips">
-                          <InfoLine class="icon" />
-                          <span class="tips">{{ t('默认用户认证，将默认从 Cookies 中获取用户认证信息；自定义用户认证，可自定义用户认证信息') }}</span>
-                        </div>
-                        <!-- <div class="edit-user-btns">
-                          <BkButton theme="primary" @click="saveUserAuthEdit">{{ t('保存') }}</BkButton>
-                          <BkButton class="ml8" @click="cancelUserAuthEdit">{{ t('取消') }}</BkButton>
-                          </div> -->
+                        <BkAlert
+                          v-if="userAuthTips"
+                          class="user-auth-alert"
+                          theme="info"
+                          :title="userAuthTips"
+                        />
                       </div>
                     </template>
                   </BkPopConfirm>
@@ -510,18 +537,20 @@ import Top from '@/views/online-debugging/components/Top.vue';
 import RequestPayload from '@/views/online-debugging/components/RequestPayload.vue';
 import ResponseContent from '@/views/online-debugging/components/ResponseContent.vue';
 import Doc from '@/views/online-debugging/components/Doc.vue';
-import TableEmpty from '@/components/table-empty/Index.vue';
-import AgSideslider from '@/components/ag-sideslider/Index.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
+import AgSideslider from '@/components/base/ag-sideslider/Index.vue';
 import { useEnv, useGateway, useResourceDebugging } from '@/stores';
-import {
-  getApiDetail,
-  getResourcesOnline,
-  getStages,
-  postAPITest,
-  resourceSchema,
-} from '@/services/source/online-debugging';
-import AgIcon from '@/components/ag-icon/Index.vue';
-import type { IGatewayRetrieveOutput } from '@/services/types/responses/gateways.ts';
+import { getReleasedResourceSchema, getReleasedStageResources } from '@/services/source/gateway/release';
+import { createApiTest } from '@/services/source/gateway/api-test';
+import type { IAPITestAuthorization, IAPITestInputSLZ } from '@/services/types/gateway/api-test.ts';
+import { getGatewayDetail } from '@/services/source/gateway/gateway';
+import { getStageList } from '@/services/source/gateway/stage';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
+import type { IGatewayRetrieveOutput } from '@/services/types/gateway/gateway.ts';
+
+interface IProps { gatewayId?: number }
+
+const { gatewayId = 0 } = defineProps<IProps>();
 
 const { t } = useI18n();
 const gatewayStore = useGateway();
@@ -558,24 +587,6 @@ const originResourceGroup = ref<any>({});
 const curComponentName = ref<any>('');
 const curResource = ref<any>({});
 const defaultValue = {
-  params: {
-    stage_id: '',
-    resource_id: '',
-    method: '',
-    headers: {},
-    path_params: {},
-    query_params: {},
-    body: '',
-    use_test_app: true,
-    subpath: '',
-    use_user_from_cookies: false,
-    authorization: {
-      bk_app_code: '',
-      bk_app_secret: '',
-      uin: '',
-      skey: '',
-    },
-  },
   formData: {
     path: '',
     method: '',
@@ -584,8 +595,6 @@ const defaultValue = {
     authorization: {
       bk_app_code: '',
       bk_app_secret: '',
-      uin: '',
-      skey: '',
       bk_ticket: '',
       bk_token: '',
     },
@@ -594,8 +603,9 @@ const defaultValue = {
       query: {},
     },
     headers: {},
-    // 用户认证
-    useUserFromCookies: true,
+    // 用户认证：use_cookies | ticket | access_token | personal_token
+    userAuthType: 'use_cookies',
+    userAuthValue: '',
   },
 };
 const formData = ref<any>({ ...defaultValue.formData });
@@ -621,11 +631,12 @@ const appAuthorization = reactive<any>({
   bk_app_secret: '',
 });
 // 编辑用户认证
-const userCookies = reactive<any>({
+const userAuth = reactive<any>({
   isEdit: false,
-  useUserFromCookies: true,
-  bk_token: '',
-  bk_ticket: '',
+  userAuthType: 'use_cookies',
+  ticketValue: '',
+  accessToken: '',
+  personalToken: '',
 });
 const response = ref<any>({});
 
@@ -651,6 +662,42 @@ const containerWidth = ref(0);
 const toolsWidth = ref(0);
 
 const authField = computed(() => envStore.env.EDITION === 'te' ? 'bk_ticket' : 'bk_token');
+
+// 用户认证方式收起后的摘要
+const userAuthSummary = computed(() => {
+  const { userAuthType, userAuthValue } = formData.value;
+  switch (userAuthType) {
+    case 'ticket':
+      return userAuthValue
+        ? `（${t('登录态票据')}）${authField.value}：******`
+        : `（${t('登录态票据')}）${t('未配置')}`;
+    case 'access_token':
+      return userAuthValue
+        ? '（access_token）******'
+        : `（access_token）${t('未配置')}`;
+    case 'personal_token':
+      return userAuthValue
+        ? `（${t('个人令牌')}）Bearer ******`
+        : `（${t('个人令牌')}）${t('未配置')}`;
+    default:
+      return t('当前登录用户（自动读取 Cookie）');
+  }
+});
+
+// 各认证方式的说明，个人令牌不展示请求头示例
+const userAuthTips = computed(() => {
+  const field = authField.value;
+  switch (userAuth.userAuthType) {
+    case 'use_cookies':
+      return `${t('从 Cookie 中获取当前登录用户的票据（{name}）。', { name: field })}${t('请求头示例')}：X-Bkapi-Authorization: {"${field}":"<Cookie ${field}>"}`;
+    case 'ticket':
+      return `${t('将自定义票据写入请求头 X-Bkapi-Authorization，与应用认证一起传递。')}${t('请求头示例')}：X-Bkapi-Authorization: {"${field}":"<自定义 ${field}>"}`;
+    case 'access_token':
+      return `${t('请求头示例')}：X-Bkapi-Authorization: {"access_token":"YOUR_ACCESS_TOKEN"}`;
+    default:
+      return '';
+  }
+});
 
 const availableTabWidth = computed(() => {
   const width = containerWidth.value - toolsWidth.value;
@@ -780,7 +827,7 @@ onBeforeUnmount(() => {
   toolsResizeObserver?.disconnect();
 });
 
-const apigwId = computed(() => gatewayStore.apigwId);
+const apigwId = computed(() => Number(gatewayId));
 
 const isDefaultAppAuth = computed(() => formData.value.appAuth === 'use_test_app');
 
@@ -895,18 +942,24 @@ watch(
   },
 );
 
-watch(() => route, () => {
-  stage.value = 0;
-  const stageId = route.query?.stage_id;
-  stage.value = Number(stageId) || 0;
-  if (stage.value) {
-    handleStageChange(stage.value);
-  }
-}, { immediate: true });
-
-watch(() => gatewayStore.currentGateway, () => {
-  router.replace({ query: undefined });
-}, { deep: true });
+watch(
+  () => route.query?.stage_id,
+  (stageId) => {
+    if (!stageId || route.name !== 'OnlineDebugging') return;
+    stage.value = Number(stageId) || 0;
+    if (stage.value) {
+      handleStageChange(stage.value);
+      const restQuery = { ...route.query };
+      delete restQuery.stage_id;
+      router.replace({
+        path: route.path,
+        query: restQuery,
+        hash: route.hash,
+      });
+    }
+  },
+  { immediate: true },
+);
 
 watch(isShowDoc, () => {
   if (isShowDoc.value) {
@@ -928,7 +981,7 @@ const getApigwReleaseResources = async () => {
       limit: 10000,
       offset: 0,
     };
-    const res = await getResourcesOnline(apigwId.value, stage.value, query);
+    const res = await getReleasedStageResources(apigwId.value, stage.value, query);
     const group: any = {};
     const defaultItem: any = {
       labelId: 'default',
@@ -1027,7 +1080,7 @@ const clearSchema = () => {
 
 const getResourceParams = async () => {
   if (!apigwId.value || !stage.value || !curResource.value?.id) return;
-  const res = await resourceSchema(apigwId.value, stage.value, curResource.value?.id);
+  const res = await getReleasedResourceSchema(apigwId.value, stage.value, curResource.value?.id);
 
   clearSchema();
   if (res?.body_example) {
@@ -1110,7 +1163,7 @@ const getApigwStages = async () => {
   };
 
   try {
-    const res = await getStages(apigwId.value, pageParams);
+    const res = await getStageList(apigwId.value, pageParams);
     stageList.value = res || [];
     if (stageList.value.length) {
       const effectiveStage = stageList.value.find((item: any) => item.release?.status === 'success' || item.resource_version?.version) || stageList.value[0];
@@ -1132,7 +1185,7 @@ const getApigwStages = async () => {
 
 const getApigwDetail = async () => {
   try {
-    const res = await getApiDetail(apigwId.value);
+    const res = await getGatewayDetail(apigwId.value);
     curApigw.value = res;
     curApigw.value.statusBoolean = Boolean(curApigw.value?.status);
   }
@@ -1331,31 +1384,35 @@ const cancelAppAuthEdit = () => {
 };
 
 const handleEditUserAuth = () => {
-  userCookies.useUserFromCookies = formData.value.useUserFromCookies;
-  userCookies[authField.value] = formData.value.authorization[authField.value];
-  userCookies.isEdit = true;
+  const { userAuthType, userAuthValue } = formData.value;
+  userAuth.userAuthType = userAuthType || 'use_cookies';
+  userAuth.ticketValue = userAuth.userAuthType === 'ticket' ? userAuthValue : '';
+  userAuth.accessToken = userAuth.userAuthType === 'access_token' ? userAuthValue : '';
+  userAuth.personalToken = userAuth.userAuthType === 'personal_token' ? userAuthValue : '';
+  userAuth.isEdit = true;
 };
 
 const saveUserAuthEdit = () => {
-  if (userCookies.useUserFromCookies) {
-    formData.value.authorization[authField.value] = '';
-  }
-  else {
-    formData.value.authorization[authField.value] = userCookies[authField.value];
-  }
+  const modeValues: Record<string, string> = {
+    use_cookies: '',
+    ticket: userAuth.ticketValue,
+    access_token: userAuth.accessToken,
+    personal_token: userAuth.personalToken,
+  };
 
-  formData.value.useUserFromCookies = userCookies.useUserFromCookies;
-  userCookies.isEdit = false;
+  formData.value.userAuthType = userAuth.userAuthType;
+  formData.value.userAuthValue = modeValues[userAuth.userAuthType] ?? '';
+  userAuth.isEdit = false;
 };
 
 const cancelUserAuthEdit = () => {
-  userCookies.isEdit = false;
+  userAuth.isEdit = false;
 };
 
 const getKeyValue = (list: any[]) => {
   if (!list?.length) return {};
 
-  const obj: any = {};
+  const obj: Record<string, string> = {};
   list.forEach((item: any) => {
     if (item.name) {
       obj[item.name] = item.value;
@@ -1365,7 +1422,7 @@ const getKeyValue = (list: any[]) => {
   return obj;
 };
 
-const checkFormData = (data: any) => {
+const checkFormData = (data: IAPITestInputSLZ & { authorization: IAPITestAuthorization }) => {
   const pathValues = Object.values(data.path_params);
   const pathKeys = Object.keys(data.path_params);
   // const reg = /^[\w{}/.-]*$/;
@@ -1378,7 +1435,7 @@ const checkFormData = (data: any) => {
   //   form.value.validate();
   //   return false;
   // }
-  if (pathKeys?.length && pathValues.some((val: any) => !val?.length)) {
+  if (pathKeys?.length && pathValues.some(val => !val?.length)) {
     Message({
       theme: 'error',
       message: t('请输入完整的路径参数'),
@@ -1390,7 +1447,7 @@ const checkFormData = (data: any) => {
     Message({
       theme: 'error',
       delay: 5000,
-      message: t('应用ID格式不正确，只能包含：小写字母、数字、连字符(-)、下划线(_)，首字母必须是字母'),
+      message: t('应用 ID 格式不正确，只能包含：小写字母、数字、连字符(-)、下划线(_)，首字母必须是字母'),
     });
     return false;
   }
@@ -1405,19 +1462,29 @@ const formatPayload = () => {
   const { raw } = payload.body;
   // formData: formDataList, urlencoded,
 
-  const data: any = {};
-  data.stage_id = stage.value;
-  data.resource_id = curResource.value?.id;
-  data.method = curResource.value?.method;
-  data.query_params = getKeyValue(query);
-  data.path_params = getKeyValue(path);
-  data.headers = getKeyValue(headers);
-  data.body = raw;
+  const stageId = stage.value;
+  const resourceId = curResource.value?.id;
+  const method = curResource.value?.method;
+  if (stageId === undefined || !resourceId || !method) {
+    return false;
+  }
 
-  // 用户认证
-  data.use_user_from_cookies = curResource.value?.verified_user_required ? formData.value?.useUserFromCookies : false;
-  data.authorization = formData.value?.authorization || {};
-  data.use_test_app = isDefaultAppAuth.value;
+  const { userAuthType } = formData.value;
+  const userAuthValue = (formData.value.userAuthValue || '').trim();
+  const useCookiesAuth = (userAuthType || 'use_cookies') === 'use_cookies';
+  const data = {
+    stage_id: stageId,
+    resource_id: resourceId,
+    method,
+    query_params: getKeyValue(query),
+    path_params: getKeyValue(path),
+    headers: getKeyValue(headers),
+    body: raw,
+    // 资源未开启用户认证时，不携带 Cookie 认证信息
+    use_user_from_cookies: Boolean(curResource.value?.verified_user_required) && useCookiesAuth,
+    use_test_app: isDefaultAppAuth.value,
+    authorization: { ...formData.value?.authorization },
+  } satisfies IAPITestInputSLZ;
 
   // 默认应用认证数据过滤
   if (isDefaultAppAuth.value) {
@@ -1425,9 +1492,17 @@ const formatPayload = () => {
     data.authorization.bk_app_code = '';
   }
 
-  // 默认用户认证数据过滤
-  if (formData.value?.useUserFromCookies) {
-    data.authorization[authField.value] = '';
+  if (userAuthType === 'ticket' && userAuthValue) {
+    // 登录态票据
+    data.authorization[authField.value] = userAuthValue;
+  }
+  else if (userAuthType === 'access_token' && userAuthValue) {
+    // access_token
+    data.headers['X-Bkapi-Authorization'] = JSON.stringify({ access_token: userAuthValue });
+  }
+  else if (userAuthType === 'personal_token' && userAuthValue) {
+    // 个人令牌
+    data.headers.Authorization = `Bearer ${userAuthValue}`;
   }
 
   if (checkFormData(data)) {
@@ -1445,7 +1520,7 @@ const handleSend = async (e: Event, name: string) => {
 
   try {
     isLoading.value = true;
-    const res = await postAPITest(apigwId.value, data);
+    const res = await createApiTest(apigwId.value, data);
 
     if (name === curResource.value?.name) {
       response.value = res;
@@ -1725,6 +1800,7 @@ init();
 }
 
 .edit-user-auth {
+  min-height: 180px;
 
   .title {
     margin-bottom: 8px;
@@ -1746,6 +1822,26 @@ init();
     margin-bottom: 16px;
   }
 
+  .personal-token-prefix {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    padding: 0 8px;
+    color: #63656E;
+    background-color: #F5F7FA;
+    border-right: 1px solid #C4C6CC;
+
+    .key {
+      padding-right: 8px;
+      border-right: 1px solid #DCDEE5;
+    }
+
+    .bearer {
+      padding-left: 8px;
+      color: #979BA5;
+    }
+  }
+
   .edit-user-tips {
     display: flex;
     margin-bottom: 8px;
@@ -1759,7 +1855,22 @@ init();
     .tips {
       margin-left: 6px;
       font-size: 12px;
+      line-height: 20px;
       color: #63656E;
+      word-break: break-all;
+    }
+  }
+
+  .user-auth-alert {
+    margin-bottom: 8px;
+
+    :deep(.bk-alert-wraper) {
+      align-items: flex-start;
+
+      .bk-alert-title {
+        line-height: 20px;
+        word-break: break-all;
+      }
     }
   }
 }
@@ -1820,7 +1931,7 @@ init();
 
   .my-menu-header {
     display: flex;
-    padding: 0px 24px 7px;
+    padding: 0 24px 7px;
     cursor: pointer;
     align-items: center;
 

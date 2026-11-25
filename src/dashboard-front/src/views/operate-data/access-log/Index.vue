@@ -29,10 +29,9 @@
         >
           <BkDatePicker
             :key="dateKey"
-            ref="datePickerRef"
             v-model="dateValue"
             type="datetimerange"
-            style="max-width: 300px;"
+            style="max-width: 290px;"
             :clearable="false"
             :placeholder="t('选择日期时间范围')"
             use-shortcut-text
@@ -126,7 +125,7 @@
           </template>
           <SearchInput
             v-model:mode-value="keyword"
-            style="min-width: 250px;"
+            style="min-width: 220px;"
             @search="handleSearch"
           />
         </BkFormItem>
@@ -139,7 +138,7 @@
               {{ t('查询') }}
             </BkButton>
             <BkButton
-              class="ml10"
+              class="ml-10px"
               @click="handleClearFilterKey"
             >
               {{ t('重置') }}
@@ -165,8 +164,7 @@
             closable
             @close="() => handleTagClose(item)"
           >
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <span v-html="generateTagContent(item)" />
+            <span v-bk-xss-html="generateTagContent(item)" />
           </BkTag>
           <BkButton
             theme="primary"
@@ -206,7 +204,7 @@
                   class="no-data-chart"
                 >
                   <slot name="empty">
-                    <TableEmpty
+                    <AgTableEmpty
                       :keyword="tableEmptyConf.keyword"
                       :abnormal="tableEmptyConf.isAbnormal"
                       @refresh="getSearchData"
@@ -267,6 +265,7 @@
                 ref="tableRef"
                 v-model:table-data="tableData"
                 v-model:settings="settings"
+                cache-identifier="AccessLog"
                 table-row-key="request_id"
                 show-settings
                 expand-on-row-click
@@ -303,7 +302,7 @@
                         </dt>
                         <dd class="value">
                           <span
-                            v-if="field === 'response_body' && row.status === '200'"
+                            v-if="field === 'response_body' && Number(row.status) === 200"
                             class="respond"
                           >
                             <InfoLine class="respond-icon" /><span>{{ t('状态码为 200 时不记录响应正文') }}</span>
@@ -372,9 +371,7 @@
 
 <script lang="ts" setup>
 import dayjs from 'dayjs';
-import * as echarts from 'echarts';
-import 'echarts/lib/chart/bar';
-import 'echarts/lib/component/tooltip';
+import { type ECharts, createChart } from '@/utils/echarts';
 import {
   merge,
   trim,
@@ -382,20 +379,24 @@ import {
 } from 'lodash-es';
 
 import { copy } from '@/utils';
-import { useChartIntervalOption, useDatePicker } from '@/hooks';
+import {
+  RECENT_DATE_PRESETS,
+  useChartIntervalOption,
+  useDatePicker,
+} from '@/hooks';
 import QueryUsagePopover from './components/QueryUsagePopover.vue';
 import SearchInput from './components/SearchInput.vue';
-import { useAccessLog, useFeatureFlag, useGateway } from '@/stores';
+import { useFeatureFlag, useGateway } from '@/stores';
 import {
-  type ISearchParamsInterface,
-  fetchApigwAccessLogChart,
-  fetchApigwAccessLogList,
-  fetchApigwAccessLogShareLink,
-  fetchApigwStages,
-} from '@/services/source/access-log';
-import { exportLogs } from '@/services/source/report';
-import { getApigwResources } from '@/services/source/dashboard';
-import { getBackendServiceList } from '@/services/source/backend-services.ts';
+  exportAccessLogs,
+  getAccessLogList,
+  getAccessLogShareLink,
+  getAccessLogTimechart,
+} from '@/services/source/gateway/access-log';
+import type { ISearchParamsInterface } from '@/types/access-log';
+import { getResourceList } from '@/services/source/gateway/resource';
+import { getStageList } from '@/services/source/gateway/stage';
+import { getBackendServiceList } from '@/services/source/gateway/backend';
 import {
   AngleUpFill,
   CopyShape,
@@ -407,26 +408,40 @@ import {
 } from 'bkui-vue/lib/icon';
 import { Message } from 'bkui-vue';
 import { useStorage } from '@vueuse/core';
-import AgIcon from '@/components/ag-icon/Index.vue';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
 import ResourceSearcher from '@/views/operate-data/dashboard/components/ResourceSearcher.vue';
-import AiBluekingButton from '@/components/ai-seek/AiBluekingButton.vue';
-import AiChatSlider from '@/components/ai-seek/AiChatSlider.vue';
-import TableEmpty from '@/components/table-empty/Index.vue';
-import type { ITableMethod } from '@/types/common';
-import AgTable from '@/components/ag-table/Index.vue';
+import AiBluekingButton from '@/components/ai/ai-blueking-button/Index.vue';
+import AiChatSlider from '@/components/ai/ai-chat-slider/Index.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
+import AgTable, {
+  type IAgTableInstance,
+  type ITableColumn,
+  type TableRow,
+} from '@/components/base/ag-table';
+import type { IRequestLogOutput } from '@/services/types/gateway/access-log';
 import type {
+  ICountAndResults,
   IExtractApiReturn,
   IExtractListApiResults,
 } from '@/services/types/utils.ts';
-import type { EChartsType } from 'echarts';
+import {
+  getBucketRange,
+  toTimeRangeSeconds,
+} from '@/utils/time-range';
 
-type IStageItem = IExtractApiReturn<typeof fetchApigwStages>[number];
+interface IAccessLogRow extends IRequestLogOutput {
+  bk_username?: string | null
+  response_size?: number | null
+  llm_summary?: Record<string, unknown> | null
+  [key: string]: any
+}
+
+type IStageItem = IExtractApiReturn<typeof getStageList>[number];
 type IBackendItem = IExtractListApiResults<typeof getBackendServiceList>;
 
 const { t } = useI18n();
 const { getChartIntervalOption } = useChartIntervalOption();
 const gatewayStore = useGateway();
-const accessLogStore = useAccessLog();
 const featureFlagStore = useFeatureFlag();
 
 // 从localStorage 提取搜索历史
@@ -434,9 +449,10 @@ const queryHistory = useStorage('access-log-query-history', []);
 
 const activeIndex = ref<number[]>([1, 2, 3]);
 const keyword = ref('');
-const chartInstance = ref<EChartsType | null>(null);
+const chartInstance = ref<ECharts | null>(null);
 const chartContainer = ref<HTMLDivElement | null>(null);
-const datePickerRef = ref<any>(null);
+// 柱状图各桶起点（秒），框选时按下标换算时间，不解析坐标轴文本
+const chartTimeline = shallowRef<number[]>([]);
 const isPageLoading = ref(false);
 const isDataLoading = ref(false);
 const isShareLoading = ref(false);
@@ -461,13 +477,13 @@ const tableEmptyConf = ref<{
   isAbnormal: false,
 });
 
-const tableData = ref<any[]>([]);
+const tableData = ref<IAccessLogRow[]>([]);
 const expandedFields = ref<{
   label: string
   field: string
 }[]>([]);
 const pageCount = ref<number>(0);
-const tableRef = useTemplateRef<InstanceType<typeof AgTable> & ITableMethod>('tableRef');
+const tableRef = useTemplateRef<IAgTableInstance<IAccessLogRow>>('tableRef');
 const settings = shallowRef({
   checked: ['timestamp', 'method', 'http_path', 'status', 'backend_duration', 'error'],
   fields: [
@@ -591,7 +607,12 @@ const {
   handleConfirm,
   handleShortcutChange,
   handleSelectionModeChange,
-} = useDatePicker(searchParams);
+  applySelectedRange,
+  resetSelection,
+} = useDatePicker(searchParams, {
+  presets: RECENT_DATE_PRESETS,
+  defaultPreset: 'last-1h',
+});
 
 const apigwId = computed(() => gatewayStore.apigwId);
 const isAIGateway = computed(() => gatewayStore.isAIGateway);
@@ -627,22 +648,11 @@ const formatValue = (value: any, field: string) => {
   return value || '--';
 };
 
-const formatDatetime = (timeRange: (number | string | Date)[]) => {
-  return [+new Date(`${timeRange[0]}`) / 1000, +new Date(`${timeRange[1]}`) / 1000];
-};
-
-const setSearchTimeRange = () => {
-  let timeRange = dateValue.value;
-  // 选择的是时间快捷项，需要实时计算时间值
-  if (shortcutSelectedIndex.value !== -1) {
-    timeRange = accessLogStore.datepickerShortcuts[shortcutSelectedIndex.value].value();
-  }
-  const formatTimeRange = formatDatetime(timeRange);
-  searchParams.value = Object.assign(searchParams.value, {
-    time_start: formatTimeRange[0],
-    time_end: formatTimeRange[1],
-  });
-};
+/**
+ * 计算本次查询的秒级区间并写入查询参数
+ * @returns 是否得到有效区间；无效时不修改查询参数，调用方不应发起查询
+ */
+const setSearchTimeRange = () => applySelectedRange();
 
 const handlePanelChange = ({ name }: any) => {
   if (name === 2) {
@@ -652,6 +662,7 @@ const handlePanelChange = ({ name }: any) => {
 
 const renderChart = (data: Record<string, any>) => {
   const { series, timeline } = data;
+  chartTimeline.value = timeline ?? [];
   const xAxisData = timeline.map((time: number) => dayjs.unix(time).format('YYYY-MM-DD\nHH:mm:ss'));
   const options = {
     grid: {
@@ -716,17 +727,20 @@ const renderChart = (data: Record<string, any>) => {
   const intervalOption = getChartIntervalOption(timeDuration, 'time', 'xAxis');
   nextTick(() => {
     chartInstance.value?.setOption(merge(options, intervalOption));
-  });
-  chartInstance.value?.dispatchAction({
-    type: 'takeGlobalCursor',
-    key: 'dataZoomSelect',
-    dataZoomSelectActive: true,
+    // 必须在配置生效后执行：先清除上一次框选留下的缩放，再开启框选。
+    // 若在 setOption 之前开启，首次渲染时 toolbox 尚未注册，拖动鼠标不会产生框选
+    chartInstance.value?.dispatchAction({ type: 'restore' });
+    chartInstance.value?.dispatchAction({
+      type: 'takeGlobalCursor',
+      key: 'dataZoomSelect',
+      dataZoomSelectActive: true,
+    });
   });
   chartResize();
 };
 
 const getResources = async () => {
-  const pageParams: Parameters<typeof getApigwResources>[1] = {
+  const pageParams: Parameters<typeof getResourceList>[1] = {
     no_page: true,
     order_by: 'path',
     offset: 0,
@@ -735,7 +749,7 @@ const getResources = async () => {
   };
 
   try {
-    const res = await getApigwResources(apigwId.value, pageParams);
+    const res = await getResourceList(apigwId.value, pageParams);
     resourceList.value = res.results;
   }
   catch (err) {
@@ -744,7 +758,7 @@ const getResources = async () => {
   }
 };
 
-const tableColumns = shallowRef<any[]>([
+const tableColumns = shallowRef<ITableColumn<IAccessLogRow>[]>([
   {
     title: t('请求ID'),
     colKey: 'request_id',
@@ -756,7 +770,7 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'timestamp',
     ellipsis: true,
     width: 180,
-    cell: (h: any, { row }: { row: Record<string, any> }) => {
+    cell: (_h, { row }) => {
       return formatValue(row.timestamp, 'timestamp');
     },
   },
@@ -885,7 +899,7 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'error',
     ellipsis: true,
     width: 120,
-    cell: (h: any, { row }: { row: Record<string, any> }) => {
+    cell: (_h, { row }) => {
       return row.error || '--';
     },
   },
@@ -902,8 +916,8 @@ const handleResourceChange = () => {
 };
 
 const getApigwStages = async () => {
-  const pageParams: Parameters<typeof fetchApigwStages>[1] = {};
-  const res = await fetchApigwStages(apigwId.value, pageParams);
+  const pageParams: Parameters<typeof getStageList>[1] = {};
+  const res = await getStageList(apigwId.value, pageParams);
   stageList.value = res || [];
   if (stageList.value.length) {
     searchParams.value.stage_id = stageList.value[0].id;
@@ -945,15 +959,15 @@ const getList = () => {
   tableRef.value?.fetchData(params, { resetPage: true });
 };
 
-const getTableData = async (params: Record<string, any> = {}) => {
+const getTableData = async (params: Record<string, any> = {}): Promise<ICountAndResults<IAccessLogRow>> => {
   // setSearchTimeRange();
   const { path } = getPayload();
-  const results = await fetchApigwAccessLogList(apigwId.value, params, path);
+  const results = await getAccessLogList(apigwId.value, params, path);
 
   expandedFields.value = results?.fields || [];
   pageCount.value = results?.count || 0;
 
-  return results;
+  return results as ICountAndResults<IAccessLogRow>;
 };
 
 const getApigwAccessLogChart = async () => {
@@ -961,17 +975,18 @@ const getApigwAccessLogChart = async () => {
   const { params, path } = getPayload();
   params.no_page = true;
 
-  const results = await fetchApigwAccessLogChart(apigwId.value, params, path);
+  const results = await getAccessLogTimechart(apigwId.value, params, path);
 
   chartData.value = results || {};
   renderChart(chartData.value);
-  chartInstance.value?.dispatchAction({ type: 'restore' });
 };
 
 const getSearchData = async () => {
   isDataLoading.value = true;
   try {
-    setSearchTimeRange();
+    if (!setSearchTimeRange()) {
+      return;
+    }
     await Promise.all([
       getList(),
       getApigwAccessLogChart(),
@@ -988,7 +1003,7 @@ const getSearchData = async () => {
   }
 };
 
-const handleRowCopy = (field: string, row: any) => {
+const handleRowCopy = (field: string, row: IAccessLogRow) => {
   let copyStr = `${field}: ${row[field]}`;
   if (field === 'llm_summary') {
     copyStr = `${field}: ${JSON.stringify(row[field], null, 2)}`;
@@ -996,7 +1011,7 @@ const handleRowCopy = (field: string, row: any) => {
   copy(copyStr);
 };
 
-const handleInclude = (field: string, row: any) => {
+const handleInclude = (field: string, row: IAccessLogRow) => {
   const fieldStr = `${field}:${row[field]}`;
   includeObj.value?.push(fieldStr);
   includeObj.value = Array.from(new Set(includeObj.value));
@@ -1009,7 +1024,7 @@ const handleInclude = (field: string, row: any) => {
   getSearchData();
 };
 
-const handleExclude = (field: string, row: any) => {
+const handleExclude = (field: string, row: IAccessLogRow) => {
   const fieldStr = `${field}:${row[field]}`;
 
   excludeObj.value?.push(fieldStr);
@@ -1073,17 +1088,24 @@ const handleClearSearch = () => {
 
 const handleDownload = async (event: Event) => {
   event.stopPropagation();
-  if (pageCount.value === 0 || isDownloadLoading.value) {
+  // 后端导出必须带起止时间（只传 time_range 会报错），导出沿用当前列表的时间快照
+  const { time_start, time_end } = searchParams.value;
+  if (pageCount.value === 0 || isDownloadLoading.value
+    || typeof time_start !== 'number' || typeof time_end !== 'number') {
     return;
   }
 
   try {
     isDownloadLoading.value = true;
     const { params, path } = getPayload();
-    params.offset = tableRef.value?.getPagination()?.current || 1;
-    params.limit = 10000;
 
-    await exportLogs(apigwId.value, params, path);
+    await exportAccessLogs(apigwId.value, {
+      ...params,
+      time_start,
+      time_end,
+      offset: tableRef.value?.getPagination()?.current || 1,
+      limit: 10000,
+    }, path);
 
     Message({
       message: t('导出成功'),
@@ -1102,11 +1124,11 @@ const handleDownload = async (event: Event) => {
   }
 };
 
-const handleClickCopyLink = async ({ request_id }: any) => {
-  const params = { request_id };
+const handleClickCopyLink = async ({ request_id }: IAccessLogRow) => {
+  const params = { request_id: request_id ?? '' };
   isShareLoading.value = true;
   try {
-    const { link } = await fetchApigwAccessLogShareLink(apigwId.value, params);
+    const { link } = await getAccessLogShareLink(apigwId.value, params);
     copy(link || '');
   }
   catch (err) {
@@ -1118,7 +1140,9 @@ const handleClickCopyLink = async ({ request_id }: any) => {
 };
 
 const handlePickerConfirm = () => {
-  handleConfirm();
+  if (!handleConfirm()) {
+    return;
+  }
   getSearchData();
 };
 
@@ -1156,15 +1180,14 @@ const handleClearFilterKey = () => {
   backend_id.value = '';
   searchParams.value.backend_name = '';
   searchParams.value.resource_id = '';
-  [datePickerRef.value!.shortcut] = [accessLogStore.datepickerShortcuts[1]];
-  dateValue.value = [];
-  shortcutSelectedIndex.value = 1;
+  // 恢复默认快捷项后重建日期组件
+  resetSelection();
   dateKey.value = String(+new Date());
   handleSearch('');
 };
 
 const updateTableEmptyConfig = () => {
-  const time = dateValue.value.some(Boolean);
+  const time = Array.isArray(dateValue.value) && dateValue.value.some(Boolean);
   if (keyword.value || !tableData.value.length) {
     tableEmptyConf.value.emptyType = 'searchEmpty';
     return;
@@ -1176,8 +1199,9 @@ const updateTableEmptyConfig = () => {
   tableEmptyConf.value.emptyType = '';
 };
 
-const getRowClass = ({ row }: { row: Record<string, any> }) => {
-  return !(row.status >= 200 && row.status < 300) || row.error ? 'exception hover:cursor-pointer' : 'hover:cursor-pointer';
+const getRowClass = ({ row }: { row: TableRow<IAccessLogRow> }) => {
+  const isSuccess = row.status !== null && row.status >= 200 && row.status < 300;
+  return !isSuccess || row.error ? 'exception hover:cursor-pointer' : 'hover:cursor-pointer';
 };
 
 const chartResize = () => {
@@ -1194,33 +1218,31 @@ const initData = async () => {
 };
 
 const initChart = async () => {
-  chartInstance.value = markRaw(echarts.init(chartContainer.value));
+  chartInstance.value = markRaw(createChart(chartContainer.value));
   window.addEventListener('resize', chartResize);
 
   chartInstance.value?.on('datazoom', (event: any) => {
-    const { startValue, endValue } = event.batch[0];
+    // startValue/endValue 为所选柱子的下标
+    const { startValue, endValue } = event?.batch?.[0] ?? {};
+    const { time_start, time_end } = searchParams.value;
+    const queryRange = typeof time_start === 'number' && typeof time_end === 'number'
+      ? toTimeRangeSeconds(time_start * 1000, time_end * 1000)
+      : null;
+    const range = getBucketRange(chartTimeline.value, startValue, endValue, queryRange);
 
-    // 获取x轴缩放后的数据范围
-    const zoomedXAxisData = (chartInstance.value?.getOption() as any).xAxis[0].data.slice(startValue, endValue + 1);
-    const startTime = zoomedXAxisData[0];
-    const endTime = zoomedXAxisData[zoomedXAxisData.length - 1];
-
-    if (startTime === endTime) {
-      dateValue.value = [];
-      shortcutSelectedIndex.value = 1;
-      [datePickerRef.value!.shortcut] = [accessLogStore.datepickerShortcuts[1]];
-    }
-    else {
-      shortcutSelectedIndex.value = -1;
-      dateValue.value = [new Date(startTime), new Date(endTime)];
+    // 空选择不改变当前查询条件；单个柱子也是有效选择
+    if (!range) {
+      return;
     }
 
+    shortcutSelectedIndex.value = -1;
+    dateValue.value = [new Date(range[0] * 1000), new Date(range[1] * 1000)];
     dateKey.value = String(+new Date());
     handlePickerConfirm();
   });
 };
 
-const handleAIChatClick = (row: any) => {
+const handleAIChatClick = (row: IAccessLogRow) => {
   const res: Record<string, any> = {};
   expandedFields.value.forEach(({ label, field }: {
     label: string
@@ -1312,6 +1334,8 @@ onBeforeUnmount(() => {
 
   .search-term {
     display: flex;
+    flex-wrap: wrap;
+    row-gap: 8px;
     margin-bottom: 24px;
     align-items: center;
 
@@ -1357,14 +1381,14 @@ onBeforeUnmount(() => {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 12px;
       flex: 1;
       min-width: 0;
 
       :deep(.bk-form-item) {
         display: flex;
         max-width: fit-content;
-        min-width: 0;
+        min-width: auto;
         margin: 0;
         align-items: center;
         flex: 1;
@@ -1383,6 +1407,11 @@ onBeforeUnmount(() => {
             width: 100%;
           }
         }
+      }
+
+      :deep(.bk-select) {
+        min-width: 160px;
+        max-width: 160px;
       }
     }
   }

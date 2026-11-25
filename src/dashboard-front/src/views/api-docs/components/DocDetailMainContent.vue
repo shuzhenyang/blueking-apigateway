@@ -25,45 +25,57 @@
       class="target-detail custom-scroll-bar"
     >
       <header class="detail-header">
-        <header class="flex items-center flex-wrap res-name">
-          <div class="mr-12px font-700">
-            {{ api.name ?? '--' }}
-          </div>
-          <BkTag
-            v-if="basics?.kind === 2"
-            theme="info"
-            class="mr-12px"
-          >
-            {{ t('模型代理 API') }}
-          </BkTag>
-          <BkTag
-            v-if="basics?.is_deprecated"
-            theme="danger"
-            class="font-400"
-          >
-            deprecated
-          </BkTag>
-        </header>
-        <footer class="res-header-footer">
-          <main class="res-desc">
-            {{ api.description ?? '--' }}
-          </main>
-          <aside class="res-sdk">
-            <span
-              class="text-12px"
-              @click="handleSdkInstructionClick"
+        <header class="res-name-row">
+          <div class="res-name-main">
+            <div class="res-name">
+              {{ api.name ?? '--' }}
+            </div>
+            <BkTag
+              v-if="basics?.kind === 2"
+              theme="info"
             >
-              <AgIcon name="document" />
-              {{ t('SDK 使用说明') }}
-            </span>
+              {{ t('模型代理 API') }}
+            </BkTag>
+            <BkTag
+              v-if="deprecation.isDeprecated"
+              theme="danger"
+              class="font-400"
+            >
+              deprecated
+            </BkTag>
+          </div>
+          <aside class="res-header-actions">
+            <BkButton
+              text
+              theme="primary"
+              class="gateway-detail-btn"
+              @click="handleGatewayDetailClick"
+            >
+              <AgIcon
+                name="info"
+                class="gateway-detail-icon"
+              />
+              {{ curTab === 'gateway' ? t('网关详情') : t('组件详情') }}
+            </BkButton>
+            <!-- 申请权限按钮，后端接口由 PR #3340 提供 -->
+            <BkButton
+              v-if="showApplyPermission"
+              theme="primary"
+              @click="handleApplyClick"
+            >
+              {{ t('申请权限') }}
+            </BkButton>
           </aside>
-        </footer>
+        </header>
+        <p class="res-desc">
+          {{ api.description ?? '--' }}
+        </p>
         <BkAlert
-          v-if="basics?.deprecated_note"
+          v-if="deprecation.note"
           theme="warning"
           class="mt-16px"
           closable
-          :title="basics?.deprecated_note"
+          :title="deprecation.note"
         />
       </header>
       <main class="detail-main">
@@ -95,15 +107,19 @@
               </span>：
               <span v-if="api.verified_app_required && api.resource_perm_required">
                 <span>{{ t('是') }}</span>
+                <!-- TODO 待权限申请接口完成后再放开 -->
+                <span
+                  v-if="false"
+                  v-bk-tooltips="t('可点击右上角「申请权限」提交申请，审批通过后方可调用。')"
+                  class="perm-extra is-link"
+                  @click="handleApplyClick"
+                >{{ t('（允许申请权限）') }}</span>
                 <span
                   v-if="api.allow_apply_permission"
-                  v-bk-tooltips="t('需要在开发者中心申请该网关API权限')"
-                  class="border-b-1px border-b-dashed border-b-#979ba5 cursor-pointer"
                 >{{ t('（允许申请权限）') }}</span>
                 <span
                   v-else
-                  v-bk-tooltips="t('只能由网关管理员主动授权')"
-                  class="border-b-1px border-b-dashed border-b-#979ba5 cursor-pointer"
+                  v-bk-tooltips="t('本资源仅支持由网关管理员授权，不支持在线申请。')"
                 >{{ t('（只能主动授权）') }}</span>
               </span>
               <span v-else>{{ t('否') }}</span>
@@ -115,8 +131,8 @@
               >
                 {{ t('权限申请') }}
               </span>：
-              {{ api.verified_app_required ?
-                ((api.allow_apply_permission || api.component_permission_required) ? t('是') : t('否'))
+              {{ api.verified_app_required
+                ? ((api.allow_apply_permission || api.component_permission_required) ? t('是') : t('否'))
                 : t('否')
               }}
             </span>
@@ -133,12 +149,47 @@
             </span>
           </section>
         </article>
-        <!--  API markdown 文档  -->
         <article
-          v-if="markdownHtml"
+          v-if="curTab === 'gateway' || markdownHtml"
           class="res-detail-content"
         >
+          <!--  调用地址：请求方法 + 完整调用地址  -->
+          <section
+            v-if="curTab === 'gateway'"
+            class="call-guide"
+          >
+            <h3 id="doc-heading-调用地址">
+              {{ t('调用地址') }}
+            </h3>
+            <div class="url-hero">
+              <span
+                class="method-badge"
+                :class="method"
+              >
+                {{ method || '--' }}
+              </span>
+              <code
+                class="url-text"
+                :title="resourceUrl || '--'"
+              >
+                {{ resourceUrl || '--' }}
+              </code>
+              <AgCopyButton
+                v-if="resourceUrl"
+                v-bk-tooltips="t('复制')"
+                class="url-copy"
+                :source="resourceUrl"
+              />
+            </div>
+          </section>
+          <!--  认证方式：默认折叠，内容由后端接口的 auth_content 动态返回  -->
+          <DocAuthSection
+            v-if="curTab === 'gateway'"
+            :markdown-html="authMarkdownHtml"
+          />
+          <!--  文档正文：请求参数、接口说明等，由后端接口的 body_content 返回  -->
           <div
+            v-if="markdownHtml"
             id="resMarkdown"
             v-bk-xss-html="markdownHtml"
             class="ag-markdown-view"
@@ -157,28 +208,46 @@
 </template>
 
 <script setup lang="ts">
-import DocDetailSideNav from './DocDetailSideNav.vue';
+import DocDetailSideNav, { type INavItem } from './DocDetailSideNav.vue';
+import DocAuthSection from './DocAuthSection.vue';
+import type { IDocsEsbBoardsSystemsComponentsListResponse } from '@/services/types/docs/esb.ts';
 import type {
-  IApiGatewayBasics,
-  IComponent,
-  INavItem,
-  IResource,
-  ISystemBasics,
-  TabType,
-} from '../types.d.ts';
+  IDocsGatewaysResourcesDocReadResponse,
+  IDocsGatewaysResourcesListResponse,
+} from '@/services/types/docs/gateway.ts';
+import type { IDocBasics } from './DocDetailSideContent.vue';
+import { docTabKey } from '../utils/doc-context';
 import { copy } from '@/utils';
-import {
-  useElementBounding,
-  useScroll,
-} from '@vueuse/core';
-import { minBy } from 'lodash-es';
+import { useScroll } from '@vueuse/core';
+
+// 两类 API 的公共字段必填，网关资源或 ESB 组件特有的字段按需提供。
+export interface IDocApi extends Pick<IDocsGatewaysResourcesListResponse,
+  'id' | 'name' | 'description' | 'verified_app_required' | 'verified_user_required'>,
+  Partial<Pick<IDocsGatewaysResourcesListResponse,
+    'method' | 'path' | 'resource_perm_required' | 'allow_apply_permission' | 'labels' | 'is_deprecated' | 'deprecated_note'>>,
+  Partial<Pick<IDocsEsbBoardsSystemsComponentsListResponse, 'component_permission_required'>> {}
+
+export type IDocContent = Omit<IDocsGatewaysResourcesDocReadResponse, 'is_deprecated' | 'deprecated_note'>
+  & Partial<Pick<IDocsGatewaysResourcesDocReadResponse, 'is_deprecated' | 'deprecated_note'>>;
 
 interface IProps {
-  api?: IResource & IComponent | null
-  basics?: IApiGatewayBasics & ISystemBasics | null
+  api?: IDocApi | null
+  basics?: IDocBasics | null
   navList?: INavItem[]
+  // 文档正文（后端 body_content）渲染后的 html
   markdownHtml?: string
+  // 认证说明（后端 auth_content）渲染后的 html，为空时整块不展示
+  authMarkdownHtml?: string
   updatedTime?: string | null
+  // 调用地址：请求方法
+  method?: string
+  // 调用地址：完整调用地址
+  resourceUrl?: string
+}
+
+interface IEmits {
+  'show-gateway-detail': []
+  'show-apply-permission': []
 }
 
 const {
@@ -186,31 +255,80 @@ const {
   basics = null,
   navList = [],
   markdownHtml = '',
+  authMarkdownHtml = '',
   updatedTime = null,
+  method = '',
+  resourceUrl = '',
 } = defineProps<IProps>();
 
-const emit = defineEmits<{ 'show-sdk-instruction': [void] }>();
+const emit = defineEmits<IEmits>();
 
 const { t } = useI18n();
 
 // 注入当前的总 tab 变量
-const curTab = inject<Ref<TabType>>('curTab');
+const curTab = inject(docTabKey);
 
 const detailWrapRef = ref<HTMLElement | null>(null);
 // API 文档大标题元素集合
 const docHeadingElements = ref<HTMLElement[]>([]);
 // 当前应该高亮右侧导航的文档标题ID
 const activeDocHeadingId = ref('');
+
+// 点击导航后会触发平滑滚动，滚动结束前先停掉滚动联动，避免把点击的高亮覆盖掉
+let suppressScrollSpyUntil = 0;
+let isScrollSpyUpdate = false;
+
+const setActiveByScrollSpy = (id: string) => {
+  isScrollSpyUpdate = true;
+  activeDocHeadingId.value = id;
+  // 本次变更刷入 watcher 后还原标记
+  nextTick(() => {
+    isScrollSpyUpdate = false;
+  });
+};
+
+// 非滚动来源（点击右侧导航）导致的高亮变化：短时间内停止滚动联动
+watch(activeDocHeadingId, () => {
+  if (isScrollSpyUpdate) return;
+  suppressScrollSpyUntil = Date.now() + 800;
+});
+
 const { y } = useScroll(detailWrapRef, {
-  // 监听 API 文档容器的滚动结束事件，获取距离容器最上方且可见的标题元素
+  // 监听 API 文档容器的滚动结束事件，获取容器视口顶部以下最近的标题元素
   onStop: () => {
-    const topVisibleHeading = minBy(docHeadingElements.value, (el: HTMLElement) => {
-      const { top } = useElementBounding(el);
-      const offsetTop = top.value - 100;
-      return offsetTop > 0 ? offsetTop : Infinity;
+    if (Date.now() < suppressScrollSpyUntil) return;
+    const container = detailWrapRef.value;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const threshold = 100;
+    // 选中最后一个顶部位于容器顶部 + threshold 之内的标题
+    const active = [...docHeadingElements.value].reverse().find((el: HTMLElement) => {
+      const rect = el.getBoundingClientRect();
+      // 折叠中的认证方式等隐藏标题，rect 尺寸为 0，不参与计算
+      if (rect.height === 0) return false;
+      return rect.top <= containerRect.top + threshold;
     });
-    activeDocHeadingId.value = topVisibleHeading?.id || '';
+    setActiveByScrollSpy(active?.id || '');
   },
+});
+
+const showApplyPermission = computed(() => {
+  return curTab?.value === 'gateway'
+    && Boolean(api?.verified_app_required && api?.resource_perm_required && api?.allow_apply_permission);
+});
+
+// 弃用状态：网关弃用时覆盖其下所有资源（展示网关的弃用说明），否则取资源自身
+const deprecation = computed(() => {
+  if (basics?.is_deprecated) {
+    return {
+      isDeprecated: true,
+      note: basics?.deprecated_note ?? '',
+    };
+  }
+  return {
+    isDeprecated: Boolean(api?.is_deprecated),
+    note: api?.deprecated_note ?? '',
+  };
 });
 
 const appVerifiedTooltips = computed(() => {
@@ -225,10 +343,11 @@ const userVerifiedTooltips = computed(() => {
   return '--';
 });
 
+// 文档内容变化后重新收集标题（用于右侧导航高亮）
 watch(
-  () => markdownHtml,
+  () => [markdownHtml, authMarkdownHtml],
   () => {
-    initMarkdownHtml('resMarkdown');
+    collectDocHeadings();
   },
 );
 
@@ -243,52 +362,39 @@ watch(
   },
 );
 
-const initMarkdownHtml = (box: string) => {
+const collectDocHeadings = () => {
   docHeadingElements.value = [];
   nextTick(() => {
-    const markdownDom = document.getElementById(box);
-    // 复制代码
-    markdownDom?.querySelectorAll('a')?.forEach((item) => {
-      item.target = '_blank';
-    });
-    markdownDom?.querySelectorAll('pre')?.forEach((item) => {
-      const parentDiv = document.createElement('div');
-      const btn = document.createElement('button');
-      const codeBox = document.createElement('div');
-      const code = item?.querySelector('code')?.innerText;
-      parentDiv.className = 'pre-wrapper';
-      btn.className = 'ag-copy-btn';
-      codeBox.className = 'code-box';
-      btn.innerHTML = '<span title="复制"><i class="apigateway-icon icon-ag-copy-info"></i></span>';
-      btn.setAttribute('data-copy', code ?? '');
-      parentDiv?.appendChild(btn);
-      const codeEl = item?.querySelector('code');
-      if (codeEl) codeBox?.appendChild(codeEl);
-      item?.appendChild(codeBox);
-      item?.parentNode?.replaceChild(parentDiv, item);
-      parentDiv?.appendChild(item);
-    });
     // 获取文档中的标题元素，它们的 id 以 doc-heading- 开头
-    docHeadingElements.value = Array.from(document.querySelectorAll('.target-detail [id^=doc-heading-]'));
-
-    setTimeout(() => {
-      const copyDoms = Array.from(document.getElementsByClassName('ag-copy-btn'));
-
-      const handleCopy = function (this: any) {
-        copy(this.dataset?.copy);
-      };
-
-      copyDoms.forEach((dom: any) => {
-        dom.onclick = handleCopy;
-      });
-    }, 1000);
+    docHeadingElements.value = Array.from(
+      detailWrapRef.value?.querySelectorAll<HTMLElement>('[id^=doc-heading-]') || [],
+    );
   });
 };
 
-const handleSdkInstructionClick = () => {
-  emit('show-sdk-instruction');
+// 事件委托：点击复制按钮时复制对应 pre 内的文本
+const handleCopyClick = (e: MouseEvent) => {
+  const btn = (e.target as HTMLElement).closest('.ag-copy-btn');
+  if (!btn) return;
+  const pre = btn.closest('.pre-wrapper')?.querySelector('pre');
+  if (pre) copy(pre.innerText);
 };
 
+onMounted(() => {
+  detailWrapRef.value?.addEventListener('click', handleCopyClick);
+});
+
+onUnmounted(() => {
+  detailWrapRef.value?.removeEventListener('click', handleCopyClick);
+});
+
+const handleGatewayDetailClick = () => {
+  emit('show-gateway-detail');
+};
+
+const handleApplyClick = () => {
+  emit('show-apply-permission');
+};
 </script>
 
 <style scoped lang="scss">
@@ -299,41 +405,67 @@ $code-color: #63656e;
 
 .content-wrap {
   display: flex;
+  height: 100%;
+  min-height: 0;
   align-items: flex-start;
 
   .target-detail {
-    height: calc(100vh - 144px);
+    height: 100%;
+    min-height: 0;
     padding-right: 8px;
     padding-left: 8px;
     overflow-y: scroll;
+    box-sizing: border-box;
     flex-grow: 1;
 
     .detail-header {
       margin-bottom: 16px;
 
-      .res-name {
+      .res-name-row {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        justify-content: space-between;
         margin-bottom: 4px;
+      }
+
+      .res-name-main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .res-name {
         font-size: 20px;
+        font-weight: 700;
         line-height: 28px;
         color: #313238;
       }
 
-      .res-header-footer {
+      .res-desc {
+        margin: 0;
+        font-size: 14px;
+        line-height: 22px;
+        color: #979ba5;
+      }
+
+      .res-header-actions {
         display: flex;
-        justify-content: space-between;
+        flex-shrink: 0;
+        gap: 8px;
         align-items: center;
+      }
 
-        .res-desc {
-          font-size: 14px;
-          line-height: 22px;
-          letter-spacing: 0;
-          color: #979ba5;
-        }
+      .gateway-detail-btn {
+        padding: 0 8px;
+      }
 
-        .res-sdk {
-          color: #3a84ff;
-          cursor: pointer;
-        }
+      .gateway-detail-icon {
+        margin-right: 4px;
+        font-size: 14px;
       }
     }
 
@@ -350,15 +482,9 @@ $code-color: #63656e;
 
       .res-basics {
         display: grid;
-        margin-bottom: 16px;
         grid-template-columns: 1fr 1fr;
         grid-template-rows: 40px 40px;
-
-        @container (width < 640px) {
-          padding-block: 12px;
-          grid-template-columns: 1fr;
-          grid-template-rows: 40px 40px 40px 40px;
-        }
+        margin-bottom: 16px;
 
         .basic-cell {
           display: flex;
@@ -376,6 +502,90 @@ $code-color: #63656e;
             border: none;
           }
         }
+
+        .perm-extra {
+          border-bottom: 1px dashed #979ba5;
+
+          &.is-link {
+            cursor: pointer;
+          }
+        }
+      }
+
+      .call-guide {
+        margin-bottom: 24px;
+
+        h3 {
+          margin: 0 0 12px;
+          font-size: 16px;
+          font-weight: 700;
+          line-height: 22px;
+          color: #313238;
+        }
+      }
+
+      .url-hero {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        min-height: 40px;
+        padding: 9px 12px;
+        margin-bottom: 0;
+        background: #f5f7fa;
+        border: 1px solid #dcdee5;
+        border-radius: 2px;
+      }
+
+      .method-badge {
+        flex-shrink: 0;
+        min-width: 56px;
+        padding: 2px 8px;
+        margin-top: 1px;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 20px;
+        color: #3a84ff;
+        text-align: center;
+        background: #e1ecff;
+        border-radius: 2px;
+
+        &.GET {
+          color: #14a568;
+          background: #e4f5e9;
+        }
+
+        &.POST {
+          color: #3a84ff;
+          background: #e1ecff;
+        }
+
+        &.PUT,
+        &.PATCH {
+          color: #e38b02;
+          background: #fff3e0;
+        }
+
+        &.DELETE {
+          color: #ea3636;
+          background: #feebea;
+        }
+      }
+
+      .url-text {
+        flex: 1;
+        min-width: 0;
+        font-family: "Lucida Console", "Courier New", Monaco, monospace;
+        font-size: 13px;
+        line-height: 22px;
+        color: #313238;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+        white-space: normal;
+      }
+
+      .url-copy {
+        flex-shrink: 0;
+        margin-top: 3px;
       }
     }
 

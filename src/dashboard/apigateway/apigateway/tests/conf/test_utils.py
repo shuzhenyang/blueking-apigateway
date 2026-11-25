@@ -20,6 +20,7 @@
 from environ import Env
 
 from apigateway.conf.utils import (
+    get_cli_function_overview,
     get_default_feature_flags,
     get_doc_links,
     get_frontend_env_vars,
@@ -31,6 +32,14 @@ def test_get_plugin_metadata_config_uses_local_concurrency_policy():
     config = get_plugin_metadata_config(Env())
 
     assert config["bk-concurrency-limit"]["policy"] == "local"
+
+
+def test_get_plugin_metadata_config_includes_request_size_fields():
+    log_format = get_plugin_metadata_config(Env())["file-logger"]["log_format"]
+
+    assert log_format["request_size"] == "$request_length"
+    assert log_format["content_length"] == "$content_length"
+    assert log_format["response_size"] == "$body_bytes_sent"
 
 
 def test_get_default_feature_flags_mcp_server_oauth2_personal_client(monkeypatch):
@@ -76,6 +85,36 @@ def test_get_frontend_env_vars_includes_paas_developer_center_link(monkeypatch):
     assert env_vars["PAAS_DEVELOPER_CENTER_LINK"] == "https://paas.example.com/developer-center"
     assert env_vars["PAAS_APP_CREATE_LINK"] == "https://paas.example.com/developer-center/app/create"
     assert env_vars["BK_USER_PERSONAL_CENTER_LINK"] == "https://user.example.com/personal-center"
+
+
+def test_get_cli_function_overview_includes_developer_center():
+    overview = get_cli_function_overview("ZH")
+
+    assert [item["service"] for item in overview] == [
+        "API 网关",
+        "监控平台",
+        "AIDev",
+        "配置平台",
+        "作业平台",
+        "标准运维",
+        "节点管理",
+        "开发者中心",
+    ]
+
+
+def test_get_cli_function_overview_english():
+    overview = get_cli_function_overview("EN")
+
+    assert [item["service"] for item in overview] == [
+        "API Gateway",
+        "Monitor",
+        "AIDev",
+        "CMDB",
+        "Job",
+        "SOPS",
+        "NodeMan",
+        "Developer Center",
+    ]
 
 
 def test_get_doc_links_includes_personal_token():

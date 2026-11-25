@@ -25,6 +25,7 @@ from apigateway.apps.audit.models import AuditEventLog
 from apigateway.apps.mcp_server.constants import (
     FEATURED_MCP_CATEGORY_NAME,
     OFFICIAL_MCP_CATEGORY_NAME,
+    UNCATEGORIZED_MCP_CATEGORY_NAME,
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerExtendTypeEnum,
     MCPServerStatusEnum,
@@ -429,16 +430,35 @@ class TestMCPMarketplaceServerListApi:
         assert mcp_server_data is not None
         assert mcp_server_data["prompts_count"] == 3
 
-    def test_list_with_keyword(self, request_view, fake_public_mcp_server):
-        """测试带关键词过滤"""
-        resp = request_view(
-            method="GET",
-            view_name="mcp_marketplace.server.list",
-            data={"keyword": fake_public_mcp_server.name[:5]},
+    @pytest.mark.parametrize(
+        "field, keyword, matched",
+        [
+            ("name", "needle", True),
+            ("title", "needle", True),
+            ("description", "needle", True),
+            ("_labels", "needle", True),
+            ("name", "absent", False),
+        ],
+    )
+    def test_list_with_keyword(self, request_view, fake_public_mcp_server, field, keyword, matched):
+        value = json.dumps(["needle"]) if field == "_labels" else "needle"
+        MCPServer.objects.filter(id=fake_public_mcp_server.id).update(**{field: value})
+        G(
+            MCPServer,
+            gateway=fake_public_mcp_server.gateway,
+            stage=fake_public_mcp_server.stage,
+            name="unmatched",
+            title="other",
+            description="other",
+            _labels="[]",
+            status=MCPServerStatusEnum.ACTIVE.value,
+            is_public=True,
         )
-        result = resp.json()
-
-        assert resp.status_code == 200
+        response = request_view(method="GET", view_name="mcp_marketplace.server.list", data={"keyword": keyword})
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert {item["id"] for item in data["results"]} == ({fake_public_mcp_server.id} if matched else set())
+        assert data["count"] == int(matched)
 
 
 class TestMCPMarketplaceServerRetrieveApi:
@@ -1068,6 +1088,93 @@ class TestMCPMarketplaceCategoryListApi:
         # 只统计公开的
         assert official_category["mcp_server_count"] == 1
 
+    def test_list_categories_uncategorized_count(self, request_view, fake_categories, fake_public_mcp_server):
+        """测试未分类统计没有任何启用常规分类的 MCPServer，并与按未分类筛选的列表数量一致"""
+        uncategorized_category = G(
+            MCPServerCategory,
+            name=UNCATEGORIZED_MCP_CATEGORY_NAME,
+            display_name="未分类",
+            sort_order=0,
+            is_active=True,
+        )
+        # fake_public_mcp_server 没有任何分类；其余 server 分别只有官方、只有停用分类、显式未分类、常规分类
+        for categories in [
+            [fake_categories["official"]],
+            [fake_categories["inactive"]],
+            [uncategorized_category],
+            [uncategorized_category, fake_categories["devops"]],
+            [fake_categories["official"], fake_categories["devops"]],
+        ]:
+            server = G(
+                MCPServer,
+                gateway=fake_public_mcp_server.gateway,
+                stage=fake_public_mcp_server.stage,
+                status=MCPServerStatusEnum.ACTIVE.value,
+                is_public=True,
+            )
+            server.categories.add(*categories)
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        category_counts = {cat["name"]: cat["mcp_server_count"] for cat in result["data"]}
+        assert category_counts[UNCATEGORIZED_MCP_CATEGORY_NAME] == 4
+        assert category_counts["DevOps"] == 2
+        assert category_counts[OFFICIAL_MCP_CATEGORY_NAME] == 2
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.server.list",
+            data={"categories": UNCATEGORIZED_MCP_CATEGORY_NAME},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"]["count"] == 4
+
+        # 筛选官方时，未分类只统计官方中没有常规分类的 MCPServer
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"categories": OFFICIAL_MCP_CATEGORY_NAME},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        category_counts = {cat["name"]: cat["mcp_server_count"] for cat in result["data"]}
+        assert category_counts[UNCATEGORIZED_MCP_CATEGORY_NAME] == 1
+        assert category_counts["DevOps"] == 1
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.server.list",
+            data={"categories": f"{UNCATEGORIZED_MCP_CATEGORY_NAME},{OFFICIAL_MCP_CATEGORY_NAME}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"]["count"] == 1
+
+    def test_list_categories_with_multiple_special_categories(
+        self, request_view, fake_categories, fake_public_mcp_server
+    ):
+        """测试同时筛选官方和精选时，分类统计与列表结果一致"""
+        featured_category = G(MCPServerCategory, name=FEATURED_MCP_CATEGORY_NAME, sort_order=2, is_active=True)
+        fake_public_mcp_server.categories.add(
+            fake_categories["official"], featured_category, fake_categories["devops"]
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="mcp_marketplace.category.list",
+            data={"categories": f"{OFFICIAL_MCP_CATEGORY_NAME},{FEATURED_MCP_CATEGORY_NAME}"},
+        )
+        result = resp.json()
+        assert resp.status_code == 200
+        devops_category = next(
+            (cat for cat in result["data"] if cat["name"] == "DevOps"),
+            None,
+        )
+        assert devops_category["mcp_server_count"] == 1
+
 
 class TestMCPServerCategoryModel:
     """测试 MCPServerCategory 模型"""
@@ -1081,16 +1188,6 @@ class TestMCPServerCategoryModel:
         """测试 MCPServer 分类相关方法"""
         # 添加分类
         fake_public_mcp_server.categories.add(fake_categories["official"], fake_categories["devops"])
-
-        # 测试获取分类名称
-        category_names = fake_public_mcp_server.get_category_names()
-        assert OFFICIAL_MCP_CATEGORY_NAME in category_names
-        assert "DevOps" in category_names
-
-        # 测试获取分类显示名称
-        display_names = fake_public_mcp_server.get_category_display_names()
-        assert "官方" in display_names
-        assert "运维工具" in display_names
 
         # 测试是否为官方
         assert fake_public_mcp_server.is_official() is True
@@ -1381,37 +1478,3 @@ class TestMCPMarketplaceServerAppPermissionApplyCreateApi:
             ).count()
             == 1
         )
-
-
-class TestMCPMarketplaceApplicableAppListApi:
-    def test_list_passes_user_tenant_id_to_paas_component(self, mocker, request_view, settings):
-        settings.ENABLE_MULTI_TENANT_MODE = True
-
-        user = mocker.MagicMock(username="alice", tenant_id="tenant-a")
-        mock_get_apps = mocker.patch(
-            "apigateway.apis.web.mcp_marketplace.views.get_paas_apps_by_username",
-            return_value=[
-                {
-                    "code": "app-001",
-                    "name": "App 001",
-                    "logo_url": "https://example.com/logo.png",
-                }
-            ],
-        )
-
-        resp = request_view(
-            method="GET",
-            view_name="mcp_marketplace.applicable_apps",
-            user=user,
-        )
-
-        result = resp.json()
-        assert resp.status_code == 200
-        assert result["data"] == [
-            {
-                "bk_app_code": "app-001",
-                "name": "App 001",
-                "logo_url": "https://example.com/logo.png",
-            }
-        ]
-        mock_get_apps.assert_called_once_with("alice", "tenant-a")

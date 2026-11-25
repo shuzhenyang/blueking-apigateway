@@ -227,12 +227,89 @@ class TestResourceListCreateApi:
         assert resp.status_code == 200
         assert len(result["data"]["results"]) == expected
         resources = {resource["id"]: resource for resource in result["data"]["results"]}
+        for resource in resources.values():
+            assert {"auth_type", "oauth2_app_delegated_enabled"}.isdisjoint(resource["auth_config"])
         if resource_1.id in resources:
             assert resources[resource_1.id]["auth_config"]["oauth2_public_client_enabled"] is True
             assert resources[resource_1.id]["auth_config"]["oauth2_personal_client_enabled"] is False
+            assert resources[resource_1.id]["auth_config"]["auth_verified_required"] is True
         if resource_2.id in resources:
             assert resources[resource_2.id]["auth_config"]["oauth2_public_client_enabled"] is False
             assert resources[resource_2.id]["auth_config"]["oauth2_personal_client_enabled"] is True
+            assert resources[resource_2.id]["auth_config"]["auth_verified_required"] is False
+
+    @pytest.mark.parametrize(
+        "query, expected_names, expected_count",
+        [
+            ({"auth_type": "none"}, ["none"], 1),
+            ({"auth_type": "app"}, ["app"], 1),
+            ({"auth_type": "personal"}, ["all_user_methods", "personal"], 2),
+            ({"auth_type": "public"}, ["all_user_methods", "public"], 2),
+            ({"auth_type": "oauth"}, ["all_user_methods", "oauth"], 2),
+            ({"auth_type": "personal,public"}, ["all_user_methods", "personal", "public"], 3),
+            ({"auth_type": "personal,public", "limit": 1, "offset": 1}, ["personal"], 3),
+            ({"auth_type": "app,oauth", "keyword": "oauth"}, ["oauth"], 1),
+            (
+                {"auth_type": ""},
+                ["all_user_methods", "app", "legacy", "none", "oauth", "personal", "public", "user"],
+                8,
+            ),
+        ],
+    )
+    def test_list_filter_by_auth_type(
+        self, request_view, fake_gateway, fake_backend, query, expected_names, expected_count
+    ):
+        auth_context = ResourceAuthContext()
+        for name, user, app, personal, public in [
+            ("none", False, False, False, False),
+            ("app", False, True, True, True),
+            ("user", True, False, False, False),
+            ("personal", True, False, True, False),
+            ("public", True, False, False, True),
+            ("oauth", True, True, False, False),
+            ("all_user_methods", True, True, True, True),
+            ("legacy", None, None, False, False),
+        ]:
+            resource = G(
+                Resource,
+                gateway=fake_gateway,
+                name=name,
+                path=f"/{name}/",
+                oauth2_personal_client_enabled=personal,
+                oauth2_public_client_enabled=public,
+            )
+            G(Proxy, resource=resource, backend=fake_backend)
+            if user is not None:
+                auth_context.save(
+                    resource.id,
+                    dict(
+                        ResourceHandler.get_default_auth_config(),
+                        auth_verified_required=user,
+                        app_verified_required=app,
+                    ),
+                )
+
+        response = request_view(
+            method="GET",
+            view_name="resource.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            data={"order_by": "name", **query},
+        )
+
+        assert response.status_code == 200, response.json()
+        result = response.json()["data"]
+        assert result["count"] == expected_count
+        assert [resource["name"] for resource in result["results"]] == expected_names
+
+    def test_list_rejects_invalid_auth_type(self, request_view, fake_gateway):
+        response = request_view(
+            method="GET",
+            view_name="resource.list_create",
+            path_params={"gateway_id": fake_gateway.id},
+            data={"auth_type": "app,invalid"},
+        )
+
+        assert response.status_code == 400
 
     @pytest.mark.parametrize(
         "data",
@@ -467,6 +544,8 @@ class TestResourceRetrieveUpdateDestroyApi:
         assert result["data"]["id"] == fake_resource.id
         assert result["data"]["auth_config"]["oauth2_public_client_enabled"] is True
         assert result["data"]["auth_config"]["oauth2_personal_client_enabled"] is True
+        assert result["data"]["auth_config"]["auth_verified_required"] is True
+        assert {"auth_type", "oauth2_app_delegated_enabled"}.isdisjoint(result["data"]["auth_config"])
 
     def test_retrieve_with_released_stages(self, fake_resource, request_view):
         fake_gateway = fake_resource.gateway
@@ -614,6 +693,99 @@ class TestResourceRetrieveUpdateDestroyApi:
         fake_resource.refresh_from_db()
         assert fake_resource.oauth2_public_client_enabled is True
 
+    def test_update_preserves_omitted_auth_and_public_settings(self, request_view, fake_resource):
+        self._prepare_update_target(fake_resource)
+        ResourceAuthContext().save(
+            fake_resource.id,
+            {
+                "skip_auth_verification": False,
+                "auth_verified_required": True,
+                "app_verified_required": False,
+                "resource_perm_required": False,
+            },
+        )
+        Resource.objects.filter(id=fake_resource.id).update(is_public=False, allow_apply_permission=False)
+        fake_resource.refresh_from_db()
+        data = self._make_update_data(fake_resource, {})
+        data["description"] = "changed"
+        data.pop("is_public")
+        data.pop("allow_apply_permission")
+
+        response = request_view(
+            method="PUT",
+            view_name="resource.retrieve_update_destroy",
+            path_params={"gateway_id": fake_resource.gateway_id, "id": fake_resource.id},
+            data=data,
+        )
+
+        assert response.status_code == 204, response.json()
+        auth_config = ResourceAuthContext().get_config(fake_resource.id)
+        assert auth_config["auth_verified_required"] is True
+        assert auth_config["app_verified_required"] is False
+        assert auth_config["resource_perm_required"] is False
+        fake_resource.refresh_from_db()
+        assert fake_resource.description == "changed"
+        assert fake_resource.is_public is False
+        assert fake_resource.allow_apply_permission is False
+
+    def test_update_normalizes_auth_hierarchy_and_ignores_derived_fields(self, request_view, fake_resource):
+        self._prepare_update_target(fake_resource)
+        data = self._make_update_data(
+            fake_resource,
+            {
+                "auth_type": "none",
+                "oauth2_app_delegated_enabled": True,
+                "auth_verified_required": True,
+                "app_verified_required": False,
+                "resource_perm_required": True,
+            },
+        )
+        data["is_public"] = True
+        data["allow_apply_permission"] = True
+
+        response = request_view(
+            method="PUT",
+            view_name="resource.retrieve_update_destroy",
+            path_params={"gateway_id": fake_resource.gateway_id, "id": fake_resource.id},
+            data=data,
+        )
+
+        assert response.status_code == 204, response.json()
+        assert ResourceAuthContext().get_config(fake_resource.id) == {
+            "skip_auth_verification": False,
+            "auth_verified_required": True,
+            "app_verified_required": False,
+            "resource_perm_required": False,
+        }
+        fake_resource.refresh_from_db()
+        assert fake_resource.is_public is True
+        assert fake_resource.allow_apply_permission is False
+
+    def test_update_normalizes_unchanged_legacy_auth_settings(self, request_view, fake_resource):
+        self._prepare_update_target(fake_resource)
+        auth_config = {
+            "skip_auth_verification": False,
+            "auth_verified_required": True,
+            "app_verified_required": False,
+            "resource_perm_required": True,
+        }
+        ResourceAuthContext().save(fake_resource.id, auth_config)
+        fake_resource.is_public = True
+        fake_resource.allow_apply_permission = True
+        fake_resource.save(update_fields=["is_public", "allow_apply_permission"])
+
+        response = request_view(
+            method="PUT",
+            view_name="resource.retrieve_update_destroy",
+            path_params={"gateway_id": fake_resource.gateway_id, "id": fake_resource.id},
+            data=self._make_update_data(fake_resource, auth_config),
+        )
+
+        assert response.status_code == 204, response.json()
+        assert ResourceAuthContext().get_config(fake_resource.id)["resource_perm_required"] is False
+        fake_resource.refresh_from_db()
+        assert fake_resource.allow_apply_permission is False
+
     def test_destroy(self, request_view, fake_resource):
         fake_gateway = fake_resource.gateway
 
@@ -721,6 +893,47 @@ class TestResourceBatchUpdateDestroyApi:
         resource = Resource.objects.get(id=fake_resource.id)
         assert resource.is_public == data["is_public"]
         assert resource.allow_apply_permission == data["allow_apply_permission"]
+
+    def test_update_writes_allow_apply_permission_only_for_resources_checking_permission(
+        self, mocker, request_view, fake_resource, fake_resource1
+    ):
+        ResourceHandler.save_auth_config(fake_resource1.id, {"resource_perm_required": False})
+        mock_record = mocker.patch("apigateway.apis.web.resource.views.Auditor.record_resource_op_success")
+
+        resp = request_view(
+            method="PUT",
+            view_name="resource.batch_update_destroy",
+            path_params={"gateway_id": fake_resource.gateway.id},
+            data={
+                "ids": [fake_resource.id, fake_resource1.id],
+                "is_public": True,
+                "allow_apply_permission": True,
+            },
+        )
+
+        assert resp.status_code == 204
+        assert Resource.objects.get(id=fake_resource.id).allow_apply_permission is True
+        assert Resource.objects.get(id=fake_resource1.id).allow_apply_permission is False
+        assert Resource.objects.get(id=fake_resource1.id).is_public is True
+        data_after = mock_record.call_args.kwargs["data_after"]
+        assert data_after["allow_apply_permission"] is True
+        assert data_after["allow_apply_permission_result"] == {
+            "true": [fake_resource.id],
+            "false": [fake_resource1.id],
+        }
+
+    def test_update_disables_allow_apply_permission_when_not_public(self, request_view, fake_resource):
+        resp = request_view(
+            method="PUT",
+            view_name="resource.batch_update_destroy",
+            path_params={"gateway_id": fake_resource.gateway.id},
+            data={"ids": [fake_resource.id], "is_public": False, "allow_apply_permission": True},
+        )
+
+        assert resp.status_code == 204
+        resource = Resource.objects.get(id=fake_resource.id)
+        assert resource.is_public is False
+        assert resource.allow_apply_permission is False
 
     def test_update_bumps_updated_time(self, request_view, fake_resource):
         stale_updated_time = timezone.now() - timedelta(minutes=5)
@@ -1183,6 +1396,8 @@ class TestResourceImportCheckApi:
         result = resp.json()
 
         assert resp.status_code == 200
+        for item in expected:
+            item.update(is_deprecated=False, deprecated_note="")
         assert result["data"] == expected
 
     def test_post_ai_resource(self, request_view, fake_gateway):

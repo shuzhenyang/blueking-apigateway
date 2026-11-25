@@ -31,8 +31,10 @@ from apigateway.apps.mcp_server.constants import (
     MCPServerStatusEnum,
 )
 from apigateway.apps.permission.constants import (
+    FORMATTED_TO_DB_GRANT_DIMENSION,
     FormattedGrantDimensionEnum,
     GrantDimensionEnum,
+    GrantTypeEnum,
     PermissionApplyExpireDaysEnum,
 )
 from apigateway.biz.constants import BK_USERNAME_PATTERN
@@ -54,7 +56,7 @@ from apigateway.service.utils import get_resource_url
 
 def _get_mcp_server_url_from_context(context, obj) -> str:
     least_privileges = context.get("least_privileges", {})
-    least_privilege = least_privileges.get((obj.gateway.id, obj.stage.id), "")
+    least_privilege = least_privileges.get(obj.id, "")
     return MCPServerHandler.get_mcp_server_url(obj, least_privilege)
 
 
@@ -103,6 +105,7 @@ class GatewayLookupInputSLZ(serializers.Serializer):
 class GatewayListOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
+    display_name = SerializerTranslatedField(default_field="display_name_or_name", read_only=True)
     description = SerializerTranslatedField(default_field="description_i18n", allow_blank=True, read_only=True)
     maintainers = serializers.SerializerMethodField()
     doc_maintainers = serializers.SerializerMethodField()
@@ -124,6 +127,7 @@ class GatewayListOutputSLZ(serializers.Serializer):
 class GatewayRetrieveOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
+    display_name = SerializerTranslatedField(default_field="display_name_or_name", read_only=True)
     description = SerializerTranslatedField(default_field="description_i18n", allow_blank=True, read_only=True)
     maintainers = serializers.SerializerMethodField()
     doc_maintainers = serializers.SerializerMethodField()
@@ -177,9 +181,7 @@ class GatewayAppPermissionApplyInputSLZ(serializers.Serializer):
 
     def validate_grant_dimension(self, value: str) -> str:
         """将 gateway 映射为 api（PermissionDimensionManager 使用 GrantDimensionEnum 值）"""
-        if value == FormattedGrantDimensionEnum.GATEWAY.value:
-            return GrantDimensionEnum.API.value
-        return value
+        return FORMATTED_TO_DB_GRANT_DIMENSION.get(value, value)
 
     def validate_target_app_code(self, value):
         request = self.context["request"]
@@ -242,6 +244,48 @@ class GatewayAppPermissionApplyOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.GatewayAppPermissionApplyOutputSLZ"
+
+
+class CurrentAppPermissionListInputSLZ(serializers.Serializer):
+    GRANT_DIMENSION_CHOICES = [
+        (FormattedGrantDimensionEnum.GATEWAY.value, "网关"),
+        (FormattedGrantDimensionEnum.RESOURCE.value, "资源"),
+    ]
+
+    grant_dimension = serializers.ChoiceField(choices=GRANT_DIMENSION_CHOICES, help_text="授权维度")
+    gateway_name = serializers.CharField(required=False, allow_blank=True, help_text="网关名称，精确匹配")
+    resource_name = serializers.CharField(
+        required=False, allow_blank=True, help_text="资源名称，精确匹配，仅按资源维度查询时生效"
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.open.serializers.CurrentAppPermissionListInputSLZ"
+
+    def validate_grant_dimension(self, value: str) -> str:
+        """将 gateway 映射为 api（PermissionDimensionManager 使用 GrantDimensionEnum 值）"""
+        return FORMATTED_TO_DB_GRANT_DIMENSION[value]
+
+
+class GatewayAppPermissionListInputSLZ(CurrentAppPermissionListInputSLZ):
+    target_app_code = serializers.CharField(required=True, validators=[BKAppCodeValidator()], help_text="蓝鲸应用 ID")
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.open.serializers.GatewayAppPermissionListInputSLZ"
+
+
+class AppPermissionListOutputSLZ(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    bk_app_code = serializers.CharField(read_only=True, help_text="蓝鲸应用 ID")
+    gateway_name = serializers.CharField(source="gateway.name", read_only=True, help_text="网关名称")
+    resource_name = serializers.SerializerMethodField(help_text="资源名称，按网关维度查询时为空")
+    expires = serializers.DateTimeField(read_only=True, help_text="过期时间")
+    grant_type = serializers.ChoiceField(read_only=True, choices=GrantTypeEnum.get_choices(), help_text="授权类型")
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.open.serializers.AppPermissionListOutputSLZ"
+
+    def get_resource_name(self, obj) -> str:
+        return self.context.get("resource_names", {}).get(getattr(obj, "resource_id", None), "")
 
 
 class MCPServerListInputSLZ(serializers.Serializer):
@@ -421,6 +465,12 @@ class MCPServerAppPermissionRecordListInputSLZ(serializers.Serializer):
     bk_app_code = serializers.CharField(required=True, validators=[BKAppCodeValidator()], help_text="蓝鲸应用 ID")
     mcp_server_id = serializers.IntegerField(required=False, allow_null=True, help_text="MCPServer ID")
     record_id = serializers.IntegerField(required=False, allow_null=True, help_text="申请记录 ID")
+    status = serializers.ChoiceField(
+        choices=MCPServerAppPermissionApplyStatusEnum.get_choices(),
+        allow_blank=True,
+        required=False,
+        help_text="审批状态",
+    )
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.MCPServerAppPermissionRecordListInputSLZ"
@@ -497,13 +547,13 @@ class UserMCPServerListOutputSLZ(MCPServerBaseOutputSLZ):
     least_privilege = serializers.SerializerMethodField(help_text="最低权限")
 
     def get_application_url(self, obj) -> str:
-        least_privilege = self.context["least_privileges"].get((obj.gateway.id, obj.stage.id))
+        least_privilege = self.context["least_privileges"].get(obj.id)
         if least_privilege == MCPServerLeastPrivilegeEnum.APPLICATION.value:
             return build_mcp_server_application_url(obj.name, obj.protocol_type)
         return ""
 
     def get_least_privilege(self, obj) -> str:
-        return self.context["least_privileges"].get((obj.gateway.id, obj.stage.id), "")
+        return self.context["least_privileges"].get(obj.id, "")
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.UserMCPServerListOutputSLZ"
@@ -546,6 +596,10 @@ class GatewayResourceListOutputSLZ(serializers.Serializer):
     labels = serializers.SerializerMethodField(help_text="标签列表")
     auth_config = serializers.SerializerMethodField(help_text="认证配置")
 
+    is_deprecated = serializers.BooleanField(default=False, read_only=True, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, read_only=True, help_text="弃用说明")
+    has_openapi_schema = serializers.SerializerMethodField(help_text="是否已声明请求参数")
+
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.GatewayResourceListOutputSLZ"
 
@@ -556,6 +610,10 @@ class GatewayResourceListOutputSLZ(serializers.Serializer):
     def get_labels(self, obj):
         """获取标签列表"""
         return self.context.get("labels", {}).get(obj.id, [])
+
+    def get_has_openapi_schema(self, obj) -> bool:
+        """是否已声明请求参数，包括声明无请求参数"""
+        return obj.id in self.context.get("resource_ids_with_openapi_schema", set())
 
     def get_auth_config(self, obj):
         """获取认证配置"""
@@ -603,8 +661,12 @@ class GatewayResourceDetailOutputSLZ(serializers.Serializer):
     enable_websocket = serializers.BooleanField(read_only=True, help_text="是否启用 WebSocket")
     is_public = serializers.BooleanField(read_only=True, help_text="是否公开")
     schema = serializers.DictField(read_only=True, help_text="资源的 OpenAPI Schema 定义")
+    has_openapi_schema = serializers.BooleanField(read_only=True, help_text="是否已声明请求参数")
     doc = serializers.DictField(read_only=True, help_text="资源文档信息", allow_null=True)
     auth_config = AuthConfigOutputSLZ(read_only=True, help_text="认证配置")
+
+    is_deprecated = serializers.BooleanField(default=False, read_only=True, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, read_only=True, help_text="弃用说明")
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.GatewayResourceDetailOutputSLZ"
@@ -814,6 +876,11 @@ class GatewayResourceListInputSLZ(serializers.Serializer):
     keyword = serializers.CharField(
         required=False, allow_blank=True, help_text="搜索关键字，模糊匹配资源 name、description 或标签名称"
     )
+    has_openapi_schema = serializers.BooleanField(
+        required=False,
+        allow_null=True,
+        help_text="按是否已声明请求参数过滤，包括声明无请求参数；不传则不过滤",
+    )
     fields = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -835,6 +902,9 @@ class GatewayReleasedResourceOutputSLZ(serializers.Serializer):
     method = serializers.CharField(read_only=True)
     path = serializers.CharField(read_only=True)
     schema = serializers.DictField(read_only=True, help_text="参数协议")
+
+    is_deprecated = serializers.BooleanField(default=False, read_only=True, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, read_only=True, help_text="弃用说明")
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.GatewayReleasedResourceOutputSLZ"
@@ -858,6 +928,9 @@ class GatewayReleasedResourceListItemOutputSLZ(serializers.Serializer):
     user_verified_required = serializers.BooleanField(read_only=True)
     oauth2_public_client_enabled = serializers.BooleanField(read_only=True)
     oauth2_personal_client_enabled = serializers.BooleanField(read_only=True)
+
+    is_deprecated = serializers.BooleanField(default=False, read_only=True, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, read_only=True, help_text="弃用说明")
 
     class Meta:
         ref_name = "apigateway.apis.v2.open.serializers.GatewayReleasedResourceListItemOutputSLZ"

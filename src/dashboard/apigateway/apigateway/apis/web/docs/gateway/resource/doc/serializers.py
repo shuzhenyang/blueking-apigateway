@@ -29,7 +29,14 @@ class DocInputSLZ(serializers.Serializer):
 class DocOutputSLZ(serializers.Serializer):
     type = serializers.CharField(help_text="文档类型，如 markdown")
     content = serializers.CharField(help_text="文档内容")
+    method = serializers.CharField(help_text="请求方法")
+    resource_url = serializers.CharField(help_text="完整调用地址")
+    auth_content = serializers.CharField(allow_blank=True, help_text="认证说明，Markdown 格式")
+    body_content = serializers.CharField(allow_blank=True, help_text="文档正文，Markdown 格式")
     updated_time = serializers.DateTimeField(help_text="文档更新时间")
+
+    is_deprecated = serializers.BooleanField(default=False, read_only=True, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, read_only=True, help_text="弃用说明")
 
     class Meta:
         ref_name = "apigateway.apis.web.docs.gateway.resource.doc.serializers.DocOutputSLZ"

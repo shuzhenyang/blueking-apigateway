@@ -18,6 +18,7 @@
 #
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from ddf import G
@@ -26,21 +27,25 @@ from django.conf import settings
 from apigateway.apps.audit.constants import OpObjectTypeEnum, OpTypeEnum
 from apigateway.apps.audit.models import AuditEventLog
 from apigateway.apps.data_plane.models import DataPlane
+from apigateway.apps.label.models import APILabel, ResourceLabel
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermission, MCPServerCategory
 from apigateway.apps.openapi.models import OpenAPIFileResourceSchemaVersion
 from apigateway.apps.permission.constants import (
     OAUTH2_PERSONAL_CLIENT_APP_CODE,
     OAUTH2_PUBLIC_CLIENT_APP_CODE,
+    GrantTypeEnum,
 )
 from apigateway.apps.permission.models import AppGatewayPermission, AppResourcePermission
 from apigateway.biz.gateway import GatewayHandler
-from apigateway.core.constants import BackendKindEnum, GatewayKindEnum, ResourceKindEnum
+from apigateway.core.constants import BackendKindEnum, GatewayKindEnum, GatewayTypeEnum, ResourceKindEnum
 from apigateway.core.models import (
     Backend,
     BackendConfig,
     Gateway,
     GatewayRelatedApp,
     Proxy,
+    Release,
+    ReleasedResource,
     Resource,
     ResourceVersion,
     Stage,
@@ -75,6 +80,52 @@ def _model_backend(name="openai-primary"):
 
 
 class TestSyncApi:
+    @pytest.mark.parametrize("tags", [["a_bc"], ["a-bc", "a_bc"]])
+    def test_resource_sync_preserves_unused_label_with_different_separator(
+        self, request_view, fake_gateway, disable_app_permission, tags
+    ):
+        G(Backend, gateway=fake_gateway, name="default")
+        old_label = G(APILabel, gateway=fake_gateway, name="a-bc")
+        old_resource = G(Resource, gateway=fake_gateway)
+        G(ResourceLabel, resource=old_resource, api_label=old_label)
+        old_resource.delete()
+        assert APILabel.objects.filter(id=old_label.id).exists()
+        assert not ResourceLabel.objects.filter(api_label=old_label).exists()
+
+        openapi = {
+            "swagger": "2.0",
+            "basePath": "/",
+            "info": {"version": "0.2", "title": "API Gateway Swagger"},
+            "paths": {
+                "/users": {
+                    "get": {
+                        "operationId": "get_users",
+                        "tags": tags,
+                        "x-bk-apigateway-resource": {
+                            "backend": {"name": "default", "type": "HTTP", "method": "get", "path": "/users"}
+                        },
+                    }
+                }
+            },
+        }
+
+        response = request_view(
+            method="POST",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.resources.sync",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"content": json.dumps(openapi), "delete": True},
+        )
+
+        assert response.status_code == 200, response.json()
+        resource = Resource.objects.get(gateway=fake_gateway, name="get_users")
+        assert response.json()["data"]["added"] == [{"id": resource.id}]
+        assert set(APILabel.objects.filter(gateway=fake_gateway).values_list("name", flat=True)) == {"a-bc", "a_bc"}
+        assert APILabel.objects.get(gateway=fake_gateway, name="a-bc").id == old_label.id
+        assert set(ResourceLabel.objects.filter(resource=resource).values_list("api_label__name", flat=True)) == set(
+            tags
+        )
+
     def test_resource_sync_updates_and_resets_oauth2_client_settings(
         self, request_view, fake_gateway, disable_app_permission
     ):
@@ -297,25 +348,53 @@ class TestSyncApi:
         assert response.status_code == 400
         assert not Resource.objects.filter(gateway=fake_gateway, name="chat").exists()
 
-    def test_stage_sync_ai_gateway_with_ai_backends_only(self, request_view, fake_gateway, disable_app_permission):
+    @pytest.mark.parametrize("with_backup", [False, True])
+    def test_stage_sync_ai_gateway_with_ai_backends_only(
+        self, request_view, fake_gateway, disable_app_permission, with_backup
+    ):
         fake_gateway.kind = GatewayKindEnum.AI.value
         fake_gateway.save()
 
+        model_backend = _model_backend()
+        if with_backup:
+            model_backend["config"]["instances"].append(
+                {
+                    "name": "backup",
+                    "priority": 0,
+                    "provider": "openai",
+                    "auth": {"header": {"Authorization": "Bearer backup-secret"}},
+                }
+            )
         resp = request_view(
             method="POST",
             gateway=fake_gateway,
             view_name="openapi.v2.sync.gateway.stages.sync",
             path_params={"gateway_name": fake_gateway.name},
-            data={"name": "prod", "description": "desc", "vars": {}, "ai_backends": [_model_backend()]},
+            data={"name": "prod", "description": "desc", "vars": {}, "ai_backends": [model_backend]},
         )
 
         assert resp.status_code == 200, resp.json()
         backend = Backend.objects.get(gateway=fake_gateway, name="openai-primary")
         assert backend.kind == BackendKindEnum.AI.value
         backend_config = BackendConfig.objects.get(backend=backend, stage__name="prod")
-        assert backend_config.config["instances"][0]["auth"]["header"]["Authorization"] == "Bearer secret"
-        assert backend_config.config["instances"][0]["weight"] == 0
+        primary = next(item for item in backend_config.config["instances"] if item["name"] == "primary")
+        assert primary["auth"]["header"]["Authorization"] == "Bearer secret"
+        assert primary["weight"] == (1 if with_backup else 0)
         assert "options" not in backend_config.config["instances"][0]
+
+        if with_backup:
+            assert backend_config.config["fallback_strategy"] == ["http_429", "http_5xx"]
+            model_backend["config"]["instances"].pop()
+            updated = request_view(
+                method="POST",
+                gateway=fake_gateway,
+                view_name="openapi.v2.sync.gateway.stages.sync",
+                path_params={"gateway_name": fake_gateway.name},
+                data={"name": "prod", "description": "desc", "vars": {}, "ai_backends": [model_backend]},
+            )
+            assert updated.status_code == 200, updated.json()
+            backend_config.refresh_from_db()
+            assert len(backend_config.config["instances"]) == 1
 
     def test_stage_sync_normal_gateway_rejects_ai_backends(self, request_view, fake_gateway, disable_app_permission):
         resp = request_view(
@@ -541,6 +620,165 @@ class TestSyncApi:
         assert response.status_code == 200, response.json()
         assert response.json()["data"]["kind"] == "ai"
         assert Gateway.objects.get(name=gateway_name).kind == GatewayKindEnum.AI.value
+
+    @pytest.mark.parametrize(
+        ("data", "expected"),
+        [
+            ({}, True),
+            ({"oauth2_app_enabled": True}, True),
+            ({"oauth2_app_enabled": False}, False),
+        ],
+    )
+    def test_gateway_sync_creates_gateway_with_oauth2_app_enabled(
+        self, mocker, request_view, unique_gateway_name, disable_app_permission, default_data_plane, data, expected
+    ):
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.sync.gateway.sync",
+            path_params={"gateway_name": unique_gateway_name},
+            data=data,
+            app=mocker.MagicMock(app_code="foo"),
+        )
+
+        assert response.status_code == 200, response.json()
+        assert Gateway.objects.get(name=unique_gateway_name).oauth2_app_enabled is expected
+
+    @pytest.mark.parametrize(
+        ("data", "expected"),
+        [
+            # 未传时保留管理员在页面上关闭的开关
+            ({"description": "updated"}, False),
+            ({"oauth2_app_enabled": True}, True),
+            ({"oauth2_app_enabled": False}, False),
+        ],
+    )
+    def test_gateway_sync_updates_oauth2_app_enabled_only_when_provided(
+        self,
+        mocker,
+        request_view,
+        fake_gateway,
+        unique_gateway_name,
+        disable_app_permission,
+        default_data_plane,
+        data,
+        expected,
+    ):
+        fake_gateway.name = unique_gateway_name
+        fake_gateway.oauth2_app_enabled = False
+        fake_gateway.save(update_fields=["name", "oauth2_app_enabled"])
+        GatewayHandler.save_auth_config(fake_gateway.id, user_auth_type="default")
+
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.sync.gateway.sync",
+            path_params={"gateway_name": fake_gateway.name},
+            data=data,
+            gateway=fake_gateway,
+            app=mocker.MagicMock(app_code="foo"),
+        )
+
+        assert response.status_code == 200, response.json()
+        fake_gateway.refresh_from_db()
+        assert fake_gateway.oauth2_app_enabled is expected
+
+    @pytest.mark.parametrize(
+        ("data", "expected_is_official", "expected_api_type"),
+        [
+            ({"api_type": 1}, True, 1),
+            ({"is_official": True}, True, 1),
+            ({"is_official": False}, False, 10),
+            ({"api_type": 10, "is_official": True}, True, 1),
+            ({"api_type": 1, "is_official": False}, False, 10),
+        ],
+    )
+    def test_gateway_syncs_is_official_and_auth_api_type(
+        self,
+        mocker,
+        request_view,
+        unique_gateway_name,
+        disable_app_permission,
+        default_data_plane,
+        data,
+        expected_is_official,
+        expected_api_type,
+    ):
+        gateway_name = f"bk-{unique_gateway_name}" if expected_is_official else unique_gateway_name
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.sync.gateway.sync",
+            path_params={"gateway_name": gateway_name},
+            data=data,
+            app=mocker.MagicMock(app_code="foo"),
+        )
+
+        assert response.status_code == 200, response.json()
+        gateway = Gateway.objects.get(name=gateway_name)
+        assert gateway.is_official is expected_is_official
+        assert response.json()["data"]["is_official"] is expected_is_official
+        assert GatewayHandler.get_gateway_auth_config(gateway.id)["api_type"] == expected_api_type
+
+    def test_gateway_sync_preserves_super_official_type_without_new_field(
+        self,
+        mocker,
+        request_view,
+        fake_gateway,
+        disable_app_permission,
+        default_data_plane,
+    ):
+        fake_gateway.name = "bk-test"
+        fake_gateway.is_official = True
+        fake_gateway.save(update_fields=["name", "is_official"])
+        GatewayHandler.save_auth_config(
+            fake_gateway.id, user_auth_type="default", api_type=GatewayTypeEnum.SUPER_OFFICIAL_API
+        )
+
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.sync.gateway.sync",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"description": "updated"},
+            gateway=fake_gateway,
+            app=mocker.MagicMock(app_code="foo"),
+        )
+
+        assert response.status_code == 200, response.json()
+        fake_gateway.refresh_from_db()
+        assert fake_gateway.is_official is True
+        assert response.json()["data"]["is_official"] is True
+        assert GatewayHandler.get_gateway_auth_config(fake_gateway.id)["api_type"] == 0
+
+    @pytest.mark.parametrize("is_official", [True, False])
+    def test_gateway_sync_preserves_super_official_type_with_new_field(
+        self,
+        mocker,
+        request_view,
+        fake_gateway,
+        disable_app_permission,
+        default_data_plane,
+        is_official,
+    ):
+        fake_gateway.name = "bk-test"
+        fake_gateway.is_official = True
+        fake_gateway.save(update_fields=["name", "is_official"])
+        GatewayHandler.save_auth_config(
+            fake_gateway.id, user_auth_type="default", api_type=GatewayTypeEnum.SUPER_OFFICIAL_API
+        )
+
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.sync.gateway.sync",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"is_official": is_official, "description": "updated"},
+            gateway=fake_gateway,
+            app=mocker.MagicMock(app_code="foo"),
+        )
+
+        assert response.status_code == 200, response.json()
+        assert response.json()["data"]["is_official"] is True
+        fake_gateway.refresh_from_db()
+        assert fake_gateway.is_official is True
+        assert fake_gateway.description == "updated"
+        assert GatewayHandler.get_gateway_auth_config(fake_gateway.id)["api_type"] == 0
 
     def test_gateway_sync_ai_gateway_rejects_older_default_data_plane(
         self, mocker, request_view, unique_gateway_name, disable_app_permission, default_data_plane
@@ -1543,9 +1781,10 @@ class TestSyncApiCategory:
         fake_release_v2,
         disable_app_permission,
     ):
-        """测试创建 MCPServer 时同步分类"""
+        """测试官方网关创建 MCPServer 时同步特殊分类"""
         make_resource_schema_version(fake_release_v2.resource_version)
         fake_gateway.name = "test"
+        fake_gateway.is_official = True
         fake_stage.name = "test"
         fake_gateway.save()
         fake_stage.save()
@@ -1746,7 +1985,7 @@ class TestSyncApiCategory:
         fake_release_v2,
         disable_app_permission,
     ):
-        """测试更新 MCPServer 时同步分类"""
+        """测试更新 MCPServer 时同步分类：以声明为准替换，已绑定的特殊分类也被移除"""
         make_resource_schema_version(fake_release_v2.resource_version)
         fake_gateway.name = "test"
         fake_stage.name = "test"
@@ -1806,9 +2045,7 @@ class TestSyncApiCategory:
 
         # 验证分类已更新
         mcp_server.refresh_from_db()
-        assert mcp_server.categories.count() == 1
-        assert not mcp_server.categories.filter(id=category1.id).exists()
-        assert mcp_server.categories.filter(id=category2.id).exists()
+        assert set(mcp_server.categories.values_list("id", flat=True)) == {category2.id}
 
     def test_mcp_server_sync_update_without_category_names(
         self,
@@ -1919,6 +2156,94 @@ class TestSyncApiCategory:
         assert resp.status_code == 400
         result = resp.json()
         assert "分类不存在" in str(result["error"])
+
+    def test_mcp_server_sync_ignores_special_categories_on_normal_gateway(
+        self,
+        request_view,
+        fake_gateway,
+        fake_stage,
+        fake_resource,
+        fake_resource_schema_with_body,
+        fake_release_v2,
+        disable_app_permission,
+    ):
+        """非官方网关传入的 Official/Featured 不生效"""
+        make_resource_schema_version(fake_release_v2.resource_version)
+        fake_gateway.name = "test"
+        fake_gateway.is_official = False
+        fake_stage.name = "test"
+        fake_gateway.save()
+        fake_stage.save()
+
+        for name in ["Official", "Featured", "Monitoring"]:
+            MCPServerCategory.objects.get_or_create(name=name, defaults={"display_name": name})
+
+        data = {
+            "mcp_servers": [
+                {
+                    "name": "special-category-server",
+                    "resource_names": [fake_resource.name],
+                    "is_public": True,
+                    "description": "special category",
+                    "status": 1,
+                    "category_names": ["Official", "Featured", "Monitoring"],
+                }
+            ]
+        }
+        resp = request_view(
+            method="POST",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.stages.mcp_servers.sync",
+            path_params={"gateway_name": fake_gateway.name, "stage_name": fake_stage.name},
+            data=data,
+        )
+        assert resp.status_code == 200
+        mcp_server = MCPServer.objects.get(id=resp.json()["data"][0]["id"])
+        assert list(mcp_server.categories.values_list("name", flat=True)) == ["Monitoring"]
+
+    def test_mcp_server_sync_with_inactive_category_names(
+        self,
+        request_view,
+        fake_gateway,
+        fake_stage,
+        fake_resource,
+        fake_resource_schema_with_body,
+        fake_release_v2,
+        disable_app_permission,
+    ):
+        """传入已停用的分类，返回错误"""
+        make_resource_schema_version(fake_release_v2.resource_version)
+        fake_gateway.name = "test"
+        fake_stage.name = "test"
+        fake_gateway.save()
+        fake_stage.save()
+
+        MCPServerCategory.objects.update_or_create(
+            name="Monitoring", defaults={"display_name": "监控告警", "is_active": False}
+        )
+
+        data = {
+            "mcp_servers": [
+                {
+                    "name": "inactive-category-server",
+                    "resource_names": [fake_resource.name],
+                    "is_public": True,
+                    "description": "inactive category",
+                    "status": 1,
+                    "category_names": ["Monitoring"],
+                }
+            ]
+        }
+        resp = request_view(
+            method="POST",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.stages.mcp_servers.sync",
+            path_params={"gateway_name": fake_gateway.name, "stage_name": fake_stage.name},
+            data=data,
+        )
+        assert resp.status_code == 400
+        assert "已停用" in str(resp.json()["error"])
+        assert not MCPServer.objects.filter(name__endswith="inactive-category-server").exists()
 
 
 class TestSyncApiToolNames:
@@ -2166,3 +2491,243 @@ class TestGatewayAppPermissionGrantApi:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+
+class TestGatewayAppPermissionRevokeApi:
+    """测试 v2_sync_revoke_permission 接口"""
+
+    def test_revoke_gateway_permission(self, request_view, fake_gateway, fake_resource, disable_app_permission):
+        gateway_permissions = {
+            bk_app_code: G(AppGatewayPermission, gateway=fake_gateway, bk_app_code=bk_app_code)
+            for bk_app_code in ["app1", "app2", "app3"]
+        }
+        another_gateway = G(Gateway)
+        G(AppGatewayPermission, gateway=another_gateway, bk_app_code="app1")
+        sync_permission = G(
+            AppResourcePermission,
+            gateway=fake_gateway,
+            bk_app_code="app1",
+            resource_id=fake_resource.id,
+            grant_type=GrantTypeEnum.SYNC.value,
+        )
+        another_resource = G(Resource, gateway=fake_gateway, name="another_resource")
+        G(
+            AppResourcePermission,
+            gateway=fake_gateway,
+            bk_app_code="app1",
+            resource_id=another_resource.id,
+            grant_type=GrantTypeEnum.INITIALIZE.value,
+        )
+
+        resp = request_view(
+            method="DELETE",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.permissions.revoke",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"target_app_codes": ["app1", "app2"], "grant_dimension": "gateway"},
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"data": None}
+        assert list(
+            AppGatewayPermission.objects.filter(gateway=fake_gateway).values_list("bk_app_code", flat=True)
+        ) == ["app3"]
+        # 仅回收当前网关的按网关授权及由其同步产生的资源权限，不影响其它网关及其它按资源授权
+        assert AppGatewayPermission.objects.filter(gateway=another_gateway, bk_app_code="app1").exists()
+        assert list(
+            AppResourcePermission.objects.filter(gateway=fake_gateway, bk_app_code="app1").values_list(
+                "resource_id", flat=True
+            )
+        ) == [another_resource.id]
+
+        audit_logs = AuditEventLog.objects.filter(
+            op_object_group=str(fake_gateway.id),
+            op_object_type=OpObjectTypeEnum.PERMISSION.value,
+            op_type=OpTypeEnum.DELETE.value,
+        )
+        assert sorted((log.op_object_id, log.comment) for log in audit_logs) == sorted(
+            [
+                (str(gateway_permissions["app1"].id), "OpenAPI 回收权限，授权维度：网关"),
+                (str(gateway_permissions["app2"].id), "OpenAPI 回收权限，授权维度：网关"),
+                (str(sync_permission.id), "OpenAPI 回收权限，授权维度：资源"),
+            ]
+        )
+        assert {log.username for log in audit_logs} == {settings.GATEWAY_DEFAULT_CREATOR}
+
+    def test_revoke_resource_permission(self, request_view, fake_gateway, fake_resource, disable_app_permission):
+        another_resource = G(Resource, gateway=fake_gateway, name="another_resource")
+        resource_permissions = {
+            bk_app_code: G(
+                AppResourcePermission, gateway=fake_gateway, bk_app_code=bk_app_code, resource_id=fake_resource.id
+            )
+            for bk_app_code in ["app1", "app2", "app3"]
+        }
+        G(AppResourcePermission, gateway=fake_gateway, bk_app_code="app1", resource_id=another_resource.id)
+        G(AppGatewayPermission, gateway=fake_gateway, bk_app_code="app1")
+        another_gateway = G(Gateway)
+        same_name_resource = G(Resource, gateway=another_gateway, name=fake_resource.name)
+        G(AppResourcePermission, gateway=another_gateway, bk_app_code="app1", resource_id=same_name_resource.id)
+
+        resp = request_view(
+            method="DELETE",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.permissions.revoke",
+            path_params={"gateway_name": fake_gateway.name},
+            data={
+                "target_app_codes": ["app1", "app2"],
+                "grant_dimension": "resource",
+                # 不存在的资源名称会被忽略
+                "resource_names": [fake_resource.name, "not_exist_resource"],
+            },
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"data": None}
+        assert list(
+            AppResourcePermission.objects.filter(gateway=fake_gateway, resource_id=fake_resource.id).values_list(
+                "bk_app_code", flat=True
+            )
+        ) == ["app3"]
+        # 仅回收指定资源的权限，不影响其它资源、按网关授权及其它网关
+        assert AppResourcePermission.objects.filter(
+            gateway=fake_gateway, bk_app_code="app1", resource_id=another_resource.id
+        ).exists()
+        assert AppGatewayPermission.objects.filter(gateway=fake_gateway, bk_app_code="app1").exists()
+        assert AppResourcePermission.objects.filter(gateway=another_gateway, bk_app_code="app1").exists()
+
+        audit_logs = AuditEventLog.objects.filter(
+            op_object_group=str(fake_gateway.id),
+            op_object_type=OpObjectTypeEnum.PERMISSION.value,
+            op_type=OpTypeEnum.DELETE.value,
+        )
+        assert sorted((log.op_object_id, log.comment) for log in audit_logs) == sorted(
+            [
+                (str(resource_permissions["app1"].id), "OpenAPI 回收权限，授权维度：资源"),
+                (str(resource_permissions["app2"].id), "OpenAPI 回收权限，授权维度：资源"),
+            ]
+        )
+
+    def test_revoke_released_resource_permission(self, request_view, fake_gateway, disable_app_permission):
+        # 资源已从编辑区删除，但仍在已发布版本中生效
+        resource_version = G(ResourceVersion, gateway=fake_gateway, _data="[]")
+        G(Release, gateway=fake_gateway, stage=G(Stage, gateway=fake_gateway), resource_version=resource_version)
+        G(
+            ReleasedResource,
+            gateway=fake_gateway,
+            resource_version_id=resource_version.id,
+            resource_id=10001,
+            resource_name="deleted_resource",
+            data={},
+        )
+        G(AppResourcePermission, gateway=fake_gateway, bk_app_code="app1", resource_id=10001)
+
+        resp = request_view(
+            method="DELETE",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.permissions.revoke",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"target_app_codes": ["app1"], "grant_dimension": "resource", "resource_names": ["deleted_resource"]},
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 200
+        assert not AppResourcePermission.objects.filter(gateway=fake_gateway, bk_app_code="app1").exists()
+
+    def test_revoke_resource_permission_with_not_exist_resource_names(
+        self, request_view, fake_gateway, fake_resource, disable_app_permission
+    ):
+        G(AppResourcePermission, gateway=fake_gateway, bk_app_code="app1", resource_id=fake_resource.id)
+
+        resp = request_view(
+            method="DELETE",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.permissions.revoke",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"target_app_codes": ["app1"], "grant_dimension": "resource", "resource_names": ["not_exist"]},
+            content_type="application/json",
+        )
+
+        # 资源名称均不存在时不回收任何权限，避免误删该应用的全部资源权限
+        assert resp.status_code == 200
+        assert AppResourcePermission.objects.filter(gateway=fake_gateway, bk_app_code="app1").exists()
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"target_app_codes": [], "grant_dimension": "gateway"},
+            {"target_app_codes": ["app1"], "grant_dimension": "api"},
+            {"target_app_codes": ["app1"], "grant_dimension": "resource"},
+            {"target_app_codes": ["app1"], "grant_dimension": "resource", "resource_names": []},
+            {"target_app_codes": ["app1"]},
+            # OAuth2 内置应用的权限由系统管理，不允许回收
+            {"target_app_codes": ["app1", OAUTH2_PUBLIC_CLIENT_APP_CODE], "grant_dimension": "gateway"},
+            {"target_app_codes": ["app1", OAUTH2_PERSONAL_CLIENT_APP_CODE], "grant_dimension": "gateway"},
+            # 超过 100 个
+            {"target_app_codes": [f"app{i}" for i in range(101)], "grant_dimension": "gateway"},
+            {
+                "target_app_codes": ["app1"],
+                "grant_dimension": "resource",
+                "resource_names": [f"resource{i}" for i in range(101)],
+            },
+        ],
+    )
+    def test_revoke_invalid_params(self, request_view, fake_gateway, fake_resource, disable_app_permission, data):
+        G(AppGatewayPermission, gateway=fake_gateway, bk_app_code="app1")
+        G(AppResourcePermission, gateway=fake_gateway, bk_app_code="app1", resource_id=fake_resource.id)
+
+        resp = request_view(
+            method="DELETE",
+            gateway=fake_gateway,
+            view_name="openapi.v2.sync.gateway.permissions.revoke",
+            path_params={"gateway_name": fake_gateway.name},
+            data=data,
+            content_type="application/json",
+        )
+
+        assert resp.status_code == 400
+        assert AppGatewayPermission.objects.filter(gateway=fake_gateway, bk_app_code="app1").exists()
+        assert AppResourcePermission.objects.filter(gateway=fake_gateway, bk_app_code="app1").exists()
+
+
+@pytest.mark.parametrize("operation", ["grant", "revoke"])
+@pytest.mark.parametrize("identity", ["missing", "unrelated", "other-gateway"])
+def test_permission_mutations_reject_unrelated_app(request_view, fake_gateway, operation, identity):
+    G(AppGatewayPermission, gateway=fake_gateway, bk_app_code="target")
+    if identity == "other-gateway":
+        G(GatewayRelatedApp, gateway=G(Gateway), bk_app_code="caller")
+    before_gateway = list(AppGatewayPermission.objects.values())
+    before_resource = list(AppResourcePermission.objects.values())
+    response = request_view(
+        method="POST",
+        view_name=f"openapi.v2.sync.gateway.permissions.{operation}",
+        path_params={"gateway_name": fake_gateway.name},
+        gateway=fake_gateway,
+        app=None if identity == "missing" else SimpleNamespace(app_code="caller"),
+        data={
+            "target_app_code": "target",
+            "target_app_codes": ["target"],
+            "expire_days": 10,
+            "grant_dimension": "gateway",
+        },
+        format="json",
+    )
+    assert response.status_code == 403
+    assert list(AppGatewayPermission.objects.values()) == before_gateway
+    assert list(AppResourcePermission.objects.values()) == before_resource
+
+
+def test_grant_permission_with_real_related_app(request_view, fake_gateway):
+    G(GatewayRelatedApp, gateway=fake_gateway, bk_app_code="caller")
+    response = request_view(
+        method="POST",
+        view_name="openapi.v2.sync.gateway.permissions.grant",
+        path_params={"gateway_name": fake_gateway.name},
+        gateway=fake_gateway,
+        app=SimpleNamespace(app_code="caller"),
+        format="json",
+        data={"target_app_code": "target", "expire_days": 10, "grant_dimension": "gateway"},
+    )
+    assert response.status_code == 201
+    assert AppGatewayPermission.objects.get(gateway=fake_gateway, bk_app_code="target").expires is not None

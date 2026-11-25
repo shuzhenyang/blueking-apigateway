@@ -24,6 +24,7 @@ from rest_framework.validators import UniqueTogetherValidator
 
 from apigateway.apis.web.ai_backend import (
     AIBackendWebConfigAdapter,
+    AIBackendWebConnectivityInputSLZ,
     AIBackendWebInputSLZ,
     serialize_ai_backend_config_for_web,
 )
@@ -54,18 +55,18 @@ class AIBackendConfigSLZ(AIBackendWebInputSLZ):
 
 class AIBackendConnectivityInputSLZ(serializers.Serializer):
     backend_id = serializers.IntegerField(required=False, min_value=1)
-    config = serializers.DictField()
+    config = AIBackendWebConnectivityInputSLZ()
 
     class Meta:
         ref_name = "apigateway.apis.web.backend.serializers.AIBackendConnectivityInputSLZ"
 
     def validate(self, attrs):
-        config_slz = AIBackendConfigSLZ(data=attrs["config"])
-        config_slz.is_valid(raise_exception=True)
-        web_config = dict(config_slz.validated_data)
-        stage_id = web_config.pop("stage_id")
+        config = attrs["config"]
         existing_value = None
         if backend_id := attrs.get("backend_id"):
+            stage_id = config.get("stage_id")
+            if not stage_id:
+                raise serializers.ValidationError({"config": {"stage_id": _("测试已有模型服务时必须提供环境 ID。")}})
             existing = (
                 BackendConfig.objects.filter(
                     backend_id=backend_id,
@@ -87,7 +88,9 @@ class AIBackendConnectivityInputSLZ(serializers.Serializer):
                     existing.stage_id,
                 )
                 raise serializers.ValidationError({"config": _("已有后端配置无法读取，请联系管理员。")}) from None
-        attrs["config"] = AIBackendWebConfigAdapter.to_internal(web_config, existing_config=existing_value)
+        config["instance"] = AIBackendWebConfigAdapter.to_connectivity(
+            config["instance"], existing_config=existing_value
+        )
         return attrs
 
 

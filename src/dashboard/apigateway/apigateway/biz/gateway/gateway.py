@@ -34,6 +34,11 @@ from apigateway.apps.plugin.models import PluginBinding
 from apigateway.apps.rbac.constants import GatewayRoleEnum
 from apigateway.apps.rbac.models import GatewayMember
 from apigateway.apps.support.models import ReleasedResourceDoc
+from apigateway.biz.iam import (
+    apply_gateway_member_snapshots_to_iam,
+    build_gateway_member_snapshot,
+)
+from apigateway.biz.iam.constants import BK_IAM_V4_SYSTEM_ID
 from apigateway.biz.release import ReleaseHandler
 from apigateway.biz.stage import StageHandler
 from apigateway.common.tenant.query import gateway_filter_by_maintainer_tenant_id
@@ -46,6 +51,10 @@ from apigateway.core.constants import (
     GatewayTypeEnum,
 )
 from apigateway.core.gateway_auth import GatewayAuthConfig
+from apigateway.core.gateway_name import (
+    normalize_display_name,
+    normalize_display_name_en,
+)
 from apigateway.core.models import Backend, BackendConfig, Context, Gateway, Release, Resource, Stage
 from apigateway.service.alarm_strategy import create_default_alarm_strategy
 from apigateway.service.contexts import GatewayAuthContext
@@ -79,6 +88,8 @@ def _is_official_gateway_type(gateway_type: Optional[GatewayTypeEnum]) -> bool:
 
 class GatewayData(BaseModel):
     name: str = Field(...)
+    display_name: Optional[str] = Field(default=None)
+    display_name_en: Optional[str] = Field(default=None)
     description: str = Field(default="")
     description_en: Optional[str] = Field(default=None)
     maintainers: List[str] = Field(default_factory=list)
@@ -91,6 +102,8 @@ class GatewayData(BaseModel):
     # 上层如需修改，需明确指定配置值
     allow_auth_from_params: Optional[bool] = Field(default=None)
     allow_delete_sensitive_params: Optional[bool] = Field(default=None)
+    # 默认值 None：新建网关按开启处理，更新网关时保留当前值
+    oauth2_app_enabled: Optional[bool] = Field(default=None)
 
     tenant_mode: Optional[str] = Field(default=None)
     tenant_id: Optional[str] = Field(default=None)
@@ -292,6 +305,7 @@ class GatewayHandler:
             username=username,
             source=source,
             data_plane_ids=data_plane_ids,
+            skip_missing_users=True,
         )
         return saver.save()
 
@@ -315,7 +329,11 @@ class GatewayHandler:
             logger.info("Bound gateway '%s' to data plane '%s'", gateway.name, data_plane.name)
 
     @staticmethod
-    def delete_gateway(gateway_id: int):
+    @transaction.atomic
+    def delete_gateway(gateway_id: int, operated_by: Optional[str] = None):
+        gateway = Gateway.objects.select_for_update().get(id=gateway_id)
+        member_snapshot = build_gateway_member_snapshot(GatewayMember.objects.filter(gateway_id=gateway_id))
+
         # 1. delete gateway context
 
         Context.objects.delete_by_scope_ids(
@@ -354,8 +372,25 @@ class GatewayHandler:
         StatisticsGatewayRequestByDay.objects.filter(gateway_id=gateway_id).delete()
         StatisticsAppRequestByDay.objects.filter(gateway_id=gateway_id).delete()
 
-        # 10. delete gateway
-        Gateway.objects.filter(id=gateway_id).delete()
+        # 10. revoke IAM authorizations and delete gateway
+        iam_operator = None
+        if settings.BK_IAM_V4_ENABLED:
+            iam_operator = operated_by or BK_IAM_V4_SYSTEM_ID
+            apply_gateway_member_snapshots_to_iam(gateway, member_snapshot, {}, iam_operator)
+
+        try:
+            gateway.delete()
+        except Exception:
+            if iam_operator is not None:
+                try:
+                    apply_gateway_member_snapshots_to_iam(gateway, {}, member_snapshot, iam_operator)
+                except Exception:
+                    logger.critical(
+                        "failed to restore gateway IAM authorizations after gateway deletion failed, gateway_id=%s",
+                        gateway_id,
+                        exc_info=True,
+                    )
+            raise
 
     @staticmethod
     def get_docs_url(gateway: Gateway) -> str:
@@ -534,6 +569,8 @@ class GatewaySaver:
         username: str = "",
         source: Optional[CallSourceTypeEnum] = None,
         data_plane_ids: Optional[List[int]] = None,
+        *,
+        skip_missing_users: bool = False,
     ):
         self.bk_app_code = bk_app_code
         self.username = username
@@ -542,6 +579,7 @@ class GatewaySaver:
         self._gateway_data = data
         self._source = source
         self._data_plane_ids = data_plane_ids
+        self._skip_missing_users = skip_missing_users
 
     def _get_gateway(self, gateway_id: Optional[int]) -> Optional[Gateway]:
         if gateway_id:
@@ -564,14 +602,19 @@ class GatewaySaver:
     def _create_gateway(self):
         # 1. resolve and validate data planes before saving the gateway
         validate_gateway_name_kind(self._gateway_data.name, self._gateway_data.kind)
+        display_name = normalize_display_name(self._gateway_data.display_name, name=self._gateway_data.name)
+        display_name_en = normalize_display_name_en(self._gateway_data.display_name_en)
         self._gateway = gateway = Gateway(
             name=self._gateway_data.name,
+            display_name=display_name,
+            display_name_en=display_name_en,
             description=self._gateway_data.description,
             description_en=self._gateway_data.description_en,
             status=self._gateway_data.status,
             is_public=self._gateway_data.is_public,
             kind=self._gateway_data.kind,
             is_official=_is_official_gateway_type(self._gateway_data.gateway_type),
+            oauth2_app_enabled=self._gateway_data.oauth2_app_enabled is not False,
             tenant_mode=self._gateway_data.tenant_mode,
             tenant_id=self._gateway_data.tenant_id,
             created_by=self.username,
@@ -584,7 +627,12 @@ class GatewaySaver:
         maintainers = self._gateway_data.maintainers
         if not maintainers:
             maintainers = [self.username or settings.GATEWAY_DEFAULT_CREATOR]
-        replace_gateway_administrators(gateway, maintainers, self.username or settings.GATEWAY_DEFAULT_CREATOR)
+        replace_gateway_administrators(
+            gateway,
+            maintainers,
+            self.username or settings.GATEWAY_DEFAULT_CREATOR,
+            skip_missing_users=self._skip_missing_users,
+        )
 
         # 3. save related data
         GatewayHandler.save_related_data(
@@ -640,6 +688,12 @@ class GatewaySaver:
 
     def _update_gateway(self):
         gateway = self._gateway
+        update_fields = ["display_name_en", "description", "description_en", "is_public", "updated_by", "updated_time"]
+
+        if "display_name" in self._gateway_data.model_fields_set:
+            gateway.display_name = normalize_display_name(self._gateway_data.display_name, name=gateway.name)
+            update_fields.append("display_name")
+        gateway.display_name_en = normalize_display_name_en(self._gateway_data.display_name_en)
 
         # 1. update gateway
         gateway.description = self._gateway_data.description
@@ -647,11 +701,20 @@ class GatewaySaver:
         gateway.is_public = self._gateway_data.is_public
         if self._gateway_data.gateway_type is not None:
             gateway.is_official = _is_official_gateway_type(self._gateway_data.gateway_type)
+            update_fields.append("is_official")
+        if self._gateway_data.oauth2_app_enabled is not None:
+            gateway.oauth2_app_enabled = self._gateway_data.oauth2_app_enabled
+            update_fields.append("oauth2_app_enabled")
         gateway.updated_by = self.username
-        gateway.save()
+        # 同步未传开关时不能把先前读到的值写回，页面可能已经修改过。
+        gateway.save(update_fields=update_fields)
+        if self._gateway_data.oauth2_app_enabled is None:
+            gateway.refresh_from_db(fields=["oauth2_app_enabled"])
         # 更新网关时，仅在显式提供维护者时新增网关管理员，不删除，以防止删除已更新的管理员数据
         if self._gateway_data.maintainers:
-            add_gateway_administrators(gateway, self._gateway_data.maintainers, self.username)
+            add_gateway_administrators(
+                gateway, self._gateway_data.maintainers, self.username, skip_missing_users=self._skip_missing_users
+            )
 
         # 2. update auth config
         GatewayHandler.save_auth_config(

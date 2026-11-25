@@ -71,6 +71,7 @@ from .serializers import (
     MCPServerAppPermissionApplyApplicantListInputSLZ,
     MCPServerAppPermissionApplyListInputSLZ,
     MCPServerAppPermissionApplyListOutputSLZ,
+    MCPServerAppPermissionApplyPendingCountOutputSLZ,
     MCPServerAppPermissionApplyUpdateInputSLZ,
     MCPServerAppPermissionCreateInputSLZ,
     MCPServerAppPermissionListInputSLZ,
@@ -119,6 +120,8 @@ from .serializers import (
     ),
 )
 class MCPServerListCreateApi(generics.ListCreateAPIView):
+    gateway_action_map = {"GET": GatewayActionEnum.OPERATE_GATEWAY.value}
+
     def list(self, request, *args, **kwargs):
         slz = MCPServerListInputSLZ(data=request.query_params)
         slz.is_valid(raise_exception=True)
@@ -185,7 +188,7 @@ class MCPServerListCreateApi(generics.ListCreateAPIView):
         app_permission_risks = MCPServerHandler.get_app_permission_risks(page, releases=releases)
 
         # 计算最低权限级别，用于判断是否展示应用态 URL
-        least_privileges = MCPServerHandler.get_least_privileges(page, releases=releases)
+        least_privileges = MCPServerHandler.get_least_privileges_by_server(page, releases=releases)
 
         slz = MCPServerListOutputSLZ(
             page,
@@ -292,7 +295,7 @@ class MCPServerRetrieveUpdateDestroyApi(MCPServerQuerySetMixin, generics.Retriev
 
         releases = MCPServerHandler._get_releases_for_mcp_servers([instance])
         app_permission_risks = MCPServerHandler.get_app_permission_risks([instance], releases=releases)
-        least_privileges = MCPServerHandler.get_least_privileges([instance], releases=releases)
+        least_privileges = MCPServerHandler.get_least_privileges_by_server([instance], releases=releases)
 
         serializer = self.get_serializer(
             instance,
@@ -453,8 +456,8 @@ class MCPServerGuidelineRetrieveApi(MCPServerQuerySetMixin, generics.RetrieveAPI
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        least_privileges = MCPServerHandler.get_least_privileges([instance])
-        least_privilege = least_privileges.get((instance.gateway.id, instance.stage.id), "")
+        least_privileges = MCPServerHandler.get_least_privileges_by_server([instance])
+        least_privilege = least_privileges.get(instance.id, "")
 
         user_tenant_id = get_user_tenant_id(request)
 
@@ -488,8 +491,8 @@ class MCPServerConfigListApi(MCPServerQuerySetMixin, generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        least_privileges = MCPServerHandler.get_least_privileges([instance])
-        least_privilege = least_privileges.get((instance.gateway.id, instance.stage.id), "")
+        least_privileges = MCPServerHandler.get_least_privileges_by_server([instance])
+        least_privilege = least_privileges.get(instance.id, "")
 
         user_tenant_id = get_user_tenant_id(request)
         configs = MCPServerHandler.build_agent_client_configs(instance, least_privilege, user_tenant_id=user_tenant_id)
@@ -742,7 +745,7 @@ class MCPServerAppPermissionApplyQuerySetMixin:
     def get_queryset(self):
         queryset = MCPServerAppPermissionApply.objects.filter(
             mcp_server__gateway=self.request.gateway,
-        )
+        ).exclude(status=MCPServerAppPermissionApplyStatusEnum.CANCELED.value)
         mcp_server_id = self.kwargs.get("mcp_server_id")
         if mcp_server_id is not None:
             queryset = queryset.filter(mcp_server_id=mcp_server_id)
@@ -925,6 +928,24 @@ class MCPServerAppPermissionApplyListApi(generics.ListAPIView):
 @method_decorator(
     name="get",
     decorator=extend_schema(
+        description="获取网关下 MCPServer 待审批的权限申请数量",
+        responses={status.HTTP_200_OK: MCPServerAppPermissionApplyPendingCountOutputSLZ()},
+        tags=["WebAPI.MCPServer"],
+    ),
+)
+class MCPServerAppPermissionApplyPendingCountApi(generics.RetrieveAPIView):
+    gateway_action = GatewayActionEnum.APPROVE_GATEWAY_PERMISSION.value
+    serializer_class = MCPServerAppPermissionApplyPendingCountOutputSLZ
+
+    def retrieve(self, request, *args, **kwargs):
+        count = MCPServerAppPermissionApply.objects.filter_pending([request.gateway.id]).count()
+        slz = self.get_serializer({"count": count})
+        return OKJsonResponse(data=slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=extend_schema(
         description="获取授权审批申请人列表",
         parameters=[MCPServerAppPermissionApplyApplicantListInputSLZ()],
         responses={status.HTTP_200_OK: {"type": "object", "additionalProperties": True}},
@@ -965,6 +986,14 @@ class MCPServerAppPermissionApplyUpdateStatusApi(MCPServerAppPermissionApplyQuer
     schema_request_partial = False
     serializer_class = MCPServerAppPermissionApplyUpdateInputSLZ
     lookup_url_kwarg = "id"
+
+    def get_queryset(self):
+        return (
+            super()
+            .get_queryset()
+            .select_for_update()
+            .filter(status=MCPServerAppPermissionApplyStatusEnum.PENDING.value)
+        )
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):

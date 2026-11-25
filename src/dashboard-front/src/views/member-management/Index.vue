@@ -27,18 +27,27 @@
         >
           {{ t('新增成员') }}
         </BkButton>
-        <BkRadioGroup v-model="activeRole">
-          <BkRadioButton
+        <div
+          class="role-tabs"
+          role="group"
+          :aria-label="t('角色')"
+        >
+          <button
             v-for="tab in roleTabs"
             :key="tab.key"
-            :label="tab.key"
+            type="button"
+            class="role-tab"
+            :class="{ active: activeRole === tab.key }"
+            :aria-pressed="activeRole === tab.key"
+            @click="() => activeRole = tab.key"
           >
             {{ tab.label }} ({{ tab.count }})
-          </BkRadioButton>
-        </BkRadioGroup>
+          </button>
+        </div>
         <BkButton
           text
           theme="primary"
+          class="text-12px!"
           @click="handleViewPermissionModel"
         >
           {{ t('查看权限模型') }}
@@ -59,7 +68,6 @@
         local-page
         table-row-key="id"
         :show-settings="false"
-        :max-limit-config="{ allocatedHeight: 220, mode: 'tdesign' }"
         :columns="columns"
         :table-empty-type="keyword ? 'search-empty' : 'empty'"
         @clear-filter="keyword = ''"
@@ -85,13 +93,9 @@
 <script setup lang="tsx">
 import { Message } from 'bkui-vue';
 import { usePopInfoBox } from '@/hooks';
-import {
-  deleteGatewayMember,
-  getGatewayMemberList,
-} from '@/services/source/gateway-member';
+import { deleteGatewayMember, getGatewayMemberList } from '@/services/source/gateway/member';
 import { useFeatureFlag, useGateway, useGatewayRoleStore, useUserInfo } from '@/stores';
-import AgTable from '@/components/ag-table/Index.vue';
-import type { PrimaryTableProps, TableRowData } from '@blueking/tdesign-ui';
+import AgTable, { type ITableColumn } from '@/components/base/ag-table';
 import AddMember from './components/AddMember.vue';
 import EditMember from './components/EditMember.vue';
 import CheckPermissionModel from './components/CheckPermissionModel.vue';
@@ -147,65 +151,55 @@ const roleTabs = computed(() => [
   },
 ]);
 
-const columns = computed<PrimaryTableProps['columns']>(() => [
+const columns = computed<ITableColumn<IMember>[]>(() => [
   {
     title: t('用户名'),
     colKey: 'username',
     width: 220,
-    cell: (_h: unknown, { row }: { row: TableRowData }) => {
-      const member = row as unknown as IMember;
-      return featureFlagStore.isEnableDisplayName
-        ? <span><bk-user-display-name user-id={member.username} /></span>
-        : <span>{member.username}</span>;
-    },
+    cell: (_h, { row }) => (
+      featureFlagStore.isEnableDisplayName
+        ? <span><bk-user-display-name user-id={row.username} /></span>
+        : <span>{row.username}</span>
+    ),
   },
   {
     title: t('角色'),
     colKey: 'role',
     width: 220,
-    cell: (_h: unknown, { row }: { row: TableRowData }) => {
-      const member = row as unknown as IMember;
-      return (
-        <bk-tag theme={member.role === 'administrator' ? 'success' : 'warning'}>
-          {getRoleLabel(member.role)}
-        </bk-tag>
-      );
-    },
+    cell: (_h, { row }) => (
+      <bk-tag theme={row.role === 'administrator' ? 'success' : 'warning'}>
+        {getRoleLabel(row.role)}
+      </bk-tag>
+    ),
   },
   {
     title: t('权限描述'),
     colKey: 'description',
     ellipsis: true,
-    cell: (_h: unknown, { row }: { row: TableRowData }) => {
-      const member = row as unknown as IMember;
-      return getRoleDescription(member.role);
-    },
+    cell: (_h, { row }) => getRoleDescription(row.role),
   },
   {
     title: t('操作'),
     colKey: 'operation',
     width: 180,
-    cell: (_h: unknown, { row }: { row: TableRowData }) => {
-      const member = row as unknown as IMember;
-      return (
-        <div class="member-actions">
-          <bk-button
-            text
-            theme="primary"
-            onClick={() => handleChangeRole(member)}
-          >
-            {t('变更角色')}
-          </bk-button>
-          <bk-button
-            text
-            theme="primary"
-            onClick={() => handleDelete(member)}
-          >
-            {t('删除成员')}
-          </bk-button>
-        </div>
-      );
-    },
+    cell: (_h, { row }) => (
+      <div class="member-actions">
+        <bk-button
+          text
+          theme="primary"
+          onClick={() => handleChangeRole(row)}
+        >
+          {t('变更角色')}
+        </bk-button>
+        <bk-button
+          text
+          theme="primary"
+          onClick={() => handleDelete(row)}
+        >
+          {t('删除成员')}
+        </bk-button>
+      </div>
+    ),
   },
 ]);
 
@@ -293,18 +287,6 @@ const handleMembersChanged = async (member?: IMember) => {
   }
 };
 
-const confirmSelfLeaveAdmin = (onConfirm: () => Promise<boolean>) => {
-  usePopInfoBox({
-    isShow: true,
-    type: 'warning',
-    title: () => t('确认移除自己的管理员权限？'),
-    subTitle: t('您已将自己从管理员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！'),
-    confirmText: t('确定'),
-    cancelText: t('取消'),
-    beforeClose: action => action === 'confirm' ? onConfirm() : true,
-  });
-};
-
 const handleChangeRole = (row: IMember) => {
   changeMember.value = row;
   isChangeShow.value = true;
@@ -318,6 +300,9 @@ const handleDelete = (row: IMember) => {
     });
     return;
   }
+
+  // InfoBox 为全局单例，嵌套弹出会被父级的关闭逻辑覆盖；移除自己的管理员权限时改为单次强警示确认。
+  const isSelfAdmin = row.username === currentUsername.value && row.role === 'administrator';
 
   const persist = async () => {
     try {
@@ -338,21 +323,14 @@ const handleDelete = (row: IMember) => {
   usePopInfoBox({
     isShow: true,
     type: 'warning',
-    title: () => t('确认删除成员？'),
-    subTitle: t('删除后该成员将失去对应权限，请确认'),
-    confirmText: t('删除'),
+    title: () => isSelfAdmin ? t('确认移除自己的管理员权限？') : t('确认删除成员？'),
+    subTitle: isSelfAdmin
+      ? t('您已将自己从管理员列表中移除，移除后您将失去查看和编辑网关的权限。请确认！')
+      : t('删除后该成员将失去对应权限，请确认'),
+    confirmText: isSelfAdmin ? t('确定') : t('删除'),
     cancelText: t('取消'),
-    confirmButtonTheme: 'danger',
-    beforeClose: (action) => {
-      if (action !== 'confirm') {
-        return true;
-      }
-      if (row.username === currentUsername.value && row.role === 'administrator') {
-        confirmSelfLeaveAdmin(persist);
-        return true;
-      }
-      return persist();
-    },
+    confirmButtonTheme: isSelfAdmin ? 'primary' : 'danger',
+    beforeClose: action => action === 'confirm' ? persist() : true,
   });
 };
 
@@ -377,6 +355,41 @@ onUnmounted(() => {
   align-items: center;
   gap: 16px;
   min-width: 0;
+}
+
+.role-tabs {
+  display: flex;
+  height: 32px;
+  padding: 4px;
+  color: #63656e;
+  background: #f0f1f5;
+  border-radius: 2px;
+  box-sizing: border-box;
+  align-items: center;
+  flex-shrink: 0;
+
+  .role-tab {
+    padding: 0 10px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 24px;
+    color: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    border-radius: 2px;
+
+    &:focus-visible {
+      outline: 2px solid #3a84ff;
+      outline-offset: 2px;
+    }
+
+    &.active {
+      color: #3a84ff;
+      background: #fff;
+    }
+  }
 }
 
 .search-input {

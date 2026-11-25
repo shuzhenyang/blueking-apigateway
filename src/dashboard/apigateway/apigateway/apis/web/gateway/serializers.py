@@ -22,6 +22,7 @@ from django.utils.translation import gettext_lazy
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
+from apigateway.apis.gateway_name import validate_gateway_display_name
 from apigateway.biz.constants import APP_CODE_PATTERN
 from apigateway.biz.gateway import GatewayHandler, build_gateway_doc_maintainers, replace_gateway_administrators
 from apigateway.biz.validators import GatewayAPIDocMaintainerValidator
@@ -33,6 +34,7 @@ from apigateway.core.constants import (
     GatewayStatusEnum,
     ProgrammableGatewayLanguageEnum,
 )
+from apigateway.core.gateway_name import GATEWAY_DISPLAY_NAME_MAX_LENGTH
 from apigateway.core.models import Gateway
 from apigateway.service.gateway_name import validate_gateway_name_kind
 from apigateway.service.paas import gen_programmable_gateway_links
@@ -66,6 +68,7 @@ class GatewayListInputSLZ(serializers.Serializer):
 class GatewayListOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True, help_text="网关 ID")
     name = serializers.CharField(read_only=True, help_text="网关名称")
+    display_name = SerializerTranslatedField(default_field="display_name_or_name", read_only=True)
     description = SerializerTranslatedField(
         allow_blank=True, default_field="description_i18n", read_only=True, help_text="网关描述"
     )
@@ -83,6 +86,8 @@ class GatewayListOutputSLZ(serializers.Serializer):
     is_official = serializers.BooleanField(
         read_only=True, help_text="是否为官方网关，true：官方网关，false：非官方网关"
     )
+    is_deprecated = serializers.BooleanField(read_only=True, help_text="是否已废弃")
+    deprecated_note = serializers.CharField(allow_blank=True, allow_null=True, read_only=True, help_text="废弃原因")
     resource_count = serializers.SerializerMethodField(help_text="网关下资源的数量")
     stages = serializers.SerializerMethodField(help_text="网关环境列表，其中的 released 表示环境是否已发布")
 
@@ -153,6 +158,9 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
         validators=[ReservedGatewayNameValidator(), NameValidator()],
         help_text="网关名称",
     )
+    display_name = serializers.CharField(
+        max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, required=False, allow_blank=True, allow_null=True
+    )
     maintainers = serializers.ListField(
         child=serializers.CharField(), allow_empty=True, required=False, default=list, help_text="网关维护人员"
     )
@@ -172,6 +180,7 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
         model = Gateway
         fields = (
             "name",
+            "display_name",
             "description",
             "maintainers",
             "developers",
@@ -219,6 +228,8 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
 
     def validate(self, data):
         validate_gateway_name_kind(data["name"], data.get("kind", GatewayKindEnum.NORMAL.value))
+        data.setdefault("display_name", data["name"])
+        validate_gateway_display_name(data)
         return data
 
     @transaction.atomic
@@ -231,6 +242,7 @@ class GatewayCreateInputSLZ(serializers.ModelSerializer):
 
 
 class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
+    display_name = SerializerTranslatedField(default_field="display_name_or_name", read_only=True)
     maintainers = serializers.SerializerMethodField(help_text="网关维护人员")
     doc_maintainers = serializers.SerializerMethodField(help_text="网关文档维护人员")
     developers = serializers.ListField(
@@ -263,6 +275,7 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
+            "display_name",
             "description",
             "maintainers",
             "doc_maintainers",
@@ -270,6 +283,7 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
             "status",
             "kind",
             "is_public",
+            "oauth2_app_enabled",
             "created_by",
             "created_time",
             "updated_time",
@@ -306,6 +320,9 @@ class GatewayRetrieveOutputSLZ(serializers.ModelSerializer):
             },
             "is_public": {
                 "help_text": "是否公开，true: 公开，false: 不公开",
+            },
+            "oauth2_app_enabled": {
+                "help_text": "是否开启 OAuth 应用通道（用户委托 token 与应用 token）",
             },
             "created_by": {
                 "help_text": "创建人",
@@ -371,6 +388,15 @@ class GatewayAPIDocMaintainerSLZ(serializers.Serializer):
 
 
 class GatewayUpdateInputSLZ(serializers.ModelSerializer):
+    _model_fields_by_property = {
+        "doc_maintainers": "_doc_maintainers",
+        "extra_info": "_extra_info",
+        "developers": "_developers",
+    }
+
+    display_name = serializers.CharField(
+        max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, required=False, allow_blank=True, allow_null=True
+    )
     maintainers = serializers.ListField(
         child=serializers.CharField(), allow_empty=True, required=False, help_text="网关维护人员"
     )
@@ -397,12 +423,14 @@ class GatewayUpdateInputSLZ(serializers.ModelSerializer):
         ref_name = "apigateway.apis.web.gateway.serializers.GatewayUpdateInputSLZ"
         model = Gateway
         fields = (
+            "display_name",
             "description",
             "maintainers",
             "doc_maintainers",
             "extra_info",
             "developers",
             "is_public",
+            "oauth2_app_enabled",
             "bk_app_codes",
             "related_app_codes",
             "is_deprecated",
@@ -417,9 +445,14 @@ class GatewayUpdateInputSLZ(serializers.ModelSerializer):
             "is_public": {
                 "help_text": "是否公开，true：公开，false：不公开",
             },
+            "oauth2_app_enabled": {
+                "required": False,
+                "help_text": "是否开启 OAuth 应用通道（用户委托 token 与应用 token），重新发布后在数据面生效",
+            },
         }
 
     def validate(self, data):
+        validate_gateway_display_name(data, self.instance)
         # Backward compatibility: treat an empty maintainers payload as omitted.
         if "maintainers" in data and not data["maintainers"]:
             data.pop("maintainers")
@@ -428,7 +461,13 @@ class GatewayUpdateInputSLZ(serializers.ModelSerializer):
     @transaction.atomic
     def update(self, instance, validated_data):
         maintainers = validated_data.pop("maintainers", None)
-        instance = super().update(instance, validated_data)
+        update_fields = ["updated_time"]
+        for name, value in validated_data.items():
+            setattr(instance, name, value)
+            update_fields.append(self._model_fields_by_property.get(name, name))
+        instance.save(update_fields=update_fields)
+        if "oauth2_app_enabled" not in validated_data:
+            instance.refresh_from_db(fields=["oauth2_app_enabled"])
         if maintainers is not None:
             replace_gateway_administrators(instance, maintainers, validated_data.get("updated_by") or "")
         return instance
@@ -446,6 +485,13 @@ class GatewayUpdateStatusInputSLZ(serializers.ModelSerializer):
                 "help_text": "网关状态，0：停用，1：启用",
             },
         }
+
+    def update(self, instance, validated_data):
+        instance.status = validated_data["status"]
+        instance.updated_by = validated_data.get("updated_by", instance.updated_by)
+        instance.save(update_fields=["status", "updated_by", "updated_time"])
+        instance.refresh_from_db(fields=["oauth2_app_enabled"])
+        return instance
 
 
 class GatewayTenantAppInfoTenant(serializers.Serializer):
@@ -494,6 +540,20 @@ class GatewayCheckNameAvailableInputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.gateway.serializers.GatewayCheckNameAvailableInputSLZ"
+
+
+class GatewayCheckDisplayNameAvailableInputSLZ(serializers.Serializer):
+    display_name = serializers.CharField(max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH)
+
+    class Meta:
+        ref_name = "apigateway.apis.web.gateway.serializers.GatewayCheckDisplayNameAvailableInputSLZ"
+
+
+class GatewayCheckDisplayNameAvailableOutputSLZ(serializers.Serializer):
+    is_available = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        ref_name = "apigateway.apis.web.gateway.serializers.GatewayCheckDisplayNameAvailableOutputSLZ"
 
 
 class GatewayCheckNameAvailableOutputSLZ(serializers.Serializer):

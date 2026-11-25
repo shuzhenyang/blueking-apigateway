@@ -19,7 +19,7 @@
 import logging
 import operator
 import re
-from typing import Dict
+from typing import Any, Dict
 
 from blue_krill.async_utils.django_utils import apply_async_on_commit
 from django.conf import settings
@@ -34,6 +34,7 @@ from rest_framework.exceptions import ValidationError
 
 from apigateway.apis.v2.permissions import OpenAPIV2GatewayNamePermission, OpenAPIV2Permission
 from apigateway.apis.v2.tenant import get_request_tenant_id
+from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.mcp_server.constants import (
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerPermissionActionEnum,
@@ -48,7 +49,8 @@ from apigateway.apps.permission.models import AppPermissionRecord
 from apigateway.apps.permission.tasks import send_mail_for_perm_apply
 from apigateway.apps.rbac.models import GatewayMember
 from apigateway.biz.access_log import LogSearchClient
-from apigateway.biz.gateway import GatewayHandler
+from apigateway.biz.audit import Auditor
+from apigateway.biz.gateway import GatewayHandler, delete_gateway_members
 from apigateway.biz.mcp_server import MCPServerHandler, MCPServerPermissionHandler
 from apigateway.biz.permission import (
     AppPermissionBuilder,
@@ -56,6 +58,7 @@ from apigateway.biz.permission import (
     ResourcePermissionBuilder,
     ResourcePermissionHandler,
 )
+from apigateway.biz.personal_workbench import WorkbenchPermissionHandler
 from apigateway.biz.resource import ResourceHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.biz.validators import BKAppCodeValidator
@@ -88,6 +91,7 @@ from apigateway.utils import time as time_utils
 from apigateway.utils.responses import OKJsonResponse
 
 from . import serializers
+from .helpers import build_gateway_permission_approval_url
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +281,7 @@ class _GatewayReleasedResourceApiMixin:
         )
 
     def serialize_released_resources(self, resources, fields):
+        oauth2_app_enabled = self.request.gateway.oauth2_app_enabled
         items = [
             {
                 "id": resource.resource_id,
@@ -284,8 +289,12 @@ class _GatewayReleasedResourceApiMixin:
                 "is_public": resource.is_public,
                 "oauth2_public_client_enabled": resource.oauth2_public_client_enabled,
                 "oauth2_personal_client_enabled": resource.oauth2_personal_client_enabled,
+                "oauth2_app_delegated_enabled": oauth2_app_enabled and resource.oauth2_app_delegated_enabled,
+                "oauth2_app_only_enabled": oauth2_app_enabled and resource.oauth2_app_only_enabled,
                 "description": (resource.data or {}).get("description", ""),
                 "description_en": (resource.data or {}).get("description_en"),
+                "is_deprecated": (resource.data or {}).get("is_deprecated", False),
+                "deprecated_note": (resource.data or {}).get("deprecated_note", ""),
             }
             for resource in resources
         ]
@@ -373,7 +382,11 @@ class GatewayListApi(generics.ListAPIView):
 
         if name:
             # 模糊匹配，查询名称中包含 name 的网关 or 精确匹配，查询名称为 name 的网关
-            queryset = queryset.filter(name__contains=name) if fuzzy else queryset.filter(name=name)
+            queryset = (
+                queryset.filter(Q(name__contains=name) | Q(display_name__contains=name))
+                if fuzzy
+                else queryset.filter(name=name)
+            )
 
         if kind:
             kind_query = Q(kind=convert_gateway_kind_name_to_value(kind))
@@ -464,16 +477,74 @@ class GatewayRetrieveDestroyApi(generics.RetrieveDestroyAPIView):
             )
 
         # 删除网关及相关数据
-        GatewayHandler.delete_gateway(instance_id)
+        GatewayHandler.delete_gateway(instance_id, operated_by=request.user.username)
 
         return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
+
+
+def _gateway_member_audit_records(members) -> list[dict[str, str]]:
+    return [{"username": member.username, "role": member.role} for member in members]
+
+
+@method_decorator(
+    name="delete",
+    decorator=extend_schema(
+        description="按用户名批量删除网关维护人",
+        parameters=[serializers.GatewayMaintainerDeleteInputSLZ],
+        responses={status.HTTP_200_OK: serializers.GatewayMaintainerDeleteOutputSLZ()},
+        tags=["OpenAPI.V2.Inner"],
+    ),
+)
+class GatewayMaintainerDeleteApi(generics.GenericAPIView):
+    permission_classes = [OpenAPIV2GatewayNamePermission]
+    serializer_class = serializers.GatewayMaintainerDeleteInputSLZ
+
+    def delete(self, request, *args, **kwargs):
+        slz = self.get_serializer(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+
+        username = request.user.username or settings.GATEWAY_DEFAULT_CREATOR
+        members_before = GatewayMember.objects.list_gateway_members(request.gateway.id)
+        deleted_members = delete_gateway_members(
+            request.gateway,
+            slz.validated_data["maintainers"],
+            username,
+        )
+        deleted_usernames = [member.username for member in deleted_members]
+        if deleted_usernames:
+            members_after = GatewayMember.objects.list_gateway_members(request.gateway.id)
+            Auditor.record_gateway_op_success(
+                op_type=OpTypeEnum.DELETE,
+                username=username,
+                gateway_id=request.gateway.id,
+                instance_id=request.gateway.id,
+                instance_name=request.gateway.name,
+                data_before={"maintainers": _gateway_member_audit_records(members_before)},
+                data_after={"maintainers": _gateway_member_audit_records(members_after)},
+                comment=_("移除网关维护人({app_code})").format(app_code=request.app.app_code),
+            )
+
+        output_slz = serializers.GatewayMaintainerDeleteOutputSLZ({"deleted": deleted_usernames})
+        return OKJsonResponse(data=output_slz.data)
+
+
+def _is_listed_permission_resource(resource: Dict[str, Any]) -> bool:
+    """开发者中心按此列表展示、检索可调用的资源
+
+    - 校验应用权限的资源：只列出允许主动申请且要求应用认证的资源（兼容层级约束落地前的存量数据）
+    - 不校验应用权限的资源（含无需认证）：即使不允许申请也列出，permission_level 为 unlimited，
+      提示调用方无需申请权限；调用时仍须满足资源的认证要求
+    """
+    if resource["resource_perm_required"]:
+        return bool(resource["allow_apply_permission"] and resource["app_verified_required"])
+    return True
 
 
 @method_decorator(
     name="get",
     decorator=extend_schema(
         parameters=[serializers.AppResourcePermissionListInputSLZ],
-        responses={status.HTTP_200_OK: serializers.AppResourcePermissionListOutputSLZ(many=True)},
+        responses={status.HTTP_200_OK: serializers.GatewayPermissionResourceListOutputSLZ(many=True)},
         tags=["OpenAPI.V2.Inner"],
     ),
 )
@@ -489,15 +560,14 @@ class GatewayPermissionResourceListApi(generics.ListAPIView):
 
         resources = ResourceVersionHandler.get_released_public_resources(request.gateway.id)
 
-        # 过滤掉不允许主动申请权限的资源
-        resources = list(filter(lambda x: x["allow_apply_permission"], resources))
+        resources = [resource for resource in resources if _is_listed_permission_resource(resource)]
 
         resource_permissions = ResourcePermissionBuilder(
             self.request.gateway,
             slz.validated_data["target_app_code"],
         ).build(resources)
 
-        slz = serializers.AppResourcePermissionListOutputSLZ(
+        slz = serializers.GatewayPermissionResourceListOutputSLZ(
             sorted(resource_permissions, key=operator.itemgetter("permission_level", "name")),
             many=True,
         )
@@ -603,6 +673,7 @@ class GatewayAppPermissionApplyCreateApi(generics.CreateAPIView):
                 "record_id": record.id,
                 "itsm_ticket_id": record.itsm_ticket_id or "",
                 "itsm_ticket_url": ItsmPermissionApplyHelper.build_ticket_url(record.itsm_ticket_id),
+                "approval_url": build_gateway_permission_approval_url(record.gateway_id, record.itsm_ticket_id),
             },
         )
 
@@ -717,7 +788,16 @@ class AppPermissionRecordListApi(generics.ListAPIView):
         tags=["OpenAPI.V2.Inner"],
     ),
 )
-class AppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
+@method_decorator(
+    name="delete",
+    decorator=extend_schema(
+        description="删除已取消的 API 网关权限申请记录",
+        parameters=[serializers.PermissionApplyRecordOperateInputSLZ],
+        responses={status.HTTP_204_NO_CONTENT: None},
+        tags=["OpenAPI.V2.Inner"],
+    ),
+)
+class AppPermissionRecordRetrieveDestroyApi(generics.RetrieveAPIView):
     permission_classes = [OpenAPIV2Permission]
     serializer_class = serializers.AppPermissionRecordRetrieveInputSLZ
     lookup_field = "id"
@@ -751,6 +831,46 @@ class AppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
             },
         )
         return OKJsonResponse(data=slz.data)
+
+    def delete(self, request, record_id: int, *args, **kwargs):
+        slz = serializers.PermissionApplyRecordOperateInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        WorkbenchPermissionHandler.delete_gateway_permission_apply_by_app(
+            record_id=record_id,
+            bk_app_code=data["target_app_code"],
+            operated_by=data["operated_by"],
+            tenant_id=get_request_tenant_id(request),
+        )
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(
+    name="post",
+    decorator=extend_schema(
+        description="取消待审批的 API 网关权限申请",
+        request=serializers.PermissionApplyRecordOperateInputSLZ,
+        responses={status.HTTP_204_NO_CONTENT: None},
+        tags=["OpenAPI.V2.Inner"],
+    ),
+)
+class AppPermissionRecordCancelApi(generics.CreateAPIView):
+    permission_classes = [OpenAPIV2Permission]
+    serializer_class = serializers.PermissionApplyRecordOperateInputSLZ
+
+    def post(self, request, record_id: int, *args, **kwargs):
+        slz = self.get_serializer(data=request.data)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        WorkbenchPermissionHandler.cancel_gateway_permission_apply_by_app(
+            record_id=record_id,
+            bk_app_code=data["target_app_code"],
+            operated_by=data["operated_by"],
+            tenant_id=get_request_tenant_id(request),
+        )
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
 
 @method_decorator(
@@ -990,14 +1110,13 @@ class MCPServerPermissionListApi(generics.ListAPIView):
 
         # 2. 查询 MCPServerAppPermissionApply（申请记录表），用于展示申请状态和处理人
         mcp_server_permission_status: Dict[int, str] = {}
-        mcp_server_permission_apply_status = (
-            MCPServerAppPermissionApply.objects.filter(
-                bk_app_code=target_app_code,
-                mcp_server_id__in=mcp_server_ids,
-                is_deleted=False,
-            )
-            .order_by("-applied_time")
-            .values("mcp_server_id", "status", "handled_by", "itsm_ticket_id")
+        mcp_server_permission_apply_status = MCPServerAppPermissionApply.objects.filter(
+            bk_app_code=target_app_code,
+            mcp_server_id__in=mcp_server_ids,
+            is_deleted=False,
+        )
+        mcp_server_permission_apply_status = mcp_server_permission_apply_status.order_by("-applied_time").values(
+            "mcp_server_id", "status", "handled_by", "itsm_ticket_id"
         )
 
         mcp_server_permission_handled_by: Dict[int, str] = {}
@@ -1017,12 +1136,14 @@ class MCPServerPermissionListApi(generics.ListAPIView):
         categories_map = MCPServerHandler.build_categories_map(mcp_server_ids)
 
         # 计算最低权限级别，用于判断是否展示应用态 URL
-        least_privileges = MCPServerHandler.get_least_privileges(mcp_servers)
+        least_privileges = MCPServerHandler.get_least_privileges_by_server(mcp_servers)
 
         for obj in mcp_servers:
             permission_status = mcp_server_permission_status.get(
                 obj.id, MCPServerPermissionStatusEnum.NEED_APPLY.value
             )
+            if permission_status == MCPServerAppPermissionApplyStatusEnum.CANCELED.value:
+                permission_status = MCPServerPermissionStatusEnum.NEED_APPLY.value
             handled_by = mcp_server_permission_handled_by.get(obj.id)
             itsm_ticket_id = mcp_server_permission_itsm_ticket_id.get(obj.id, "")
 
@@ -1143,7 +1264,7 @@ class MCPServerAppPermissionListApi(generics.ListAPIView):
         mcp_servers = [perm.mcp_server for perm in granted_permissions]
 
         # 计算最低权限级别，用于判断是否展示应用态 URL
-        least_privileges = MCPServerHandler.get_least_privileges(mcp_servers)
+        least_privileges = MCPServerHandler.get_least_privileges_by_server(mcp_servers)
 
         # Build categories map
         categories_map = MCPServerHandler.build_categories_map([perm.mcp_server_id for perm in granted_permissions])
@@ -1249,7 +1370,7 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
 
         # 计算最低权限级别，用于判断是否展示应用态 URL
         mcp_servers = [obj.mcp_server for obj in records]
-        least_privileges = MCPServerHandler.get_least_privileges(mcp_servers)
+        least_privileges = MCPServerHandler.get_least_privileges_by_server(mcp_servers)
 
         slz = serializers.MCPServerAppPermissionRecordListOutputSLZ(
             mcp_server_permission_records,
@@ -1272,7 +1393,16 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
         tags=["OpenAPI.V2.Inner"],
     ),
 )
-class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
+@method_decorator(
+    name="delete",
+    decorator=extend_schema(
+        description="删除已取消的 MCP Server 权限申请记录",
+        parameters=[serializers.PermissionApplyRecordOperateInputSLZ],
+        responses={status.HTTP_204_NO_CONTENT: None},
+        tags=["OpenAPI.V2.Inner"],
+    ),
+)
+class MCPServerAppPermissionRecordRetrieveDestroyApi(generics.RetrieveAPIView):
     permission_classes = [OpenAPIV2Permission]
     queryset = MCPServerAppPermissionApply.objects.all()
     serializer_class = serializers.MCPServerAppPermissionRecordRetrieveOutputSLZ
@@ -1332,7 +1462,7 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
         categories_map = MCPServerHandler.build_categories_map([instance.mcp_server_id])
 
         # 计算最低权限级别，用于判断是否展示应用态 URL
-        least_privileges = MCPServerHandler.get_least_privileges([instance.mcp_server])
+        least_privileges = MCPServerHandler.get_least_privileges_by_server([instance.mcp_server])
 
         context = {
             **self.get_serializer_context(),
@@ -1341,6 +1471,46 @@ class MCPServerAppPermissionRecordRetrieveApi(generics.RetrieveAPIView):
         }
         slz = self.get_serializer(mcp_server_permission_record, context=context)
         return OKJsonResponse(data=slz.data)
+
+    def delete(self, request, record_id: int, *args, **kwargs):
+        slz = serializers.PermissionApplyRecordOperateInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        WorkbenchPermissionHandler.delete_mcp_permission_apply_by_app(
+            record_id=record_id,
+            bk_app_code=data["target_app_code"],
+            operated_by=data["operated_by"],
+            tenant_id=get_request_tenant_id(request),
+        )
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(
+    name="post",
+    decorator=extend_schema(
+        description="取消待审批的 MCP Server 权限申请",
+        request=serializers.PermissionApplyRecordOperateInputSLZ,
+        responses={status.HTTP_204_NO_CONTENT: None},
+        tags=["OpenAPI.V2.Inner"],
+    ),
+)
+class MCPServerAppPermissionRecordCancelApi(generics.CreateAPIView):
+    permission_classes = [OpenAPIV2Permission]
+    serializer_class = serializers.PermissionApplyRecordOperateInputSLZ
+
+    def post(self, request, record_id: int, *args, **kwargs):
+        slz = self.get_serializer(data=request.data)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        WorkbenchPermissionHandler.cancel_mcp_permission_apply_by_app(
+            record_id=record_id,
+            bk_app_code=data["target_app_code"],
+            operated_by=data["operated_by"],
+            tenant_id=get_request_tenant_id(request),
+        )
+        return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
 
 @method_decorator(

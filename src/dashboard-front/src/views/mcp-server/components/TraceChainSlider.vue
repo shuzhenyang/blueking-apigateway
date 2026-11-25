@@ -54,7 +54,7 @@
         :z-index="999"
       >
         <div class="trace-chain-content">
-          <AgMcpTraceChain
+          <McpTraceChain
             v-if="isShow"
             :trace-chain-detail="traceData"
           />
@@ -70,14 +70,10 @@ import { cloneDeep } from 'lodash-es';
 import { t } from '@/locales';
 import { copy } from '@/utils';
 import { useTrace } from '@/stores';
-import {
-  type IGatewayLog,
-  type ITraceDetail,
-  fetchObservabilityLogInfoByGateway,
-  fetchObservabilityTraceChainByGateway,
-} from '@/services/source/observability';
-import { DEFAULT_TRACE_DATA } from '@/components/trace-view/constants/trace';
-import AgMcpTraceChain from '@/components/ag-mcp-trace-chain/Index.vue';
+import { getMcpLogChain, getMcpLogDetail } from '@/services/source/gateway/mcp-server/log';
+import type { IGatewayLog, ITraceDetail } from '@/types/observability';
+import { DEFAULT_TRACE_DATA } from '@/constants/trace';
+import McpTraceChain from '@/components/mcp/mcp-trace-chain/Index.vue';
 
 interface IProps {
   apiGatewayId: string | number
@@ -103,8 +99,8 @@ const getTraceChainDetail = async () => {
 
   try {
     const promiseList = [
-      fetchObservabilityLogInfoByGateway(apiGatewayId as number, requestId, {} as any),
-      fetchObservabilityTraceChainByGateway(apiGatewayId as number, requestId),
+      getMcpLogDetail(apiGatewayId as number, requestId),
+      getMcpLogChain(apiGatewayId as number, requestId),
     ];
     const results = await Promise.allSettled(promiseList);
 

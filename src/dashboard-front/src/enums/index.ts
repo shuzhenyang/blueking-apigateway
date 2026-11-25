@@ -26,14 +26,16 @@ const TENANT_MODE_TEXT_MAP: Record<string, string> = {
 const APPROVAL_STATUS_MAP: Record<string, string> = {
   approved: t('通过'),
   rejected: t('驳回'),
-  pending: t('未审批'),
+  pending: t('待审批'),
+  canceled: t('已撤销'),
 };
 
 const APPROVAL_HISTORY_STATUS_MAP: Record<string, string> = {
   approved: t('全部通过'),
   partial_approved: t('部分通过'),
   rejected: t('全部驳回'),
-  pending: t('未审批'),
+  pending: t('待审批'),
+  canceled: t('已撤销'),
 };
 
 const METHOD_THEMES = {
@@ -64,18 +66,6 @@ const RELEASE_STATUS_TEXT = {
   doing: t('执行中'),
 };
 
-const OPERATE_STATUS_MAP: Record<string, string> = {
-  success: t('成功'),
-  failure: t('失败'),
-  pending: t('待同步'),
-  releasing: t('同步中'),
-};
-
-const PERMISSION_LEVEL_MAP: Record<string, string> = ({
-  unlimited: t('无限制'),
-  normal: t('普通'),
-});
-
 export {
   TENANT_MODE_TEXT_MAP,
   APPROVAL_STATUS_MAP,
@@ -83,6 +73,4 @@ export {
   METHOD_THEMES,
   RELEASE_ACTION_TEXT,
   RELEASE_STATUS_TEXT,
-  OPERATE_STATUS_MAP,
-  PERMISSION_LEVEL_MAP,
 };

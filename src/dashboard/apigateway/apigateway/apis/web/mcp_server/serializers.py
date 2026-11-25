@@ -431,7 +431,7 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
 
     def get_url(self, obj) -> str:
         least_privileges = self.context.get("least_privileges", {})
-        least_privilege = least_privileges.get((obj.gateway.id, obj.stage.id), "")
+        least_privilege = least_privileges.get(obj.id, "")
         return MCPServerHandler.get_mcp_server_url(obj, least_privilege)
 
     def get_categories(self, obj):
@@ -806,6 +806,13 @@ class MCPServerAppPermissionApplyListOutputSLZ(serializers.Serializer):
 
     def get_itsm_ticket_url(self, obj):
         return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
+
+
+class MCPServerAppPermissionApplyPendingCountOutputSLZ(serializers.Serializer):
+    count = serializers.IntegerField(read_only=True, help_text="待审批数量")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.mcp_server.serializers.MCPServerAppPermissionApplyPendingCountOutputSLZ"
 
 
 class MCPServerAppPermissionApplyCreateOutputSLZ(serializers.Serializer):

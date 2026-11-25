@@ -28,9 +28,10 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db.backends.mysql.features import DatabaseFeatures
 from django.utils.encoding import force_bytes
 
-from apigateway.common.env import Env
 from apigateway.conf.celery_conf import *  # noqa
 from apigateway.conf.celery_conf import CELERY_BEAT_SCHEDULE
+from apigateway.conf.esb import is_esb_enabled
+from apigateway.conf.kms import get_env, is_kms_enabled
 from apigateway.conf.log_utils import build_logging_config
 from apigateway.conf.utils import (
     PatchFeatures,
@@ -50,7 +51,8 @@ pymysql.version_info = 1, 4, 6, "final", 0
 # 目前 Django 仅是对 5.7 做了软性的不兼容改动，在没有使用 8.0 特异的功能时，对 5.7 版本的使用无影响
 DatabaseFeatures.minimum_database_version = PatchFeatures.minimum_database_version
 
-env = Env()
+env = get_env()
+ENABLE_KMS = is_kms_enabled()
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -78,6 +80,9 @@ EDITION = env.str("EDITION", "ee")
 
 # 是否开启多租户模式
 ENABLE_MULTI_TENANT_MODE = env.bool("ENABLE_MULTI_TENANT_MODE", default=False)
+
+# EE 可关闭 ESB；TE 保留独立部署的 ESB 依赖。
+ESB_ENABLED = is_esb_enabled(env)
 
 # for apigw-manager sdk and other blueking sdks
 BK_APP_TENANT_ID = ""
@@ -132,8 +137,8 @@ INSTALLED_APPS = [
     "bk_notice_sdk",
 ]
 
-# 非多租户模式才会有 esb 相关的模型
-if not ENABLE_MULTI_TENANT_MODE:
+# 仅启用 ESB 时加载其模型和数据库配置
+if ESB_ENABLED:
     INSTALLED_APPS += [
         "apigateway.apps.esb",
         "apigateway.apps.esb.bkcore",
@@ -305,8 +310,8 @@ DATABASES = {
     },
 }
 
-# 非多租户模式才会有 esb 相关的模型
-if not ENABLE_MULTI_TENANT_MODE:
+# 仅启用 ESB 时加载其模型和数据库配置
+if ESB_ENABLED:
     DATABASES["bkcore"] = {
         "ENGINE": env.str("BK_ESB_DATABASE_ENGINE", "django.db.backends.mysql"),
         "NAME": env.str("BK_ESB_DATABASE_NAME", "bk_esb"),
@@ -352,8 +357,8 @@ if BK_APIGW_DATABASE_TLS_ENABLED:
     DATABASES["default"]["OPTIONS"]["ssl"] = default_ssl_options
 
 
-BK_ESB_DATABASE_TLS_ENABLED = env.bool("BK_ESB_DATABASE_TLS_ENABLED", False)
-if not ENABLE_MULTI_TENANT_MODE and BK_ESB_DATABASE_TLS_ENABLED:
+BK_ESB_DATABASE_TLS_ENABLED = ESB_ENABLED and env.bool("BK_ESB_DATABASE_TLS_ENABLED", False)
+if BK_ESB_DATABASE_TLS_ENABLED:
     bkcore_ssl_options = {
         "ca": env.str("BK_ESB_DATABASE_TLS_CERT_CA_FILE", ""),
     }
@@ -441,14 +446,22 @@ RABBITMQ_USER = env.str("BK_APIGW_RABBITMQ_USER", "")
 RABBITMQ_PASSWORD = env.str("BK_APIGW_RABBITMQ_PASSWORD", "")
 if all([RABBITMQ_VHOST, RABBITMQ_PORT, RABBITMQ_HOST, RABBITMQ_USER, RABBITMQ_PASSWORD]):
     # this section not support tls, both rabbitmq and redis
-    CELERY_BROKER_URL = f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/{RABBITMQ_VHOST}"
-    CELERY_RESULT_BACKEND = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0"
+    # KMS credentials are literal strings and may contain URL delimiters.
+    # Keep the legacy URL construction unchanged when KMS is disabled.
+    _rabbitmq_user = quote(RABBITMQ_USER, safe="") if ENABLE_KMS else RABBITMQ_USER
+    _rabbitmq_password = quote(RABBITMQ_PASSWORD, safe="") if ENABLE_KMS else RABBITMQ_PASSWORD
+    _redis_password = quote(REDIS_PASSWORD, safe="") if ENABLE_KMS else REDIS_PASSWORD
+    CELERY_BROKER_URL = (
+        f"amqp://{_rabbitmq_user}:{_rabbitmq_password}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/{RABBITMQ_VHOST}"
+    )
+    CELERY_RESULT_BACKEND = f"redis://:{_redis_password}@{REDIS_HOST}:{REDIS_PORT}/0"
 else:
     # 如果没有使用 Redis 作为 Broker，请不要启用该配置，详见：
     # http://docs.celeryproject.org/en/latest/userguide/configuration.html#broker-transport-options
     CELERY_BROKER_TRANSPORT_OPTIONS = REDIS_CONNECTION_OPTIONS
-    CELERY_BROKER_URL = f"redis://:{quote(REDIS_PASSWORD)}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-    CELERY_RESULT_BACKEND = f"redis://:{quote(REDIS_PASSWORD)}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    _redis_password = quote(REDIS_PASSWORD, safe="" if ENABLE_KMS else "/")
+    CELERY_BROKER_URL = f"redis://:{_redis_password}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    CELERY_RESULT_BACKEND = f"redis://:{_redis_password}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
     CELERY_TASK_DEFAULT_QUEUE = env.str(
         "BK_APIGW_CELERY_TASK_DEFAULT_QUEUE", f"{REDIS_PREFIX}bk_apigateway_dashboard_celery"
     )
@@ -464,7 +477,7 @@ else:
 
         import urllib.parse
 
-        broker_url = f"rediss://:{quote(REDIS_PASSWORD)}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}?{urllib.parse.urlencode(query_string_params)}"
+        broker_url = f"rediss://:{_redis_password}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}?{urllib.parse.urlencode(query_string_params)}"
         CELERY_BROKER_URL = broker_url
         CELERY_RESULT_BACKEND = broker_url
 
@@ -546,6 +559,18 @@ BK_PAAS3_API_TIMEOUT = env.int("BK_PAAS3_API_TIMEOUT", 30)
 BK_AUTH_API_URL = env.str("BK_AUTH_API_URL", "")
 # BKAuth 站点地址 用于 OAuth2 跳转
 BK_AUTH_SERVER_URL = env.str("BK_AUTH_SERVER_URL", "")
+
+# IAM V4 RBAC
+BK_IAM_V4_ENABLED = env.bool("BK_IAM_V4_ENABLED", False)
+BK_IAM_V4_EXCLUDED_USERNAMES = frozenset(
+    username.strip()
+    for username in env.list(
+        "BK_IAM_V4_EXCLUDED_USERNAMES",
+        default=["admin", "bk_admin"],
+    )
+    if username.strip()
+)
+
 BK_MCP_SERVER_PERMISSION_APPROVAL_URL_TMPL = (
     env.str("DASHBOARD_FE_URL", "").rstrip("/") + "/{gateway_id}/mcp/permission?serverId={mcp_server_id}"
 )
@@ -586,7 +611,7 @@ BK_ITSM4_URL_PREFIX = (
 )
 BK_ITSM4_API_TIMEOUT = env.int("BK_ITSM4_API_TIMEOUT", 30)
 BK_ITSM4_SYSTEM_TOKEN = env.str("BK_ITSM4_SYSTEM_TOKEN", default="")
-BK_ITSM4_QUERY_OPERATOR = env.str("BK_ITSM4_QUERY_OPERATOR", default="admin")
+# BK_ITSM4_QUERY_OPERATOR = env.str("BK_ITSM4_QUERY_OPERATOR", default="admin")
 BK_ITSM4_CALLBACK_APP_CODE = env.str(
     "BK_ITSM4_CALLBACK_APP_CODE",
     default="bk-itsm4" if EDITION == "te" else "cw_aitsm",
@@ -633,7 +658,9 @@ RESERVED_GATEWAY_NAME_PREFIXES = ["bk-", "bp-"]
 # 官方网关命名前缀，仅做标记
 OFFICIAL_GATEWAY_NAME_PREFIXES = ["bk-"]
 # 网关名校验白名单
-IGNORE_GATEWAY_NAME_CHECK_WHITELIST = env.list("IGNORE_GATEWAY_NAME_CHECK_WHITELIST", default=["bkpaas3", "paasv3"])
+IGNORE_GATEWAY_NAME_CHECK_WHITELIST = env.list(
+    "IGNORE_GATEWAY_NAME_CHECK_WHITELIST", default=["bkpaas3", "paasv3", "bkiam", "bcs-api-gateway", "cw-aitsm"]
+)
 
 # 允许管理端更新网关认证信息
 DEFAULT_ALLOW_UPDATE_API_AUTH = True
@@ -683,13 +710,11 @@ REQUESTS_POOL_MAXSIZE = env.int("REQUESTS_POOL_MAXSIZE", default=20)
 # API 使用指南文档地址
 # ==============================================================================
 # 可编程网关开发文档链接地址
-PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL = env.str(
-    "PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL",
-    "https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/python.md",
+PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_PYTHON_URL = (
+    "https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/python.md"
 )
-PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL = env.str(
-    "PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL",
-    "https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/golang.md",
+PROGRAMMABLE_GATEWAY_DEV_GUIDELINE_GO_URL = (
+    "https://github.com/TencentBlueKing/bk-apigateway-framework/blob/master/docs/golang.md"
 )
 
 # access token 文档链接地址
@@ -719,14 +744,14 @@ BKAUTH_SESSION_TIMEOUT = 60
 # 启用多租户模式
 BKAUTH_ENABLE_MULTI_TENANT_MODE = ENABLE_MULTI_TENANT_MODE
 
-# 验证用户信息的网关 API(租户版本) => 走网关，不走 esb
-# FIXME: remove `and ENABLE_MULTI_TENANT_MODE` when all env has the newest bk-login
-if EDITION == "ee" and ENABLE_MULTI_TENANT_MODE:
+# EE 可通过 USE_LOGIN_V3_URL 使用 bk-login v3 网关 API 验证用户信息
+USE_LOGIN_V3_URL = env.bool("USE_LOGIN_V3_URL", default=False)
+if EDITION == "ee" and USE_LOGIN_V3_URL:
     BKAUTH_USER_INFO_APIGW_URL = (
         BK_API_URL_TMPL.format(api_name="bk-login") + "/prod/login/api/v3/open/bk-tokens/userinfo/"
     )
 else:
-    # 只在 te 生效，并且会被 te_default.py 中的值覆盖
+    # 使用 v2 接口验证用户信息，TE 可在 te_default.py 中覆盖
     BKAUTH_USER_COOKIE_VERIFY_URL = f"{BK_COMPONENT_API_INNER_URL}/api/c/compapi/v2/bk_login/is_login/"
     BKAUTH_TOKEN_USER_INFO_ENDPOINT = f"{BK_COMPONENT_API_INNER_URL}/api/c/compapi/v2/bk_login/get_user/"
 
@@ -736,8 +761,8 @@ else:
 BK_LOGIN_URL = env.str("BK_LOGIN_URL", default="/")
 # 登录小窗相关
 BK_LOGIN_PLAIN_URL = env.str("BK_LOGIN_PLAIN_URL", default=BK_LOGIN_URL.rstrip("/") + "/plain/")
-BK_LOGIN_PLAIN_WINDOW_WIDTH = env.int("BK_LOGIN_PLAIN_WINDOW_WIDTH", default=700)
-BK_LOGIN_PLAIN_WINDOW_HEIGHT = env.int("BK_LOGIN_PLAIN_WINDOW_HEIGHT", default=550)
+BK_LOGIN_PLAIN_WINDOW_WIDTH = 700
+BK_LOGIN_PLAIN_WINDOW_HEIGHT = 550
 
 # ==============================================================================
 # bkrepo 配置
@@ -785,11 +810,6 @@ API_RESPONSE_ERR_CODE_DOC_DIR = os.path.join(BASE_DIR, "data/knowledge_doc/api_r
 ACCESS_LOG_CONFIG = {
     "es_time_field_name": "dtEventTimeStamp",
     "es_index": env.str("BK_APIGW_API_LOG_ES_INDEX", "2_bklog_bkapigateway_apigateway_container*"),
-}
-
-BK_ESB_ACCESS_LOG_CONFIG = {
-    "es_time_field_name": "dtEventTimeStamp",
-    "es_index": env.str("BK_ESB_API_LOG_ES_INDEX", "2_bklog_bkapigateway_esb_container*"),
 }
 
 MCP_SERVER_ACCESS_LOG_CONFIG = {

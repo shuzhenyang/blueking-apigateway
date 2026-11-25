@@ -28,7 +28,6 @@ from apigateway.core.constants import (
     GatewayStatusEnum,
     PublishEventStatusEnum,
     ReleaseHistoryStatusEnum,
-    ReleaseStatusEnum,
     StageStatusEnum,
 )
 from apigateway.core.models import Gateway, PublishEvent, Release, ReleaseHistory
@@ -206,17 +205,8 @@ class ReleaseHandler:
                 "resource_version_id": release_history.resource_version_id,
                 "resource_version_display": release_history.resource_version.object_display,
             }
-            # 如果没有查到任何发布事件
-            if publish_id not in publish_id_to_latest_event_map:
-                state["status"] = ReleaseStatusEnum.PENDING.value
-            else:
-                latest_event = publish_id_to_latest_event_map[publish_id]
-                state["status"] = latest_event.get_release_history_status()
+            state["status"] = release_history.get_status(publish_id_to_latest_event_map.get(publish_id))
 
             stage_publish_status[stage_id] = state
 
         return stage_publish_status
-
-    @staticmethod
-    def filter_released_gateway_ids(gateway_ids: List[int]) -> List[int]:
-        return list(set(Release.objects.filter(gateway_id__in=gateway_ids).values_list("gateway_id", flat=True)))

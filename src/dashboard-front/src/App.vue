@@ -44,13 +44,14 @@
           >
             <div>
               <img
-                :src="LogoWithoutTitle"
-                alt="API Gateway"
+                :src="appLogo"
+                alt=""
                 class="max-w-none h-28px cursor-pointer"
+                @error="handleLogoError"
               >
             </div>
             <div class="text-16px font-bold color-#eaebf0 cursor-pointer">
-              {{ t('蓝鲸 API 网关') }}
+              {{ productName }}
             </div>
           </div>
         </template>
@@ -66,6 +67,10 @@
                   @click="() => handleNavClick(item.url, index, item.link)"
                 >
                   <span class="text">{{ item.name }}</span>
+                  <span
+                    v-if="item.url === 'PersonalWorkbench' && pendingCount > 0"
+                    class="nav-dot"
+                  />
                 </div>
               </template>
               <div
@@ -91,8 +96,8 @@
             </div>
             <div class="header-aside-wrap">
               <LanguageToggle />
-              <ProductInfo />
-              <UserInfo v-if="isBkUserNameConfigured" />
+              <HelpMenu />
+              <UserMenu v-if="isBkUserNameConfigured" />
             </div>
           </div>
         </template>
@@ -105,10 +110,10 @@
 </template>
 
 <script lang="ts" setup>
-import LanguageToggle from '@/components/language-toggle/Index.vue';
-import ProductInfo from '@/components/product-info/Index.vue';
-import UserInfo from '@/components/user-info/Index.vue';
-import LogoWithoutTitle from '@/images/APIgateway-logo.png';
+import LanguageToggle from '@/layout/app-header/LanguageToggle.vue';
+import HelpMenu from '@/layout/app-header/HelpMenu.vue';
+import UserMenu from '@/layout/app-header/UserMenu.vue';
+import DefaultAppLogo from '@/images/APIgateway-logo.png';
 import En from '../node_modules/bkui-vue/dist/locale/en.esm.js';
 import ZhCn from '../node_modules/bkui-vue/dist/locale/zh-cn.esm.js';
 import NoticeComponent from '@blueking/notice-component';
@@ -116,9 +121,13 @@ import {
   useEnv,
   useFeatureFlag,
   useGateway,
+  usePlatformConfig,
   useUserInfo,
 } from '@/stores';
-import { useBkUserDisplayName } from '@/hooks';
+import {
+  useBkUserDisplayName,
+  usePersonalWorkbench,
+} from '@/hooks';
 import type { IHeaderNav } from '@/types/common';
 import { useScriptTag, useTitle } from '@vueuse/core';
 
@@ -128,7 +137,9 @@ const router = useRouter();
 const userInfoStore = useUserInfo();
 const featureFlagStore = useFeatureFlag();
 const envStore = useEnv();
+const platformConfigStore = usePlatformConfig();
 const { configure: configureDisplayName } = useBkUserDisplayName();
+const { pendingCount, getMyPendingData } = usePersonalWorkbench();
 const gateway = useGateway();
 
 // 接入访问统计逻辑，只在上云版执行
@@ -161,6 +172,7 @@ const userLoaded = ref(false);
 const showNoticeAlert = ref(false);
 const enableShowNotice = ref(false);
 const curLeavePageData = ref({});
+const failedLogoUrl = shallowRef('');
 // 是否配置了bk用户名配置，配置了才能渲染 bk-user-name 组件
 const isBkUserNameConfigured = ref(false);
 
@@ -173,48 +185,48 @@ const menuList = ref<IHeaderNav[]>([
     link: '',
   },
   {
-    name: t('组件管理'),
-    id: 2,
-    url: 'ComponentsMain',
-    enabled: false,
-    link: '',
-  },
-  {
     name: t('API 文档'),
-    id: 3,
+    id: 2,
     url: 'Docs',
     enabled: true,
     link: '',
   },
   {
-    name: t('平台工具'),
-    id: 4,
-    url: 'PlatformTools',
-    enabled: true,
-    link: '',
-  },
-  {
     name: t('MCP 市场'),
-    id: 5,
+    id: 3,
     url: 'McpMarket',
     enabled: true,
     link: '',
   },
   {
     name: 'BK-CLI',
-    id: 6,
+    id: 4,
     url: 'BkCli',
     enabled: false,
     link: '',
   },
   {
+    name: t('平台工具'),
+    id: 5,
+    url: 'PlatformTools',
+    enabled: true,
+    link: '',
+  },
+  {
     name: t('个人工作台'),
-    id: 7,
+    id: 6,
     url: 'PersonalWorkbench',
     enabled: true,
     link: '',
   },
 ]);
+
+const appLogo = computed(() => {
+  const configuredLogo = platformConfigStore.config?.appLogo?.trim();
+  return configuredLogo && configuredLogo !== failedLogoUrl.value ? configuredLogo : DefaultAppLogo;
+});
+
+const productName = computed(() => platformConfigStore.config?.i18n?.productName?.trim() || t('蓝鲸 API 网关'));
 
 const bkuiLocale = computed(() => {
   if (locale.value === 'zh-cn') {
@@ -264,8 +276,19 @@ watch(
 );
 
 watch(locale, () => {
-  const docTitle = useTitle();
-  docTitle.value = t('API Gateway | 腾讯蓝鲸智云');
+  document.documentElement.lang = locale.value === 'en' ? 'en' : 'zh-CN';
+  // 平台配置加载完成前先使用默认标题，加载后由 platform-config 设置
+  if (!platformConfigStore.config) {
+    const docTitle = useTitle();
+    docTitle.value = t('API Gateway | 腾讯蓝鲸智云');
+  }
+}, { immediate: true });
+
+// 登录信息就绪后查询一次待办数量，用于顶部导航「个人工作台」的红点提示
+watch(userLoaded, (loaded) => {
+  if (loaded) {
+    getMyPendingData();
+  }
 }, { immediate: true });
 
 // flag需要是实时的，确保不同页面组件执行顺序需要监听下
@@ -273,16 +296,7 @@ async function getFlagList() {
   try {
     await featureFlagStore.fetchFlags();
     enableShowNotice.value = featureFlagStore.flags.ENABLE_BK_NOTICE;
-    const isEnabledComManagement = featureFlagStore.flags?.MENU_ITEM_ESB_API
-      && !featureFlagStore.flags?.ENABLE_MULTI_TENANT_MODE;
-
     featureFlagStore.setNoticeAlert(enableShowNotice.value && showNoticeAlert.value);
-    featureFlagStore.setDisplayComManagement(isEnabledComManagement);
-
-    const comNav = menuList.value.find(item => ['ComponentsMain'].includes(item.url));
-    if (comNav) {
-      comNav.enabled = isEnabledComManagement;
-    }
 
     // 如果开启了bk-cli菜单，则需要将bk-cli菜单显示出来
     const isBkCliEnabled = featureFlagStore.flags?.ENABLE_BK_CLI;
@@ -303,6 +317,8 @@ async function getUserInfo() {
   try {
     const userData = await userInfoStore.fetchUserInfo();
     const envData = await envStore.fetchEnv();
+    // 平台配置（标题、favicon、页脚等）依赖环境变量 BK_SHARED_RES_URL，store 内保证只请求一次，不阻塞页面渲染
+    platformConfigStore.fetchConfig();
     const tenantId = userData?.tenant_id ?? '';
     const apiBaseUrl = envData?.BK_USER_WEB_API_URL ?? '';
 
@@ -346,6 +362,13 @@ const handleNavClick = (url: string, index: number, link: string = '') => {
     return;
   }
   getRouteData(url, index, link);
+};
+
+const handleLogoError = (event: Event) => {
+  const src = (event.currentTarget as HTMLImageElement).getAttribute('src');
+  if (src && src !== DefaultAppLogo) {
+    failedLogoUrl.value = src;
+  }
 };
 
 const handleLogoClick = () => {
@@ -418,24 +441,27 @@ const handleDeveloperCenterClick = () => {
         margin: 0;
 
         .header-nav-item {
-          color: #96A2B9;
+          position: relative;
+          color: #96a2B9;
           list-style: none;
 
           &.item-active {
-            color: #FFF !important;
+            color: #ffffff !important;
           }
 
           &:hover {
-            color: #D3D9E4;
+            color: #d3d9e4;
             cursor: pointer;
           }
 
-          text {
-            color: #96A2B9;
-
-            &:hover {
-              color: #D3D9E4;
-            }
+          .nav-dot {
+            position: absolute;
+            top: -2px;
+            right: -12px;
+            width: 8px;
+            height: 8px;
+            background-color: #ea3636;
+            border-radius: 50%;
           }
         }
 

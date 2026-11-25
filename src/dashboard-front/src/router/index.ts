@@ -28,8 +28,6 @@ import getResourceManagementRoutes from '@/views/resource-management/route';
 import getBasicInfoRoutes from '@/views/basic-info/routes';
 // 成员管理
 import getMemberManagementRoutes from '@/views/member-management/routes';
-// 组件管理
-import getComponentManagementRoutes from '@/views/component-management/route';
 // 后端服务
 import getBackendServicesRoutes from '@/views/backend-services/routes';
 // 模型服务
@@ -97,6 +95,7 @@ const routes: RouteRecordRaw[] = [
       // 裸访问 /:id 时默认进入基本信息页
       {
         path: '',
+        name: 'ResourcesIndex',
         redirect: to => ({
           name: 'BasicInfo',
           params: { id: to.params.id },
@@ -132,6 +131,18 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  // 流水日志分享页：顶级路由，不套网关 layout
+  {
+    path: '/:id/access-log/:requestId',
+    name: 'AccessLogDetail',
+    component: () => import('@/views/operate-data/access-log/Detail.vue'),
+    meta: {
+      title: t('流水日志'),
+      matchRoute: 'AccessLogDetail',
+      topMenu: 'home',
+      skipRoleCheck: true,
+    },
+  },
   {
     path: '/platform-tools',
     name: 'PlatformTools',
@@ -150,14 +161,6 @@ const routes: RouteRecordRaw[] = [
       matchRoute: 'BkCli',
       topMenu: 'BkCli',
     },
-  },
-  {
-    path: '/components',
-    name: 'ComponentsMain',
-    component: () => import('@/layout/component-management/Index.vue'),
-    props,
-    redirect: '/components/access',
-    children: [...getComponentManagementRoutes()],
   },
   {
     path: '/docs',

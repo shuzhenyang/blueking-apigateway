@@ -76,18 +76,17 @@ a {
 
 .ag-tag {
   display: inline-block;
-  background: #f0f1f5;
+  background-color: #f0f1f5;
   color: #63656e;
   font-size: 12px;
   vertical-align: middle;
-  box-sizing: border-box;
   overflow: hidden;
-  border-radius: 2px;
   white-space: nowrap;
-  padding: 0 4px;
-  height: 20px;
-  line-height: 20px;
-  font-weight: 400;
+  border-radius: 2px;
+  padding: 0 8px;
+  height: 22px;
+  line-height: 22px;
+  box-sizing: border-box;
 
   &.danger,
   &.delete {
@@ -122,6 +121,31 @@ a {
     background-color: #dad6fd;
     color: #5949e1;
   }
+
+  &.approved {
+    background-color: #2caf5e;
+    color: #ffffff;
+  }
+
+  &.partial_approved {
+    background-color: #daf6e5;
+    color: #299e56;
+  }
+
+  &.rejected {
+    background-color: #ffebeb;
+    color: #e71818;
+  }
+
+  &.pending {
+    background-color: #e1ecff;
+    color: #1768ef;
+  }
+
+  &.canceled {
+    background-color: #f0f1f5;
+    color: #4d4f56;
+  }
 }
 
 .ag-dot {
@@ -139,28 +163,25 @@ a {
 
   &.primary,
   &.releasing,
-  &.pending {
+  &.pending,
+  &.canceled {
     background-color: #f0f1f5;
     border: 1px solid #c9cad2;
   }
 
   &.success,
-  &.partial_approved,
   &.approved {
     background-color: #e6f6eb;
     border: 1px solid #43c472;
+  }
+
+  &.partial_approved {
+    background-color: #ffe8c3;
+    border: 1px solid #ff9c01;
   }
 
   &.rejected {
     background-color: #ffe6e6;
     border: 1px solid #ea3636;
   }
-}
-
-.mr8 {
-  margin-right: 8px !important;
-}
-
-.ml10 {
-  margin-left: 10px !important;
 }

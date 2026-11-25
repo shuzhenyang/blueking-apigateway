@@ -55,11 +55,12 @@ def test_automation_defaults_weight_and_accepts_multiple_headers():
     assert "options" not in slz.validated_data["instances"][0]
 
 
-def test_automation_rejects_multiple_instances_in_first_phase():
+def test_automation_accepts_multiple_instances_with_fixed_weights():
     slz = AIBackendConfigSLZ(data={"instances": [_custom_instance("primary"), _custom_instance("fallback")]})
 
-    assert not slz.is_valid()
-    assert "instances" in slz.errors
+    slz.is_valid(raise_exception=True)
+    assert all(item["weight"] == 1 and item["priority"] == 10 for item in slz.validated_data["instances"])
+    assert slz.validated_data["fallback_strategy"] == ["http_429", "http_5xx"]
 
 
 def test_ai_backend_ignores_unknown_outer_field():
@@ -95,6 +96,59 @@ def test_gateway_sync_input_maps_ai_kind():
 
 
 class TestGatewaySyncInputSLZ:
+    @pytest.mark.parametrize(
+        "official_config", [{"is_official": True}, {"api_type": GatewayTypeEnum.OFFICIAL_API.value}]
+    )
+    @pytest.mark.parametrize(
+        ("name", "is_valid"),
+        [
+            ("bkiam", True),
+            ("bcs-api-gateway", True),
+            ("cw-aitsm", True),
+            ("bkpaas3", True),
+            ("paasv3", True),
+            ("bk-test", True),
+            ("bkiam-test", False),
+            ("bkiamx", False),
+            ("bcs-api-gateway-test", False),
+            ("bcs-api-gatewayx", False),
+            ("cw-aitsm-test", False),
+            ("cw-aitsmx", False),
+        ],
+    )
+    def test_official_gateway_name_exceptions_are_exact(self, official_config, name, is_valid):
+        slz = GatewaySyncInputSLZ(data={"name": name, **official_config})
+
+        assert slz.is_valid() is is_valid
+        if is_valid:
+            assert slz.validated_data["gateway_type"] == GatewayTypeEnum.OFFICIAL_API.value
+        else:
+            assert "name" in slz.errors
+
+    def test_official_name_error_uses_current_field(self):
+        slz = GatewaySyncInputSLZ(data={"name": "gateway", "is_official": True})
+
+        assert not slz.is_valid()
+        assert "官方网关" in str(slz.errors["name"][0])
+        assert "api_type" not in str(slz.errors["name"][0])
+
+    @pytest.mark.parametrize(
+        ("data", "expected_gateway_type"),
+        [
+            ({"name": "bk-test", "is_official": True}, GatewayTypeEnum.OFFICIAL_API.value),
+            ({"name": "test", "is_official": False}, GatewayTypeEnum.CLOUDS_API.value),
+            ({"name": "bk-test", "api_type": 10, "is_official": True}, GatewayTypeEnum.OFFICIAL_API.value),
+            ({"name": "test", "api_type": 1, "is_official": False}, GatewayTypeEnum.CLOUDS_API.value),
+        ],
+    )
+    def test_is_official_takes_precedence_over_api_type(self, data, expected_gateway_type):
+        slz = GatewaySyncInputSLZ(data=data)
+
+        slz.is_valid(raise_exception=True)
+
+        assert slz.validated_data["gateway_type"] == expected_gateway_type
+        assert "is_official" not in slz.validated_data
+
     @pytest.mark.parametrize(
         ("data", "is_valid"),
         [

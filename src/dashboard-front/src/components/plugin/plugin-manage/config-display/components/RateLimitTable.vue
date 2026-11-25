@@ -1,0 +1,141 @@
+/*
+ * TencentBlueKing is pleased to support the open source community by making
+ * 蓝鲸智云 - API 网关(BlueKing - APIGateway) available.
+ * Copyright (C) Tencent. All rights reserved.
+ * Licensed under the MIT License (the "License"); you may not use this file except
+ * in compliance with the License. You may obtain a copy of the License at
+ *
+ *     http://opensource.org/licenses/MIT
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * We undertake not to change the open source license (MIT license) applicable
+ * to the current version of the project delivered to anyone in the future.
+ */
+
+<template>
+  <!--  插件配置展示态组件  -->
+  <!--  频率控制插件  -->
+  <BaseTable
+    :columns="tableCols"
+    :data="tableData"
+  >
+    <template
+      v-if="isUserRateLimit && featureFlagStore.isEnableDisplayName"
+      #appId="{ row }"
+    >
+      <bk-user-display-name
+        v-if="!row.isDefault"
+        :user-id="row.appId"
+      />
+      <template v-else>
+        --
+      </template>
+    </template>
+  </BaseTable>
+</template>
+
+<script setup lang="ts">
+import type {
+  IBaseTableRow,
+  IColumn,
+  IPlugin,
+} from '../types';
+import BaseTable from './BaseTable.vue';
+import { useFeatureFlag } from '@/stores';
+
+interface IRateLimitConfig {
+  rates: {
+    [key: string]: {
+      period: number
+      tokens: number
+    }[]
+  }
+}
+
+interface IRateLimitTableRow extends IBaseTableRow {
+  type: string
+  tokens: number
+  period: string
+  appId?: string
+  isDefault: boolean
+}
+
+interface IProps {
+  plugin: IPlugin<IRateLimitConfig>
+  firstColWidth: string
+}
+
+const {
+  plugin,
+  firstColWidth,
+} = defineProps<IProps>();
+
+const featureFlagStore = useFeatureFlag();
+const { t } = useI18n();
+
+const periodTextMap: Record<number, string> = {
+  1: t('秒'),
+  60: t('分'),
+  3600: t('时'),
+  86400: t('天'),
+};
+
+const isUserRateLimit = computed(() => (plugin.code || plugin.type) === 'bk-resource-user-rate-limit');
+
+// 频率控制插件表格列
+const tableCols = computed<IColumn[]>(() => [
+  {
+    label: t('类别'),
+    align: 'right',
+    field: 'type',
+    width: firstColWidth,
+    index: 0,
+    rowspan: ({ row }: any) => row.rowSpan || 1,
+  },
+  {
+    label: t('次数'),
+    field: 'tokens',
+  },
+  {
+    label: t('时间范围'),
+    field: 'period',
+  },
+  {
+    label: isUserRateLimit.value ? t('用户名') : t('蓝鲸应用 ID'),
+    field: 'appId',
+  },
+]);
+
+// 频率控制插件表格数据
+const tableData = computed(() => {
+  const defaultData: IRateLimitTableRow[] = [];
+  const specialData: IRateLimitTableRow[] = [];
+  const { rates } = plugin.config;
+  Object.entries(rates).forEach(([appId, rateConfig]) => {
+    rateConfig.forEach(({ tokens, period }, index) => {
+      const isDefault = appId === '__default';
+      const rows = isDefault ? defaultData : specialData;
+      const type = isDefault
+        ? (isUserRateLimit.value ? t('默认用户频率限制') : t('默认应用频率限制'))
+        : (isUserRateLimit.value ? t('特殊用户频率限制') : t('特殊应用频率限制'));
+      rows.push({
+        key: `${appId}:${index}`,
+        appId: isDefault ? '--' : appId,
+        isDefault,
+        tokens,
+        type,
+        period: periodTextMap[period] ?? `${period} ${t('秒')}`,
+      });
+    });
+  });
+  if (specialData.length > 0) {
+    specialData[0].rowSpan = specialData.length;
+  }
+  return [...defaultData, ...specialData];
+});
+
+</script>

@@ -79,13 +79,11 @@
 
 <script setup lang="ts">
 import { type IDialog } from '@/types/common';
-import { createSDK } from '@/services/source/sdks';
-import {
-  type IVersionItem,
-  getVersionList,
-} from '@/services/source/resource';
+import { createSDK } from '@/services/source/gateway/sdk';
+import { getVersionList } from '@/services/source/gateway/resource-version';
+import type { IVersionItem } from '@/types/resource-version';
 import { Message } from 'bkui-vue';
-import SdkLanguageSelector from '@/components/sdk-language-selector/Index.vue';
+import SdkLanguageSelector from './SdkLanguageSelector.vue';
 
 interface CreateDialog {
   resource_version_id: string

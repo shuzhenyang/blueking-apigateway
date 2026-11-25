@@ -17,6 +17,7 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
+
 import arrow
 from django_dynamic_fixture import G
 
@@ -138,6 +139,8 @@ class TestResourceVersionRetrieveOutputSLZ:
                 {
                     "id": fake_resource_version_v1.data[0]["id"],
                     "kind": ResourceKindEnum.STANDARD.value,
+                    "is_deprecated": False,
+                    "deprecated_note": "",
                     "name": fake_resource_version_v1.data[0]["name"],
                     "method": fake_resource_version_v1.data[0]["method"],
                     "path": fake_resource_version_v1.data[0]["path"],
@@ -208,6 +211,8 @@ class TestResourceVersionRetrieveOutputSLZ:
                 {
                     "id": fake_resource_version_v2.data[0]["id"],
                     "kind": ResourceKindEnum.STANDARD.value,
+                    "is_deprecated": False,
+                    "deprecated_note": "",
                     "name": fake_resource_version_v2.data[0]["name"],
                     "method": fake_resource_version_v2.data[0]["method"],
                     "path": fake_resource_version_v2.data[0]["path"],

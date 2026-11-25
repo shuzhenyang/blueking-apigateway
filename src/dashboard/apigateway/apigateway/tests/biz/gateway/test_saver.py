@@ -17,6 +17,8 @@
 #
 import pytest
 from ddf import G
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from pydantic import TypeAdapter
 from rest_framework.exceptions import ValidationError
 
@@ -49,6 +51,7 @@ class TestGatewayData:
                     "user_config": None,
                     "allow_auth_from_params": None,
                     "allow_delete_sensitive_params": None,
+                    "oauth2_app_enabled": None,
                     "tenant_id": None,
                     "tenant_mode": None,
                     "kind": GatewayKindEnum.NORMAL.value,
@@ -67,6 +70,7 @@ class TestGatewayData:
                     "not_exist_key": "",
                     "allow_auth_from_params": False,
                     "allow_delete_sensitive_params": True,
+                    "oauth2_app_enabled": None,
                     "tenant_mode": "single",
                     "tenant_id": "default",
                 },
@@ -81,6 +85,7 @@ class TestGatewayData:
                     "user_config": {"foo": "bar"},
                     "allow_auth_from_params": False,
                     "allow_delete_sensitive_params": True,
+                    "oauth2_app_enabled": None,
                     "tenant_mode": "single",
                     "tenant_id": "default",
                     "kind": GatewayKindEnum.NORMAL.value,
@@ -90,10 +95,23 @@ class TestGatewayData:
     )
     def test(self, data, expected):
         gateway_data = TypeAdapter(GatewayData).validate_python(data)
-        assert gateway_data.model_dump() == expected
+        assert gateway_data.model_dump() == {"display_name": None, "display_name_en": None, **expected}
 
 
 class TestGatewaySaver:
+    def test_sync_omitting_app_channel_preserves_a_later_update(self, fake_gateway):
+        saver = GatewaySaver(
+            fake_gateway.pk,
+            GatewayData(name=fake_gateway.name, status=fake_gateway.status, description="synced"),
+        )
+        Gateway.objects.filter(pk=fake_gateway.pk).update(oauth2_app_enabled=False)
+
+        saver.save()
+
+        fake_gateway.refresh_from_db()
+        assert fake_gateway.description == "synced"
+        assert fake_gateway.oauth2_app_enabled is False
+
     def test_save(self, unique_gateway_name, default_data_plane):
         # create
         saver = GatewaySaver(
@@ -114,6 +132,35 @@ class TestGatewaySaver:
         assert gateway.id == Gateway.objects.get(name=unique_gateway_name).id
         assert gateway.status == 0
         assert gateway.is_official is False
+
+    def test_save_oauth2_app_enabled(self, unique_gateway_name, default_data_plane):
+        gateway = GatewaySaver(
+            None, GatewayData(name=unique_gateway_name, status=1, tenant_mode="single", tenant_id="default")
+        ).save()
+        assert gateway.oauth2_app_enabled is True
+
+        gateway = GatewaySaver(
+            gateway.id,
+            GatewayData(
+                name=unique_gateway_name, status=1, oauth2_app_enabled=False, tenant_mode="single", tenant_id="default"
+            ),
+        ).save()
+        assert Gateway.objects.get(id=gateway.id).oauth2_app_enabled is False
+
+        # 未传时保留当前值
+        gateway = GatewaySaver(
+            gateway.id, GatewayData(name=unique_gateway_name, status=1, tenant_mode="single", tenant_id="default")
+        ).save()
+        assert Gateway.objects.get(id=gateway.id).oauth2_app_enabled is False
+
+        other_name = f"{unique_gateway_name}-other"
+        gateway = GatewaySaver(
+            None,
+            GatewayData(
+                name=other_name, status=1, oauth2_app_enabled=False, tenant_mode="single", tenant_id="default"
+            ),
+        ).save()
+        assert gateway.oauth2_app_enabled is False
 
     def test_create(self, settings, unique_gateway_name, default_data_plane):
         settings.DEFAULT_USER_AUTH_TYPE = "default"
@@ -411,3 +458,65 @@ class TestGatewaySaver:
         # Verify binding still exists and wasn't modified
         assert GatewayDataPlaneBinding.objects.filter(gateway=gateway, data_plane=data_plane).exists()
         assert GatewayDataPlaneBinding.objects.filter(gateway=gateway).count() == 1
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_saver_explicit_default_clear_and_english_clear(fake_gateway, value):
+    fake_gateway.display_name = "Before"
+    fake_gateway.display_name_en = "Before English"
+    fake_gateway.save(update_fields=["display_name", "display_name_en"])
+    saver = GatewaySaver(
+        fake_gateway.pk, GatewayData(name=fake_gateway.name, status=1, display_name=value, display_name_en=value)
+    )
+    gateway = saver.save()
+    gateway.refresh_from_db()
+    assert gateway.display_name == fake_gateway.name
+    assert gateway.display_name_en is None
+
+
+def test_saver_default_omission_preserves_display_name(fake_gateway):
+    fake_gateway.display_name = "Initial"
+    fake_gateway.save(update_fields=["display_name"])
+    saver = GatewaySaver(fake_gateway.pk, GatewayData(name=fake_gateway.name, status=1))
+    gateway = saver.save()
+    gateway.refresh_from_db()
+    assert gateway.display_name == "Initial"
+
+
+def test_saver_same_field_conflict_rolls_back_metadata_and_members(fake_gateway, mocker):
+    fake_gateway.display_name = "Shared"
+    fake_gateway.display_name_en = "Before English"
+    fake_gateway.save(update_fields=["display_name", "display_name_en"])
+    G(Gateway, display_name="Taken")
+    members = mocker.patch("apigateway.biz.gateway.gateway.add_gateway_administrators")
+    auth = mocker.patch("apigateway.biz.gateway.gateway.GatewayHandler.save_auth_config")
+    saver = GatewaySaver(
+        fake_gateway.pk,
+        GatewayData(
+            name=fake_gateway.name, display_name="Taken", status=1, description="changed", maintainers=["new"]
+        ),
+    )
+    with pytest.raises(IntegrityError):
+        saver.save()
+    fake_gateway.refresh_from_db()
+    assert fake_gateway.display_name_en == "Before English"
+    assert fake_gateway.description != "changed"
+    members.assert_not_called()
+    auth.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["display_name", "display_name_en"])
+@pytest.mark.parametrize("length", [64, 65])
+def test_saver_trims_before_length_validation(field, length, fake_gateway):
+    data = GatewayData(name=fake_gateway.name, status=1, **{field: " " + "A" * length + " "})
+    saver = GatewaySaver(fake_gateway.pk, data)
+    if length == 65:
+        with pytest.raises(DjangoValidationError):
+            saver.save()
+        return
+    saver.save()
+    fake_gateway.refresh_from_db()
+    assert getattr(fake_gateway, field) == "A" * 64
+    assert field in data.model_fields_set
+    omitted = GatewayData(name=fake_gateway.name, status=1)
+    assert field not in omitted.model_fields_set

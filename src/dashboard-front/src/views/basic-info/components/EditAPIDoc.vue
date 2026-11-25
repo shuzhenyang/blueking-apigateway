@@ -20,7 +20,7 @@
   <BkDialog
     width="640"
     :is-show="modelValue"
-    :title="t('编辑API文档')"
+    :title="t('编辑 API 文档')"
     @update:is-show="handleUpdateIsShow"
   >
     <div class="doc-form">
@@ -63,7 +63,7 @@
             :is-error-class="'maintainers-error-tip'"
             @on-change="(e: any) => handleContactsChange(e)"
           />
-          <TenantUserSelector
+          <TenantUserEditor
             v-else
             ref="selectorRef"
             :content="docForm.contacts"
@@ -103,12 +103,12 @@
           />
         </BkFormItem>
 
-        <BkFormItem
+        <!-- <BkFormItem
           :label="t('文档地址')"
           class="virtual-required"
-        >
+          >
           <span class="link">{{ data?.docs_url || '--' }}</span>
-        </BkFormItem>
+          </BkFormItem> -->
       </BkForm>
     </div>
     <template #footer>
@@ -124,10 +124,11 @@
         <template #content>
           <div class="preview-content">
             <div class="header li">
-              <div class="title">
+              <div class="title text-14px font-700">
                 {{ t('网关详情') }}
               </div>
               <div
+                v-if="isShowChatEntry"
                 v-bk-tooltips="{
                   content: docForm.type === 'user' ? docForm.contacts?.join(',') : t('联系服务号'),
                   theme: 'light',
@@ -141,6 +142,24 @@
                   class="doc-qw icon-ag-qw"
                 />
                 {{ docForm.type === 'user' ? t('一键拉群') : docForm.service_account.name }}
+              </div>
+            </div>
+
+            <div class="li">
+              <div class="title">
+                {{ t('网关展示名') }}
+              </div>
+              <div class="value break-all">
+                {{ getGatewayDisplayName(data) }}
+              </div>
+            </div>
+
+            <div class="li">
+              <div class="title">
+                {{ t('网关 ID') }}
+              </div>
+              <div class="value break-all">
+                {{ data?.name || '--' }}
               </div>
             </div>
 
@@ -166,7 +185,7 @@
                     field="maintainers"
                     :content="data?.maintainers"
                   />
-                  <TenantUserSelector
+                  <TenantUserEditor
                     v-else
                     :content="data?.maintainers"
                     field="maintainers"
@@ -193,7 +212,7 @@
                     field="contacts"
                     :content="docForm.contacts"
                   />
-                  <TenantUserSelector
+                  <TenantUserEditor
                     v-else
                     :content="docForm.contacts"
                     field="contacts"
@@ -235,13 +254,14 @@
 </template>
 
 <script lang="ts" setup>
-import { useFeatureFlag } from '@/stores';
+import { useEnv, useFeatureFlag } from '@/stores';
 import { cloneDeep } from 'lodash-es';
 import { Form, Message } from 'bkui-vue';
-import { getGatewayDetail, patchGateway } from '@/services/source/gateway';
+import { getGatewayDetail, patchGateway } from '@/services/source/gateway/gateway';
 import type { IExtractApiReturn } from '@/services/types/utils';
 import EditMember from '@/views/basic-info/components/EditMember.vue';
-import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
+import TenantUserEditor from '@/components/user/tenant-user-editor/Index.vue';
+import { getGatewayDisplayName } from '@/utils/gateway-name';
 
 interface IForm {
   type: string
@@ -271,6 +291,7 @@ const emit = defineEmits<IEmits>();
 
 const { t } = useI18n();
 const featureFlagStore = useFeatureFlag();
+const envStore = useEnv();
 
 const InitForm = (): IForm => {
   return {
@@ -284,10 +305,20 @@ const InitForm = (): IForm => {
 };
 
 const formRef = ref<InstanceType<typeof Form> & { clearValidate: () => void }>();
-const selectorRef = ref<InstanceType<typeof EditMember | typeof TenantUserSelector> & { isShowError: boolean
+const selectorRef = ref<InstanceType<typeof EditMember | typeof TenantUserEditor> & { isShowError: boolean
   isEditable: boolean }>();
 const loading = ref<boolean>(false);
 const docForm = ref<IForm>(InitForm());
+
+// 外发环境（ee）不展示
+const isChatEntryEnabled = computed(() => (
+  envStore.env.EDITION === 'te' && featureFlagStore.flags.ALLOW_CREATE_APPCHAT
+));
+
+// 服务号类型仍需展示服务号名称，用户类型在外发环境不展示
+const isShowChatEntry = computed(() => (
+  docForm.value.type === 'service_account' || isChatEntryEnabled.value
+));
 
 const rules = {
   'service_account.link': [
@@ -320,6 +351,25 @@ watch(
     if (modelValue) {
       const { doc_maintainers } = data as any;
       docForm.value = cloneDeep(doc_maintainers);
+      nextTick(() => {
+        if (selectorRef.value) {
+          selectorRef.value.isEditable = true;
+        }
+      });
+    }
+  },
+);
+
+// 重新挂载后置回编辑态，保证弹窗内联系人字段始终可编辑
+watch(
+  () => docForm.value.type,
+  (type) => {
+    if (type === 'user') {
+      nextTick(() => {
+        if (selectorRef.value) {
+          selectorRef.value.isEditable = true;
+        }
+      });
     }
   },
 );
@@ -338,6 +388,9 @@ const handleCommit = async () => {
     loading.value = true;
 
     const payload: any = { ...data };
+    // 展示名和认证协议在基本信息弹窗中更新，保存文档联系人时省略。
+    delete payload.display_name;
+    delete payload.oauth2_app_enabled;
 
     const { type, contacts, service_account } = docForm.value;
     if (type === 'user') {
@@ -381,7 +434,9 @@ const handleUpdateIsShow = (value: boolean) => {
     formRef.value?.clearValidate();
     if (selectorRef.value) {
       selectorRef.value.isShowError = false;
-      selectorRef.value.isEditable = false;
+      if (!value) {
+        selectorRef.value.isEditable = false;
+      }
     }
   });
   emit('update:modelValue', value);
@@ -439,13 +494,12 @@ const handleContactsChange = ({ contacts }: { contacts: string[] }) => {
 
     .title {
       margin-bottom: 4px;
-      font-size: 12px;
-      color: #4D4F56;
+      color: #4d4f56;
     }
 
     .value {
       font-size: 12px;
-      color: #4D4F56;
+      color: #313238;
     }
   }
 

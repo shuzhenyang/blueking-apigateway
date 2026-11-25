@@ -81,6 +81,7 @@
       <AgTable
         ref="tableRef"
         v-model:table-data="tableData"
+        cache-identifier="PermissionApp"
         resizable
         show-settings
         show-selection
@@ -143,23 +144,22 @@
 import { cloneDeep } from 'lodash-es';
 import { Button, Message } from 'bkui-vue';
 import { type ISearchItem, type ISearchValue } from 'bkui-vue/lib/search-select/utils.d';
-import type { IGatewaysResourcesListQuery } from '@/services/types/query/gateways';
+import type { IGatewaysResourcesListQuery } from '@/services/types/gateway/resource.ts';
 import { useTableFilterChange } from '@/hooks/use-table-filter-change';
 import {
-  type IAuthData,
-  type IExportParams,
   batchDeletePermission,
   batchUpdatePermission,
   deleteApiPermission,
   deleteResourcePermission,
   exportPermissionList,
   getPermissionList,
-  getResourceListData,
   getResourcePermissionAppList,
-} from '@/services/source/permission';
+} from '@/services/source/gateway/permission';
+import { getResourceList } from '@/services/source/gateway/resource';
 import { useFeatureFlag, useGateway, usePermission } from '@/stores';
-import type { IDropList, ITableMethod } from '@/types/common';
-import type { IPermission, IResource } from '@/types/permission';
+import type { IDropList } from '@/types/common';
+import type { IAuthData, IPermission, IPermissionExportParams, IResource } from '@/types/permission';
+import type { ICountAndResults } from '@/services/types/utils.ts';
 import { sortByKey } from '@/utils';
 import { GRANT_DIMENSION_TYPE_LIST } from '@/constants';
 import ProactiveAuthorization from '@/views/permission/app/components/ProactiveAuthorization.vue';
@@ -167,7 +167,13 @@ import RenewalDialog from '@/views/permission/app/components/Renewal.vue';
 import BatchRenewal from '@/views/permission/app/components/BatchRenewal.vue';
 import BatchRemove from '@/views/permission/app/components/BatchRemove.vue';
 import DeletePermission from '@/views/permission/app/components/DeletePermission.vue';
-import AgTable from '@/components/ag-table/Index.vue';
+import AgTable, {
+  type FilterValue,
+  type IAgTableInstance,
+  type ITableColumn,
+  type ITableSelection,
+  type TableRow,
+} from '@/components/base/ag-table';
 
 const { t } = useI18n();
 const { handleTableFilterChange } = useTableFilterChange();
@@ -175,10 +181,10 @@ const gatewayStore = useGateway();
 const permissionStore = usePermission();
 const featureFlagStore = useFeatureFlag();
 
-const tableRef = useTemplateRef<InstanceType<typeof AgTable> & ITableMethod>('tableRef');
-const tableColumns = shallowRef<any[]>([
+const tableRef = useTemplateRef<IAgTableInstance<IPermission>>('tableRef');
+const tableColumns = shallowRef<ITableColumn<IPermission>[]>([
   {
-    title: t('蓝鲸应用ID'),
+    title: t('蓝鲸应用 ID'),
     colKey: 'bk_app_code',
     ellipsis: true,
     width: 200,
@@ -188,7 +194,7 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'grant_dimension',
     ellipsis: true,
     width: 120,
-    cell: (h: any, { row }: { row: IPermission }) => {
+    cell: (_h, { row }) => {
       return (
         <span class="ag-auto-text">
           { getSearchDimensionText(row.grant_dimension) }
@@ -206,10 +212,9 @@ const tableColumns = shallowRef<any[]>([
     title: t('资源名称'),
     colKey: 'resource_name',
     ellipsis: true,
-    cell: (h: any, { row }: { row: IPermission }) => {
-      const data = row as IPermission;
+    cell: (_h, { row }) => {
       return (
-        <span>{ data.resource_name || '--' }</span>
+        <span>{ row.resource_name || '--' }</span>
       );
     },
   },
@@ -217,10 +222,9 @@ const tableColumns = shallowRef<any[]>([
     title: t('请求路径'),
     colKey: 'resource_path',
     ellipsis: true,
-    cell: (h: any, { row }: { row: IPermission }) => {
-      const data = row as IPermission;
+    cell: (_h, { row }) => {
       return (
-        <span>{ data.resource_path || '--' }</span>
+        <span>{ row.resource_path || '--' }</span>
       );
     },
   },
@@ -229,11 +233,10 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'expires',
     ellipsis: true,
     width: 100,
-    cell: (h: any, { row }: { row: IPermission }) => {
-      const data = row as IPermission;
+    cell: (_h, { row }) => {
       return (
-        <span style={{ color: permissionStore.getDurationTextColor(data.expires) }}>
-          { permissionStore.getDurationText(data.expires) }
+        <span style={{ color: permissionStore.getDurationTextColor(row.expires) }}>
+          { permissionStore.getDurationText(row.expires) }
         </span>
       );
     },
@@ -243,11 +246,10 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'grant_type',
     ellipsis: true,
     width: 120,
-    cell: (h: any, { row }: { row: IPermission }) => {
-      const data = row as IPermission;
+    cell: (_h, { row }) => {
       return (
         <span>
-          { t(['initialize'].includes(data.grant_type) ? '主动授权' : '申请审批') }
+          { t(['initialize'].includes(row.grant_type) ? '主动授权' : '申请审批') }
         </span>
       );
     },
@@ -257,12 +259,11 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'handled_by',
     ellipsis: true,
     width: 100,
-    cell: (h: any, { row }: { row: IPermission }) => {
-      const data = row as IPermission;
+    cell: (_h, { row }) => {
       return (
         !featureFlagStore.isEnableDisplayName
-          ? <span>{data.handled_by || '--'}</span>
-          : <span><bk-user-display-name user-id={data.handled_by} /></span>
+          ? <span>{row.handled_by || '--'}</span>
+          : <span><bk-user-display-name user-id={row.handled_by} /></span>
       );
     },
   },
@@ -271,7 +272,7 @@ const tableColumns = shallowRef<any[]>([
     colKey: 'operate',
     fixed: 'right',
     width: 120,
-    cell: (h: any, { row }: { row: IPermission }) => {
+    cell: (_h, { row }) => {
       return (
         <div>
           <Button
@@ -375,7 +376,7 @@ const batchRemoveSliderConf = ref({
   title: t('批量删除'),
 });
 // 导出参数
-const exportParams = ref<IExportParams>({ export_type: 'all' });
+const exportParams = ref<IPermissionExportParams>({ export_type: 'all' });
 const filterValues = ref<ISearchValue[]>([]);
 const filterConditions = ref<ISearchItem[]>([
   {
@@ -395,7 +396,7 @@ const filterConditions = ref<ISearchItem[]>([
     noValidate: true,
   },
   {
-    name: t('蓝鲸应用ID'),
+    name: t('蓝鲸应用 ID'),
     id: 'bk_app_code',
     children: [],
     onlyRecommendChildren: true,
@@ -416,7 +417,7 @@ const filterConditions = ref<ISearchItem[]>([
     noValidate: true,
   },
 ]);
-const tableData = ref([]);
+const tableData = ref<IPermission[]>([]);
 
 const apigwId = computed(() => gatewayStore.apigwId);
 // 可续期的数量
@@ -466,9 +467,12 @@ watch(
   { deep: true },
 );
 
-const getTableData = async (params: Record<string, any> = {}) => {
+const getTableData = async (params: Record<string, any> = {}): Promise<ICountAndResults<IPermission>> => {
   const results = await getPermissionList(apigwId.value, params);
-  return results ?? [];
+  return results ?? {
+    count: 0,
+    results: [],
+  };
 };
 
 function getList() {
@@ -498,13 +502,13 @@ function handleSearch() {
   getList();
 }
 
-const handleSelectionChange = ({ selections }: { selections: any[] }) => {
+const handleSelectionChange = ({ selections }: ITableSelection<TableRow<IPermission>>) => {
   isBatchRenewal.value = true;
-  curSelections.value = selections as IPermission[];
+  curSelections.value = selections;
 };
 
 // 处理表头筛选联动搜索框
-const handleFilterChange = (filterItem: any) => {
+const handleFilterChange = (filterItem: FilterValue) => {
   handleTableFilterChange({
     filterItem,
     filterData,
@@ -543,7 +547,7 @@ const getApigwResources = async () => {
   const resourceIdOption = filterConditions.value.find(
     (condition: ISearchItem) => condition.id === 'resource_id',
   );
-  const response = await getResourceListData(apigwId.value, pageParams);
+  const response = await getResourceList(apigwId.value, pageParams);
   const resources = response.results || [];
   const results = resources.map((resource: any) => ({
     id: resource.id,
@@ -676,7 +680,7 @@ const handleRemovePermission = async () => {
   removeDialogConf.value.isShow = false;
   Message({
     theme: 'success',
-    message: t('删除成功！'),
+    message: t('删除成功'),
   });
   handleClearSelection();
   getList();

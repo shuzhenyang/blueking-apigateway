@@ -73,7 +73,6 @@
 <script setup lang="ts">
 import { useEnv, useFeatureFlag } from '@/stores';
 import type { IMenu } from '@/types/common';
-import AgIcon from '@/components/ag-icon/Index.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -90,25 +89,25 @@ const platformToolsMenu = computed<IMenu[]>(() => [
   {
     name: 'PlatformToolsToolbox',
     title: t('工具箱'),
-    icon: 'gongjuxiang',
+    icon: 'toolbox',
     enabled: true,
   },
   {
     name: 'PlatformToolsCLI',
     title: t('CLI 工具'),
-    icon: 'cli',
+    icon: 'cli-tool',
     enabled: featureFlagStore.flags.ENABLE_BK_CLI,
   },
   {
     name: 'PlatformToolsAutomatedGateway',
     title: t('自动化接入网关'),
-    icon: 'zidongjieru',
+    icon: 'automate',
     enabled: true,
   },
   {
     name: 'PlatformToolsProgrammableGateway',
     title: t('可编程网关'),
-    icon: 'square-program',
+    icon: 'programmable',
     enabled: true,
   },
   {
@@ -188,28 +187,30 @@ const handleBack = () => {
 
       .bk-menu-item {
         margin: 0;
-        color: rgb(99 101 110);
+        color: #4d4f56;
 
         .item-icon {
+          color: #979ba5;
 
           .default-icon {
-            background-color: rgb(197 199 205);
+            background-color: #c5c7cd;
           }
         }
 
         &:hover {
           background: #f0f1f5;
         }
-      }
 
-      .bk-menu-item.is-active {
-        color: rgb(58 132 255);
-        background: rgb(225 236 255);
+        &.is-active {
+          color: #3a84ff;
+          background: #e1ecff;
 
-        .item-icon {
+          .item-icon {
+            color: inherit;
 
-          .default-icon {
-            background-color: rgb(58 132 255);
+            .default-icon {
+              background-color: #3a84ff;
+            }
           }
         }
       }
@@ -271,6 +272,7 @@ const handleBack = () => {
   }
 
   :deep(.navigation-container) {
+    background-color: #f5f7fa;
 
     .container-header {
       height: 0 !important;
@@ -280,25 +282,24 @@ const handleBack = () => {
   }
 
   .navigation-main-content {
-    border: 1px solid #ddd;
 
     .content-view {
       height: 100%;
       overflow: hidden;
       font-size: 14px;
+      background-color: #f5f7fa;
 
       .content-header {
         display: flex;
-        height: 51px;
+        align-items: center;
+        flex-basis: 52px;
+        height: 52px;
         padding: 0 24px;
         margin-right: auto;
         font-size: 16px;
         color: #313238;
-        background: #fff;
+        background-color: #fff;
         border-bottom: 1px solid #dcdee5;
-        box-shadow: 0 3px 4px rgb(64 112 203 / 5.88%);
-        align-items: center;
-        flex-basis: 51px;
 
         .icon-ag-return-small {
           font-size: 32px;
@@ -308,8 +309,9 @@ const handleBack = () => {
       }
 
       .default-header-view {
-        height: calc(100vh - 105px);
+        height: calc(100vh - 104px);
         overflow: auto;
+        background-color: #f5f7fa;
         scrollbar-gutter: stable;
 
         &.custom-header-view {
@@ -319,7 +321,7 @@ const handleBack = () => {
         }
 
         &.show-notice {
-          height: calc(100vh - 145px);
+          height: calc(100vh - 144px);
         }
       }
     }

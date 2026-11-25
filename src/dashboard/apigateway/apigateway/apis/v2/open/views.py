@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from blue_krill.async_utils.django_utils import apply_async_on_commit
 from django.conf import settings
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import Http404, JsonResponse
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
@@ -41,7 +41,7 @@ from apigateway.apps.mcp_server.models import (
     MCPServerAppPermissionApply,
     MCPServerCategory,
 )
-from apigateway.apps.permission.constants import PermissionApplyExpireDaysEnum
+from apigateway.apps.permission.constants import GrantDimensionEnum, PermissionApplyExpireDaysEnum
 from apigateway.apps.permission.tasks import send_mail_for_perm_apply
 from apigateway.apps.rbac.models import GatewayMember
 from apigateway.biz.access_log import LogHandler
@@ -49,6 +49,7 @@ from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.mcp_server import MCPServerHandler, MCPServerPermissionHandler
 from apigateway.biz.permission import PermissionDimensionManager
 from apigateway.biz.released_resource_doc import DocGenerator, ReleasedResourceDocHandler
+from apigateway.biz.resource import ResourceOpenAPISchemaHandler
 from apigateway.biz.resource_doc import ResourceDocHandler
 from apigateway.biz.resource_version import ResourceVersionHandler
 from apigateway.common.django.translation import get_current_language_code
@@ -58,6 +59,7 @@ from apigateway.common.tenant.constants import TenantModeEnum
 from apigateway.common.tenant.query import (
     gateway_filter_by_app_tenant_id,
     gateway_mcp_server_filter_by_user_tenant_id,
+    gateway_related_filter_by_user_tenant_id,
     mcp_server_related_filter_by_user_tenant_id,
 )
 from apigateway.components.bkauth import get_app_tenant_info
@@ -75,6 +77,7 @@ from apigateway.service.resource_version import get_resource_schema
 from apigateway.utils.responses import OKJsonResponse
 
 from . import serializers
+from .permissions import GatewayAppPermissionApplyPermission
 from .serializers import (
     GatewayAppPermissionApplyOutputSLZ,
     GatewayResourceDetailInputSLZ,
@@ -150,10 +153,16 @@ class GatewayListApi(generics.ListAPIView):
 
         if name:
             # 模糊匹配，查询名称中包含 name 的网关 or 精确匹配，查询名称为 name 的网关
-            queryset = queryset.filter(name__contains=name) if fuzzy else queryset.filter(name=name)
+            queryset = (
+                queryset.filter(Q(name__contains=name) | Q(display_name__contains=name))
+                if fuzzy
+                else queryset.filter(name=name)
+            )
 
         if keyword:
-            queryset = queryset.filter(Q(name__icontains=keyword) | Q(description__icontains=keyword))
+            queryset = queryset.filter(
+                Q(name__icontains=keyword) | Q(description__icontains=keyword) | Q(display_name__icontains=keyword)
+            )
 
         if kind:
             kind_query = Q(kind=convert_gateway_kind_name_to_value(kind))
@@ -255,7 +264,7 @@ class GatewayRetrieveApi(generics.RetrieveAPIView):
     ),
 )
 class GatewayAppPermissionApplyAPI(generics.CreateAPIView):
-    permission_classes = [OpenAPIV2GatewayNamePermission]
+    permission_classes = [OpenAPIV2GatewayNamePermission, GatewayAppPermissionApplyPermission]
     serializer_class = serializers.GatewayAppPermissionApplyInputSLZ
 
     @transaction.atomic
@@ -313,6 +322,96 @@ class GatewayAppPermissionApplyAPI(generics.CreateAPIView):
         )
 
         return OKJsonResponse(data=output_slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=extend_schema(
+        description="获取当前应用的网关 API 权限列表",
+        parameters=[serializers.CurrentAppPermissionListInputSLZ],
+        responses={status.HTTP_200_OK: serializers.AppPermissionListOutputSLZ(many=True)},
+        tags=["OpenAPI.V2.Open"],
+    ),
+)
+class CurrentAppPermissionListApi(generics.ListAPIView):
+    serializer_class = serializers.AppPermissionListOutputSLZ
+    permission_classes = [OpenAPIV2Permission]
+
+    def list(self, request, *args, **kwargs):
+        """获取当前应用的网关 API 权限列表"""
+        slz = serializers.CurrentAppPermissionListInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        model = PermissionDimensionManager.get_permission_model(data["grant_dimension"])
+        queryset = model.objects.filter(bk_app_code=request.app.app_code)
+
+        tenant_id = get_request_tenant_id(request)
+        if tenant_id:
+            queryset = gateway_related_filter_by_user_tenant_id(queryset, tenant_id)
+
+        if data.get("gateway_name"):
+            queryset = queryset.filter(gateway__name=data["gateway_name"])
+
+        if data.get("resource_name") and data["grant_dimension"] == GrantDimensionEnum.RESOURCE.value:
+            queryset = queryset.filter(
+                Exists(Resource.objects.filter(id=OuterRef("resource_id"), name=data["resource_name"]))
+            )
+
+        page = self.paginate_queryset(queryset.select_related("gateway").order_by("id"))
+
+        resource_names = {}
+        if data["grant_dimension"] == GrantDimensionEnum.RESOURCE.value:
+            resource_ids = [perm.resource_id for perm in page]
+            resource_names = dict(Resource.objects.filter(id__in=resource_ids).values_list("id", "name"))
+
+        output_slz = self.get_serializer(page, many=True, context={"resource_names": resource_names})
+        return self.get_paginated_response(output_slz.data)
+
+
+@method_decorator(
+    name="get",
+    decorator=extend_schema(
+        description="获取指定应用的网关 API 权限列表",
+        parameters=[serializers.GatewayAppPermissionListInputSLZ],
+        responses={status.HTTP_200_OK: serializers.AppPermissionListOutputSLZ(many=True)},
+        tags=["OpenAPI.V2.Open"],
+    ),
+)
+class GatewayAppPermissionListApi(generics.ListAPIView):
+    serializer_class = serializers.AppPermissionListOutputSLZ
+    permission_classes = [OpenAPIV2Permission]
+
+    def list(self, request, *args, **kwargs):
+        """获取指定应用的网关 API 权限列表"""
+        slz = serializers.GatewayAppPermissionListInputSLZ(data=request.query_params)
+        slz.is_valid(raise_exception=True)
+        data = slz.validated_data
+
+        model = PermissionDimensionManager.get_permission_model(data["grant_dimension"])
+        queryset = model.objects.filter(bk_app_code=data["target_app_code"])
+
+        tenant_id = get_request_tenant_id(request)
+        if tenant_id:
+            queryset = gateway_related_filter_by_user_tenant_id(queryset, tenant_id)
+
+        if data.get("gateway_name"):
+            queryset = queryset.filter(gateway__name=data["gateway_name"])
+
+        if data.get("resource_name") and data["grant_dimension"] == GrantDimensionEnum.RESOURCE.value:
+            queryset = queryset.filter(
+                Exists(Resource.objects.filter(id=OuterRef("resource_id"), name=data["resource_name"]))
+            )
+
+        page = self.paginate_queryset(queryset.select_related("gateway").order_by("id"))
+
+        resource_names = {}
+        if data["grant_dimension"] == GrantDimensionEnum.RESOURCE.value:
+            resource_ids = [perm.resource_id for perm in page]
+            resource_names = dict(Resource.objects.filter(id__in=resource_ids).values_list("id", "name"))
+
+        output_slz = self.get_serializer(page, many=True, context={"resource_names": resource_names})
+        return self.get_paginated_response(output_slz.data)
 
 
 @method_decorator(
@@ -506,6 +605,11 @@ class MCPServerAppPermissionRecordListApi(generics.ListAPIView):
             queryset.filter(mcp_server_id=OuterRef("mcp_server_id")).order_by("-applied_time", "-id").values("id")[:1]
         )
         queryset = queryset.filter(id=Subquery(latest_record_id)).order_by("-applied_time", "-id")
+
+        # 状态过滤在取最新记录之后，只返回当前申请状态匹配的 mcp_server
+        if data.get("status"):
+            queryset = queryset.filter(status=data["status"])
+
         # TODO: bk_aidev 切换分页协议后，删除此临时开关及下方旧版响应分支，恢复直接分页。
         use_legacy_response = request.app.app_code == "bk_aidev" and Env().bool(
             "ENABLE_BK_AIDEV_MCP_APPLY_RECORDS_COMPAT", default=False
@@ -623,6 +727,7 @@ class UserMCPServerListApi(generics.ListAPIView):
             gateway.id: {
                 "id": gateway.id,
                 "name": gateway.name,
+                "display_name": gateway.display_name_or_name,
                 "maintainers": gateway_administrators_map.get(gateway.id, []),
                 "is_official": gateway.is_official,
             }
@@ -638,7 +743,7 @@ class UserMCPServerListApi(generics.ListAPIView):
             for stage in Stage.objects.filter(id__in=stage_ids)
         }
 
-        least_privileges = MCPServerHandler.get_least_privileges(page)
+        least_privileges = MCPServerHandler.get_least_privileges_by_server(page)
 
         # Add categories map
         categories_map = MCPServerHandler.build_categories_map([mcp_server.id for mcp_server in page])
@@ -679,6 +784,7 @@ class GatewayResourceListApi(generics.ListAPIView):
         - 只返回公开的资源
         - 支持 fields 参数指定返回字段，如 fields=id,name
         - 支持 keyword 模糊搜索 name、description 和标签名称
+        - 支持 has_openapi_schema 按是否已声明请求参数过滤
         """
         slz = GatewayResourceListInputSLZ(data=request.query_params)
         slz.is_valid(raise_exception=True)
@@ -695,6 +801,15 @@ class GatewayResourceListApi(generics.ListAPIView):
                 | Q(resourcelabel__api_label__name__icontains=slz.validated_data["keyword"])
             ).distinct()
 
+        resource_ids_with_openapi_schema = ResourceOpenAPISchemaHandler.get_resource_ids_with_openapi_schema(
+            request.gateway.id
+        )
+        has_openapi_schema = slz.validated_data.get("has_openapi_schema")
+        if has_openapi_schema is True:
+            queryset = queryset.filter(id__in=resource_ids_with_openapi_schema)
+        elif has_openapi_schema is False:
+            queryset = queryset.exclude(id__in=resource_ids_with_openapi_schema)
+
         resources = list(queryset)
         fields_str = slz.validated_data.get("fields")
 
@@ -705,6 +820,9 @@ class GatewayResourceListApi(generics.ListAPIView):
             context={
                 "labels": get_resource_id_to_labels(resource_ids),
                 "auth_configs": ResourceAuthContext().get_resource_id_to_auth_config(resource_ids),
+                "resource_ids_with_openapi_schema": set(
+                    resource_ids_with_openapi_schema.filter(resource_id__in=resource_ids)
+                ),
             },
         )
 
@@ -793,7 +911,10 @@ class GatewayResourceDetailApi(generics.RetrieveAPIView):
             "match_subpath": resource_data.match_subpath,
             "enable_websocket": resource_data.enable_websocket,
             "is_public": resource_data.is_public,
+            "is_deprecated": resource_data.is_deprecated,
+            "deprecated_note": resource_data.deprecated_note,
             "schema": resource_schema or {},
+            "has_openapi_schema": ResourceOpenAPISchemaHandler.has_openapi_schema(resource_schema),
             "doc": doc_info,
             "auth_config": {
                 "user_verified_required": resource_data.verified_user_required,
@@ -824,6 +945,8 @@ class GatewayResourceDetailApi(generics.RetrieveAPIView):
                 "type": doc.get("type"),
                 "content": doc.get("content"),
                 "updated_time": doc.get("updated_time"),
+                "is_deprecated": doc.get("is_deprecated", False),
+                "deprecated_note": doc.get("deprecated_note", ""),
             }
         except Exception:  # pylint: disable=broad-except
             logger.exception(

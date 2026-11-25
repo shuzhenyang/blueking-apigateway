@@ -134,7 +134,7 @@
           </div>
         </div>
         <div class="main-encoding">
-          <AgEditor
+          <AgCodeEditor
             ref="editorRef"
             v-model="eventOutputLines"
             read-only
@@ -147,22 +147,24 @@
 
 <script lang="ts" setup>
 import {
-  type IEventResponse,
-  type IGatewayEvent,
-  type IGatewayEventTemplate,
-  type IPaasEventInstance,
   getDeployEvents,
   getFinishedDeployEvents,
   getProgrammableStageDetail,
-} from '@/services/source/programmable.ts';
-import AgEditor from '@/components/ag-editor/Index.vue';
+} from '@/services/source/gateway/programmable';
+import type {
+  IEventResponse,
+  IGatewayEvent,
+  IGatewayEventTemplate,
+  IPaasEventInstance,
+} from '@/types/programmable';
+import type { IStageListItem } from '@/types/stage';
+import AgCodeEditor from '@/components/base/ag-code-editor/Index.vue';
 import { useTimeoutPoll } from '@vueuse/core';
 import { Divider } from 'bkui-vue';
 import { Spinner } from 'bkui-vue/lib/icon';
 import dayjs from 'dayjs';
 import { sumBy } from 'lodash-es';
 import { useStage } from '@/stores';
-import type { IStageListItem } from '@/services/source/stage.ts';
 import type { IExtractApiReturn } from '@/services/types/utils.ts';
 
 interface ITimelineItem {

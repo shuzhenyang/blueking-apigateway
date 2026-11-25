@@ -16,7 +16,7 @@
  * to the current version of the project delivered to anyone in the future.
  */
 <template>
-  <AgSideSlider
+  <AgSideslider
     v-model="sliderConfig.isShow"
     ext-cls="alarm-strategy-slider"
     :width="640"
@@ -355,7 +355,7 @@
                   >
                     <BkCheckboxGroup v-model="noticeConfig.notice_role">
                       <BkCheckbox label="maintainer">
-                        {{ t('网关维护者') }}
+                        {{ t('网关管理员') }}
                       </BkCheckbox>
                       <BkCheckbox label="custom">
                         {{ t('自定义') }}
@@ -401,7 +401,7 @@
         </BkButton>
       </div>
     </template>
-  </AgSideSlider>
+  </AgSideslider>
 </template>
 
 <script lang="ts" setup>
@@ -410,13 +410,10 @@ import { Checkbox, Form, Input, Message, Select } from 'bkui-vue';
 import { useAccessLog, useGateway } from '@/stores';
 import type { IFormMethod } from '@/types/common';
 import type { IExtractApiReturn } from '@/services/types/utils';
-import { getStageList } from '@/services/source/stage';
-import {
-  type IAlarmStrategy,
-  createStrategy,
-  updateStrategy,
-} from '@/services/source/monitor';
-import AgSideSlider from '@/components/ag-sideslider/Index.vue';
+import { getStageList } from '@/services/source/gateway/stage';
+import { createStrategy, updateStrategy } from '@/services/source/gateway/monitor';
+import type { IAlarmStrategy } from '@/types/monitor';
+import AgSideslider from '@/components/base/ag-sideslider/Index.vue';
 
 type IStageListItem = IExtractApiReturn<typeof getStageList>[number];
 

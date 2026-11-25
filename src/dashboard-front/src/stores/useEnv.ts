@@ -16,10 +16,12 @@
  * to the current version of the project delivered to anyone in the future.
  */
 import { defineStore } from 'pinia';
-import { getEnv } from '@/services/source/basic';
+import { getEnvVars } from '@/services/source/platform/setting';
+
+type EnvType = Awaited<ReturnType<typeof getEnvVars>>;
 
 export const useEnv = defineStore('useEnv', {
-  state: () => ({
+  state: (): { env: EnvType } => ({
     env: {
       BK_ANALYSIS_SCRIPT_SRC: '',
       BK_APIGATEWAY_VERSION: '',
@@ -43,7 +45,7 @@ export const useEnv = defineStore('useEnv', {
       BK_USER_WEB_API_URL: '',
       CREATE_CHAT_API: '',
       EDITION: '',
-      BK_SDK_LANGUAGES: [] as string[],
+      BK_SDK_LANGUAGES: [],
       SEND_CHAT_API: '',
       BK_USER_PERSONAL_CENTER_LINK: '',
       CLI: {
@@ -55,6 +57,7 @@ export const useEnv = defineStore('useEnv', {
         GIT_REPO_URL: '',
         NPM_INSTALL_CMD: '',
         SKILL_NPM_INSTALL_CMD: '',
+        OVERVIEW: [],
       },
       HELPER: {
         name: '',
@@ -69,8 +72,12 @@ export const useEnv = defineStore('useEnv', {
         USER_VERIFY: '',
         // API资源模板变量
         TEMPLATE_VARS: '',
+        // 路由匹配规则
+        ROUTE_MATCH_RULES: '',
         // 网关认证
         AUTH: '',
+        // 个人token查看文档
+        AUTH_PERSONAL_TOKEN: '',
         // Swagger说明文档
         SWAGGER: '',
         // 跨域资源共享(CORS)
@@ -85,10 +92,6 @@ export const useEnv = defineStore('useEnv', {
         USER_TYPE: '',
         // API网关错误码
         ERROR_CODE: '',
-        // 组件频率控制
-        COMPONENT_RATE_LIMIT: '',
-        // 如何开发和发布组件
-        COMPONENT_CREATE_API: '',
         // 文档导入详情
         IMPORT_RESOURCE_DOCS: '',
         // 实例类型
@@ -137,7 +140,7 @@ export const useEnv = defineStore('useEnv', {
      * 查询环境变量信息
      */
     async fetchEnv() {
-      const result = await getEnv();
+      const result = await getEnvVars();
       this.env = Object.assign(this.env, result ?? {});
       return this.env;
     },

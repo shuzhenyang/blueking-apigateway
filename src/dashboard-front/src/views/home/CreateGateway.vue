@@ -154,8 +154,8 @@
           {{ t('通过编码的方式配置和管理网关的功能，支持接口组合、协议转换和接口编排等功能') }}
         </BkAlert>
         <BkFormItem
-          :label="t('名称')"
-          class="form-item-name"
+          :label="t('网关 ID')"
+          class="form-item-with-tips"
           property="name"
           required
         >
@@ -169,10 +169,27 @@
             show-word-limit
             :prefix="formData.kind === 2 ? 'bkai-' : undefined"
           />
+          <p class="common-form-tips">
+            {{ t('网关的唯一标识，创建后不可更改') }}
+          </p>
         </BkFormItem>
-        <span class="common-form-tips form-item-name-tips">
-          {{ t('网关的唯一标识，创建后不可更改') }}
-        </span>
+        <BkFormItem
+          :label="t('网关展示名')"
+          class="form-item-with-tips"
+          property="display_name"
+          required
+        >
+          <BkInput
+            v-model.trim="formData.display_name"
+            :maxlength="64"
+            :placeholder="t('请输入网关展示名')"
+            clearable
+            show-word-limit
+          />
+          <p class="common-form-tips">
+            {{ t('用于页面展示，可随时修改') }}
+          </p>
+        </BkFormItem>
         <BkFormItem
           v-if="formData.kind === 1"
           :label="t('开发语言')"
@@ -180,7 +197,7 @@
           required
         >
           <BkSelect
-            v-model="formData.extra_info!.language"
+            v-model="formData.extra_info.language"
             :disabled="isEdit"
             class="bk-select"
           >
@@ -199,18 +216,9 @@
           class="member-selector-form"
           :class="[{ 'is-error': isShowMemberError}]"
         >
-          <MemberSelector
-            v-if="!featureFlagStore.isTenantMode"
+          <UserSelector
             v-model="formData.maintainers"
             @change="handleMemberChange"
-          />
-          <BkUserSelector
-            v-else
-            v-model="formData.maintainers"
-            :api-base-url="envStore.tenantUserDisplayAPI"
-            multiple
-            :tenant-id="userStore.info.tenant_id"
-            @change="handleTenantUserChange"
           />
           <div
             v-if="isShowMemberError"
@@ -239,14 +247,14 @@
             required
           >
             <BkInput
-              v-model="formData.extra_info!.repository"
+              v-model="formData.extra_info.repository"
               disabled
             />
           </BkFormItem>
           <span class="common-form-tips form-item-name-tips">
             {{ t('自动创建开源仓库，将模板代码初始化到仓库中，并将创建者设定为仓库管理员') }}
           </span>
-          <bk-alert
+          <BkAlert
             v-if="isShowRepoAuthAlert"
             theme="error"
             class="common-form-tips form-item-name-tips"
@@ -266,7 +274,7 @@
                 </span>
               </div>
             </template>
-          </bk-alert>
+          </BkAlert>
         </template>
 
         <template v-if="formData.kind === 1 && envStore.env.EDITION === 'ee' && !isEdit">
@@ -295,7 +303,7 @@
             required
           >
             <BkInput
-              v-model.trim="formData.programmable_gateway_git_info!.repository"
+              v-model.trim="formData.programmable_gateway_git_info.repository"
               placeholder="http(s)://xxx.git"
             />
           </BkFormItem>
@@ -304,7 +312,7 @@
             property="programmable_gateway_git_info.account"
             required
           >
-            <BkInput v-model.trim="formData.programmable_gateway_git_info!.account" />
+            <BkInput v-model.trim="formData.programmable_gateway_git_info.account" />
           </BkFormItem>
           <BkFormItem
             :label="t('密码')"
@@ -312,7 +320,7 @@
             required
           >
             <BkInput
-              v-model.trim="formData.programmable_gateway_git_info!.password"
+              v-model.trim="formData.programmable_gateway_git_info.password"
               :placeholder="t('建议使用 access_token')"
             />
           </BkFormItem>
@@ -333,6 +341,11 @@
             t('公开，则用户可查看资源文档、申请资源权限；不公开，则网关对用户隐藏')
           }}</span>
         </BkFormItem>
+
+        <GatewayAuthProtocol
+          v-if="isEdit"
+          v-model="formData.oauth2_app_enabled"
+        />
 
         <template v-if="featureFlagStore.isTenantMode && !isEdit">
           <template v-if="userStore.info.tenant_id === 'system'">
@@ -378,7 +391,7 @@
           >
             <BkTagInput
               v-model="formData.bk_app_codes"
-              :placeholder="t('请输入蓝鲸应用ID，并按enter确认')"
+              :placeholder="t('请输入蓝鲸应用 ID，并按 enter 确认')"
               allow-create
               has-delete-icon
               collapse-tags
@@ -393,7 +406,7 @@
           >
             <BkTagInput
               v-model="formData.related_app_codes"
-              :placeholder="t('请输入蓝鲸应用ID，并按enter确认')"
+              :placeholder="t('请输入蓝鲸应用 ID，并按 enter 确认')"
               allow-create
               has-delete-icon
               :copyable="false"
@@ -449,38 +462,33 @@
 </template>
 
 <script lang="ts" setup>
-// @ts-nocheck
-import { getEnv } from '@/services/source/basic.ts';
+import { getEnvVars } from '@/services/source/platform/setting';
 import {
   checkNameAvailable,
   checkRepoAuthorization,
   createGateway,
   patchGateway,
-} from '@/services/source/gateway.ts';
-import { usePopInfoBox } from '@/hooks';
-import { Form, Message, Tag } from 'bkui-vue';
-import { cloneDeep } from 'lodash-es';
-import type { IFormMethod } from '@/types/common';
-import type { IGatewayCreateInputSLZ } from '@/services/types/body/post/gateways';
-import MemberSelector from '@/components/member-selector';
-import BkUserSelector from '@blueking/bk-user-selector';
-import bareGit from '@/images/bare_git.png';
-import apiIcon from '@/images/api.png';
-import aiIcon from '@/images/ai.png';
-import programmableIcon from '@/images/programmable.png';
+} from '@/services/source/gateway/gateway';
 import {
   useEnv,
   useFeatureFlag,
   useGateway,
   useUserInfo,
 } from '@/stores';
-import AgIcon from '@/components/ag-icon/Index.vue';
-
-type ParamType = IGatewayCreateInputSLZ & {
-  id?: number
-  tenant_mode?: string
-  tenant_id?: string
-};
+import { useGatewayDisplayNameCheck, usePopInfoBox } from '@/hooks';
+import { Form, Message, Tag } from 'bkui-vue';
+import { cloneDeep } from 'lodash-es';
+import type { IFormMethod } from '@/types/common';
+import type { IGatewayCreateInputSLZ } from '@/services/types/gateway/gateway.ts';
+import { toGatewayFormData, toGatewayUpdatePayload } from '@/utils/gateway-form';
+import { getGatewayDisplayName } from '@/utils/gateway-name';
+import UserSelector from '@/components/user/user-selector/Index.vue';
+import GatewayAuthProtocol from '@/components/gateway-auth-protocol/Index.vue';
+import bareGit from '@/images/bare_git.png';
+import apiIcon from '@/images/api.png';
+import aiIcon from '@/images/ai.png';
+import programmableIcon from '@/images/programmable.png';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -491,16 +499,11 @@ const envStore = useEnv();
 const gatewayStore = useGateway();
 
 const formRef = ref<InstanceType<typeof Form> & IFormMethod>();
-const formData = ref<ParamType>({
-  name: '',
-  description: '',
-  is_public: true,
-  kind: 0,
-  maintainers: [userStore.info.username],
-  extra_info: {
-    language: 'python',
-    repository: '',
-  },
+const formData = ref({
+  ...toGatewayFormData(),
+  maintainers: userStore.info.username ? [userStore.info.username] : [],
+  tenant_mode: 'single',
+  tenant_id: 'default',
   programmable_gateway_git_info: {
     repository: '',
     account: '',
@@ -522,33 +525,44 @@ const authUrl = ref('');
 // 授权状态轮询定时器
 let authPollingTimer: ReturnType<typeof setInterval> | null = null;
 
-const defaultFormData = ref({
-  name: '',
-  description: '',
-  is_public: true,
-  kind: 0,
-  maintainers: [userStore.info.username],
-  extra_info: {
-    language: 'python',
-    repository: '',
-  },
-  programmable_gateway_git_info: {
-    repository: '',
-    account: '',
-    password: '',
-  },
-});
+const defaultFormData = ref(cloneDeep(formData.value));
 
 const isNameAvailable = ref(true);
 // 可编程网关名称保留字
 const RESERVED_NAME_WORDS = ['-dot-', '0us0', '--', '-m-'];
 // 命中的保留字，用于错误提示
 const matchedReservedWord = ref('');
+
+// 实际提交的网关 ID（AI 网关带 bkai- 前缀），展示名为空时用其兜底查重
+const submittedGatewayName = () => {
+  const name = (formData.value.name ?? '').trim();
+  return formData.value.kind === 2 ? `bkai-${name}` : name;
+};
+
+const { checkDisplayName } = useGatewayDisplayNameCheck({
+  // 编辑场景（从基本信息页跳转）需要排除网关自身
+  gatewayId: () => formData.value.id,
+  gatewayName: submittedGatewayName,
+  displayName: () => formData.value.display_name,
+});
+
 const rules = {
+  'display_name': [
+    {
+      required: true,
+      message: t('请输入网关展示名'),
+      trigger: 'blur',
+    },
+    {
+      validator: () => checkDisplayName(),
+      message: t('展示名已被使用'),
+      trigger: 'blur',
+    },
+  ],
   'name': [
     {
       required: true,
-      message: t('请填写名称'),
+      message: t('请填写网关 ID'),
       trigger: 'blur',
     },
     {
@@ -578,7 +592,7 @@ const rules = {
         matchedReservedWord.value = RESERVED_NAME_WORDS.find(word => value.includes(word)) ?? '';
         return !matchedReservedWord.value;
       },
-      message: () => t('名称不能包含保留字 {word}', { word: matchedReservedWord.value }),
+      message: () => t('网关 ID 不能包含保留字 {word}', { word: matchedReservedWord.value }),
       trigger: 'blur',
     },
     {
@@ -597,7 +611,7 @@ const rules = {
           return false;
         }
       },
-      message: t('网关名已被占用'),
+      message: t('网关 ID 已被占用'),
       trigger: 'blur',
     },
   ],
@@ -738,28 +752,17 @@ const progressList = computed(() => {
 });
 
 watch(
-  () => featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE,
-  () => {
-    if (featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE) {
-      formData.value = Object.assign(formData.value, {
-        tenant_id: userStore.info.tenant_id || 'system',
-        tenant_mode: ['system'].includes(userStore.info.tenant_id) ? 'global' : 'single',
-      });
-      defaultFormData.value = Object.assign(defaultFormData.value, {
-        tenant_id: userStore.info.tenant_id || 'system',
-        tenant_mode: ['system'].includes(userStore.info.tenant_id) ? 'global' : 'single',
-      });
-    }
-    else {
-      formData.value = Object.assign(formData.value, {
-        tenant_id: 'default',
-        tenant_mode: 'single',
-      });
-      defaultFormData.value = Object.assign(defaultFormData.value, {
-        tenant_id: 'default',
-        tenant_mode: 'single',
-      });
-    }
+  [
+    () => featureFlagStore.flags.ENABLE_MULTI_TENANT_MODE,
+    () => userStore.info.tenant_id,
+  ],
+  ([isTenantMode, tenantId]) => {
+    const tenant = {
+      tenant_id: isTenantMode ? tenantId || 'system' : 'default',
+      tenant_mode: isTenantMode && tenantId === 'system' ? 'global' : 'single',
+    };
+    Object.assign(formData.value, tenant);
+    Object.assign(defaultFormData.value, tenant);
   },
   { immediate: true },
 );
@@ -767,8 +770,13 @@ watch(
 watch(
   () => userStore.info.username,
   () => {
-    if (userStore.info.username && !formData.value.maintainers?.length) {
-      formData.value.maintainers = [userStore.info.username];
+    if (!isEdit.value && userStore.info.username) {
+      if (!formData.value.maintainers.length) {
+        formData.value.maintainers = [userStore.info.username];
+      }
+      if (!defaultFormData.value.maintainers.length) {
+        defaultFormData.value.maintainers = [userStore.info.username];
+      }
     }
   },
   { immediate: true },
@@ -778,6 +786,10 @@ watch(
   () => formData.value?.name,
   () => {
     setRepositoryAddress();
+    // 展示名为空时以网关 ID 兜底查重，ID 变化后需要重新查重
+    if (!formData.value.display_name?.trim()) {
+      formRef.value?.clearValidate('display_name');
+    }
   },
 );
 
@@ -786,20 +798,10 @@ onMounted(() => {
   if (route.query.from === 'basic-info') {
     const currentGateway = gatewayStore.currentGateway;
     if (currentGateway?.id) {
-      formData.value = cloneDeep({
-        id: currentGateway.id,
-        name: currentGateway.name || '',
-        description: currentGateway.description,
-        maintainers: currentGateway.maintainers || [],
-        developers: currentGateway.developers || [],
-        is_public: currentGateway.is_public,
-        kind: currentGateway.kind,
-        extra_info: currentGateway.extra_info || {},
-        bk_app_codes: currentGateway.bk_app_codes || [],
-        tenant_mode: currentGateway.tenant_mode || '',
-        tenant_id: currentGateway.tenant_id || '',
-        programmable_gateway_git_info: (currentGateway as any).programmable_gateway_git_info || {},
-      });
+      formData.value = {
+        ...formData.value,
+        ...toGatewayFormData(currentGateway),
+      };
       defaultFormData.value = cloneDeep(formData.value);
     }
   }
@@ -820,7 +822,7 @@ const checkAuthorization = async () => {
 
 const setRepositoryAddress = () => {
   if (envStore.env.EDITION === 'te' && formData.value.kind === 1) {
-    formData.value.extra_info!.repository = `${repositoryUrl.value.replace('{{gateway_name}}', formData.value.name || '')}`;
+    formData.value.extra_info.repository = repositoryUrl.value.replace('{{gateway_name}}', formData.value.name);
     // 代码仓库地址变更后清除旧轮询并重新检测授权状态
     clearAuthPolling();
     if (formData.value.name) {
@@ -836,18 +838,12 @@ const handleKindChange = (type: number) => {
   setRepositoryAddress();
 };
 
-const handleMemberChange = (member: string[]) => {
-  formData.value.maintainers = member;
-  isShowMemberError.value = !member.length;
-};
-
-const handleTenantUserChange = (members: { id: string }[]) => {
-  formData.value.maintainers = members.map(member => member.id);
+const handleMemberChange = (members: string[]) => {
   isShowMemberError.value = !members.length;
 };
 
 const getUrlPrefix = async () => {
-  const res = await getEnv();
+  const res = await getEnvVars();
   repositoryUrl.value = res.BK_PAAS_APP_REPO_URL_TMPL;
 };
 
@@ -924,44 +920,66 @@ const handleConfirmCreate = async () => {
     }
 
     submitLoading.value = true;
-    const payload = cloneDeep(formData.value);
-    if (payload.kind !== 1) {
-      payload.extra_info = undefined;
-    }
-    if (payload.kind === 1 && envStore.env.EDITION === 'ee' && !isEdit.value) {
-      payload.extra_info!.repository = payload.programmable_gateway_git_info!.repository;
-    }
-    if (payload.kind === 2 && !isEdit.value) {
-      payload.name = `bkai-${payload.name}`;
-    }
+    const data = cloneDeep(formData.value);
+    const { id } = data;
 
-    if (isEdit.value) {
-      if (!featureFlagStore.flags.GATEWAY_APP_BINDING_ENABLED) {
-        payload.bk_app_codes = undefined;
-      }
-      await patchGateway(payload.id!, payload);
+    if (id) {
+      const payload = toGatewayUpdatePayload(
+        data,
+        defaultFormData.value,
+        featureFlagStore.flags.GATEWAY_APP_BINDING_ENABLED ?? false,
+      );
+      await patchGateway(id, payload);
       Message({
         message: t('编辑成功'),
         theme: 'success',
         width: 'auto',
       });
-      gatewayStore.setCurrentGateway(payload);
-      router.push(`/${gatewayStore.currentGateway.id}/basic-info`);
+      if (gatewayStore.currentGateway?.id === id) {
+        gatewayStore.setCurrentGateway({
+          ...gatewayStore.currentGateway,
+          ...payload,
+        });
+      }
+      router.push(`/${id}/basic-info`);
     }
     else {
+      const extraInfo = data.kind === 1 ? data.extra_info : undefined;
+      if (extraInfo && envStore.env.EDITION === 'ee') {
+        extraInfo.repository = data.programmable_gateway_git_info.repository;
+      }
+      const payload: IGatewayCreateInputSLZ = {
+        name: submittedGatewayName(),
+        display_name: data.display_name,
+        description: data.description,
+        maintainers: data.maintainers,
+        developers: data.developers,
+        is_public: data.is_public,
+        kind: data.kind,
+        extra_info: extraInfo,
+        bk_app_codes: data.bk_app_codes,
+        tenant_mode: data.tenant_mode,
+        tenant_id: data.tenant_id,
+        programmable_gateway_git_info: data.programmable_gateway_git_info,
+      };
       const response = await createGateway(payload);
 
       reset();
       if (payload.kind === 1) {
         router.push({
           name: 'GatewayGuide',
-          params: { id: response.id,
-            name: payload.name },
+          params: {
+            id: response.id,
+            name: payload.name,
+          },
+          query: {
+            displayName: payload.display_name,
+          },
         });
       }
       else {
         Message({
-          message: t('创建成功'),
+          message: t('网关（{name}）创建成功', { name: getGatewayDisplayName(payload) }),
           theme: 'success',
         });
         router.push({ name: 'Home' });
@@ -985,15 +1003,20 @@ const handleCancel = () => {
   router.back();
 };
 
+// 未取消就离开页面时也要停止授权状态轮询
+onBeforeUnmount(() => {
+  clearAuthPolling();
+});
+
 </script>
 
 <style lang="scss" scoped>
 .create-gateway {
-  width: 1280px;
-  margin: 0 auto;
-  padding: 16px 0 24px 0;
-  box-sizing: border-box;
   display: flex;
+  width: 1280px;
+  padding: 16px 0 24px;
+  margin: 0 auto;
+  box-sizing: border-box;
 
   .create-form {
     padding: 24px;
@@ -1001,9 +1024,11 @@ const handleCancel = () => {
     box-shadow: 0 2px 4px 0 #0000001a;
     flex: 1;
 
-    .form-item-name {
-      :deep(.bk-form-error) {
-        position: relative;
+    .form-item-with-tips {
+
+      .common-form-tips {
+        margin: 4px 0 0;
+        line-height: 18px;
       }
     }
 
@@ -1022,10 +1047,10 @@ const handleCancel = () => {
       width: 124px;
       min-height: 88px;
       padding: 8px 4px;
-      box-sizing: border-box;
       cursor: pointer;
       border: 1px solid #c4c6cc;
       border-radius: 2px;
+      box-sizing: border-box;
       flex-direction: column;
       justify-content: center;
       align-items: center;
@@ -1068,14 +1093,14 @@ const handleCancel = () => {
     .type-wrapper {
 
       .item {
-        display: flex;
-        flex-direction: column;
-        padding: 16px;
-        border-radius: 4px;
-        border: 1px solid #DCDEE5;
-        background: #ffffff;
-        box-shadow: 0 2px 4px 0 #1919290d;
         position: relative;
+        display: flex;
+        padding: 16px;
+        background: #fff;
+        border: 1px solid #DCDEE5;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px 0 #1919290d;
+        flex-direction: column;
 
         .check-icon-wrapper {
           position: absolute;
@@ -1089,13 +1114,13 @@ const handleCancel = () => {
           color: #FFF;
 
           &::before {
-            content: '';
             position: absolute;
             top: 0;
             right: -1px;
             width: 100%;
             height: 100%;
             background: #3A84FF;
+            content: '';
             clip-path: polygon(0 0, 100% 0, 100% 100%);
           }
 
@@ -1106,13 +1131,13 @@ const handleCancel = () => {
         }
 
         &:hover {
-          border: 1px solid #3A84FF;
           background: #FFF;
+          border: 1px solid #3A84FF;
         }
 
         &.active {
-          border: 1px solid #3A84FF;
           background: #F0F5FF;
+          border: 1px solid #3A84FF;
 
           .scene {
             background: #FAFBFD;
@@ -1129,14 +1154,16 @@ const handleCancel = () => {
       }
 
       &.disabled {
+
         .item {
           cursor: not-allowed;
-          opacity: 0.5;
+          opacity: 50%;
         }
       }
 
       .type {
         margin-bottom: 12px;
+
         .icon {
           display: flex;
           align-items: center;
@@ -1163,39 +1190,41 @@ const handleCancel = () => {
             background: #0e3377;
           }
         }
+
         .title {
-          color: #313238;
           font-size: 14px;
-          font-weight: Bold;
+          font-weight: bold;
+          color: #313238;
         }
       }
 
       .desc {
-        color: #4d4f56;
+        margin-bottom: 12px;
         font-size: 12px;
         line-height: 20px;
-        margin-bottom: 12px;
+        color: #4d4f56;
       }
 
       .scene {
         width: 240px;
         min-height: 118px;
         padding: 6px 8px;
-        box-sizing: border-box;
-        border-radius: 4px;
-        background: #F5F7FA;
         margin-top: auto;
+        background: #F5F7FA;
+        border-radius: 4px;
+        box-sizing: border-box;
 
         .title {
-          color: #4d4f56;
           font-size: 12px;
-          font-weight: Bold;
+          font-weight: bold;
           line-height: 24px;
+          color: #4d4f56;
         }
+
         .content {
-          color: #979ba5;
           font-size: 12px;
           line-height: 20px;
+          color: #979ba5;
         }
       }
     }
@@ -1204,10 +1233,10 @@ const handleCancel = () => {
   .progress {
     width: 360px;
     padding: 24px;
-    box-sizing: border-box;
+    margin-left: 24px;
     background: #FFF;
     box-shadow: 0 2px 4px 0 #1919290d;
-    margin-left: 24px;
+    box-sizing: border-box;
 
     .title {
       padding-bottom: 16px;

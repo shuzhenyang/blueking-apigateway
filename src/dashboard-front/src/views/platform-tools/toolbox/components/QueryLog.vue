@@ -121,7 +121,7 @@
           v-show="isEmpty"
           class="empty-wrapper"
         >
-          <TableEmpty
+          <AgTableEmpty
             :empty-type="tableEmptyConf.emptyType"
             :abnormal="tableEmptyConf.isAbnormal"
             @refresh="refreshData"
@@ -134,10 +134,10 @@
 </template>
 
 <script lang="ts" setup>
-import AgIcon from '@/components/ag-icon/Index.vue';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
 import { copy as copyToClipboard } from '@/utils';
-import TableEmpty from '@/components/table-empty/Index.vue';
-import { getLogsInfo } from '@/services/source/access-log';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
+import { queryAccessLogByRequestId } from '@/services/source/platform/toolbox';
 import dayjs from 'dayjs';
 import { useGateway } from '@/stores';
 
@@ -196,7 +196,7 @@ const getDetailData = async () => {
   isDataLoading.value = true;
 
   try {
-    const res = await getLogsInfo(requestId.value) as any;
+    const res = await queryAccessLogByRequestId(requestId.value) as any;
     details.value.result = res.results?.[0] || {};
     details.value.fields = res.fields;
   }

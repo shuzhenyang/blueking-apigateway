@@ -32,107 +32,103 @@
             { 'header-info-left-disabled': !basicInfoData.status }
           ]"
         >
-          <span class="name">{{ basicInfoData?.name?.[0]?.toUpperCase() }}</span>
+          <span class="name">{{ getGatewayDisplayName(basicInfoData)[0]?.toUpperCase() }}</span>
         </div>
         <div class="header-info-right">
-          <div class="header-info-name">
-            <span class="name">{{ basicInfoData.name }}</span>
-            <div class="header-info-tag">
-              <BkTag
-                v-if="basicInfoData.kind === 0"
-                theme="info"
-              >
-                {{ t('普通网关') }}
-              </BkTag>
-              <BkTag
-                v-if="basicInfoData.kind === 1"
-                theme="success"
-              >
-                {{ t('可编程网关') }}
-              </BkTag>
-              <BkTag
-                v-if="basicInfoData.kind === 2"
-                theme="warning"
-              >
-                {{ t('AI 网关') }}
-              </BkTag>
-              <BkTag
-                v-if="basicInfoData.is_official"
-                class="website"
-              >
-                {{ t('官方') }}
-              </BkTag>
-              <div v-if="basicInfoData.status > 0">
-                <BkTag class="enabling">
-                  <AgIcon name="yiqiyong" />
-                  {{ t('启用中') }}
+          <div class="header-info-main">
+            <div class="header-info-name">
+              <div class="gateway-name">
+                <span class="name">{{ getGatewayDisplayName(basicInfoData) }}</span>
+                <span
+                  v-if="hasDistinctDisplayName(basicInfoData)"
+                  class="gateway-id"
+                >
+                  {{ basicInfoData.name }}
+                </span>
+              </div>
+              <div class="header-info-tag">
+                <BkTag
+                  v-if="basicInfoData.kind === 0"
+                  theme="info"
+                >
+                  {{ t('普通网关') }}
+                </BkTag>
+                <BkTag
+                  v-if="basicInfoData.kind === 1"
+                  theme="success"
+                >
+                  {{ t('可编程网关') }}
+                </BkTag>
+                <BkTag
+                  v-if="basicInfoData.kind === 2"
+                  theme="warning"
+                >
+                  {{ t('AI 网关') }}
+                </BkTag>
+                <BkTag
+                  v-if="basicInfoData.is_official"
+                  class="website"
+                >
+                  {{ t('官方') }}
+                </BkTag>
+                <div v-if="basicInfoData.status > 0">
+                  <BkTag class="enabling">
+                    <AgIcon name="yiqiyong" />
+                    {{ t('启用中') }}
+                  </BkTag>
+                </div>
+                <BkTag
+                  v-if="!basicInfoData.status"
+                  class="deactivated"
+                >
+                  <AgIcon name="minus-circle" />
+                  {{ t('已停用') }}
+                </BkTag>
+                <BkTag
+                  v-if="basicInfoData.status && basicInfoData.is_deprecated"
+                  theme="danger"
+                >
+                  deprecated
                 </BkTag>
               </div>
-              <BkTag
-                v-if="!basicInfoData.status"
-                class="deactivated"
-              >
-                <AgIcon name="minus-circle" />
-                {{ t('已停用') }}
-              </BkTag>
-              <BkTag
-                v-if="basicInfoData.status && basicInfoData.is_deprecated"
-                theme="danger"
-              >
-                deprecated
-              </BkTag>
             </div>
-          </div>
-          <div class="header-info-description">
-            <EditDesc
-              field="description"
-              width="1008px"
-              :placeholder="t('请输入描述')"
-              :content="basicInfoData.description ?? ''"
-              :mode="canEditBasicInfo ? 'edit' : 'detail'"
-              @on-change="(e:Record<string, string>) => handleInfoChange(e)"
-            />
+            <div class="header-info-description">
+              <EditDesc
+                field="description"
+                width="100%"
+                :placeholder="t('请输入描述')"
+                :content="basicInfoData.description ?? ''"
+                :mode="canEditBasicInfo ? 'edit' : 'detail'"
+                @on-change="(e:Record<string, string>) => handleInfoChange(e)"
+              />
+            </div>
           </div>
           <div
             v-if="canEditBasicInfo || basicInfoData.kind === 1"
             class="header-info-button"
           >
             <template v-if="canEditBasicInfo">
-              <div>
-                <BkButton
-                  v-if="basicInfoData.status > 0"
-                  v-bk-tooltips="{ content: t('正在发布环境，请稍后再试'), disabled: !releasingStatus }"
-                  class="deactivate-btn operate-btn"
-                  :disabled="releasingStatus"
-                  @click="() => handleOperate('enable')"
-                >
-                  {{ t('停用') }}
-                </BkButton>
-                <BkButton
-                  v-else
-                  v-bk-tooltips="{ content: t('正在发布环境，请稍后再试'), disabled: !releasingStatus }"
-                  theme="primary"
-                  class="operate-btn"
-                  :disabled="releasingStatus"
-                  @click="() => handleOperate('deactivate')"
-                >
-                  {{ t('立即启用') }}
-                </BkButton>
-              </div>
               <BkButton
-                v-bk-tooltips="{ content: t('请先停用才可删除'), disabled: basicInfoData.status <= 0 }"
-                class="operate-btn"
-                :disabled="basicInfoData.status > 0"
-                @click="() => handleOperate('delete')"
+                v-if="basicInfoData.status > 0"
+                v-bk-tooltips="{ content: t('正在发布环境，请稍后再试'), disabled: !releasingStatus }"
+                class="deactivate-btn operate-btn"
+                :disabled="releasingStatus"
+                @click="() => handleOperate('enable')"
               >
-                {{ t('删除') }}
+                {{ t('停用') }}
+              </BkButton>
+              <BkButton
+                v-else
+                v-bk-tooltips="{ content: t('正在发布环境，请稍后再试'), disabled: !releasingStatus }"
+                theme="primary"
+                class="operate-btn"
+                :disabled="releasingStatus"
+                @click="() => handleOperate('deactivate')"
+              >
+                {{ t('立即启用') }}
               </BkButton>
             </template>
             <template v-if="basicInfoData.kind === 1">
-              <span
-                v-if="canEditBasicInfo"
-                class="btn-line"
-              />
               <BkButton
                 class="operate-btn"
                 @click="showGuide"
@@ -147,7 +143,7 @@
             <BkDropdown
               v-if="canEditBasicInfo"
               :popover-options="{ clickContentAutoHide: true }"
-              placement="right"
+              placement="bottom-end"
             >
               <div class="icon-deprecated">
                 <AgIcon
@@ -159,9 +155,13 @@
                   <BkDropdownItem
                     v-for="item in dropdownList"
                     :key="item.value"
+                    v-bk-tooltips="{
+                      content: t('请先停用才可删除'),
+                      disabled: item.value !== 'delete' || basicInfoData.status <= 0,
+                    }"
                     :disabled="dropdownItemDisabled(item)"
                     :ext-cls="{ 'is-disabled': dropdownItemDisabled(item) }"
-                    @click="handleDeprecatedClick(item.value)"
+                    @click="handleDropdownClick(item)"
                   >
                     {{ item.name }}
                   </BkDropdownItem>
@@ -199,6 +199,22 @@
           </template>
           <template #content>
             <div class="pannel-content">
+              <div class="pannel-content-item">
+                <div class="label">
+                  {{ `${t('网关展示名')}：` }}
+                </div>
+                <div class="value">
+                  <span>{{ getGatewayDisplayName(basicInfoData) }}</span>
+                </div>
+              </div>
+              <div class="pannel-content-item">
+                <div class="label">
+                  {{ `${t('网关 ID')}：` }}
+                </div>
+                <div class="value">
+                  <span>{{ basicInfoData.name || '--' }}</span>
+                </div>
+              </div>
               <template v-if="featureFlagStore.isTenantMode">
                 <div class="pannel-content-item">
                   <div class="label">
@@ -214,7 +230,7 @@
                   </div>
                   <div class="value url">
                     <span>{{ basicInfoData.tenant_id || '--' }}</span>
-                    <CopyButton :source="basicInfoData.tenant_id" />
+                    <AgCopyButton :source="basicInfoData.tenant_id" />
                   </div>
                 </div>
               </template>
@@ -262,11 +278,19 @@
               </div>
               <div class="pannel-content-item">
                 <div class="label">
+                  {{ `${t('认证协议')}：` }}
+                </div>
+                <div class="value">
+                  {{ gatewayStore.isResourceAuthV2 ? t('蓝鲸认证 V2') : t('蓝鲸认证 V1') }}
+                </div>
+              </div>
+              <div class="pannel-content-item">
+                <div class="label">
                   {{ `${t('访问域名')}：` }}
                 </div>
                 <div class="value url">
                   <span>{{ basicInfoData.api_domain || '--' }}</span>
-                  <CopyButton :source="basicInfoData.api_domain" />
+                  <AgCopyButton :source="basicInfoData.api_domain" />
                 </div>
               </div>
               <div class="pannel-content-item">
@@ -312,7 +336,7 @@
                   <EditRelatedAppCodes
                     field="related_app_codes"
                     width="100%"
-                    :placeholder="t('请输入应用ID，以回车键确认')"
+                    :placeholder="t('请输入应用 ID，以回车键确认')"
                     :content="basicInfoData.related_app_codes ?? []"
                     :mode="canEditBasicInfo ? 'edit' : 'detail'"
                     @on-submit="(e: Record<string, string[]>) => handleRelatedAppCodesChange(e)"
@@ -370,7 +394,7 @@
                       field="contacts"
                       :content="basicInfoData.doc_maintainers?.contacts"
                     />
-                    <TenantUserSelector
+                    <TenantUserEditor
                       v-else
                       :content="basicInfoData.doc_maintainers?.contacts"
                       field="contacts"
@@ -428,7 +452,7 @@
                       name="jump"
                       @click.stop="handleOpenNav(basicInfoData.docs_url)"
                     />
-                    <CopyButton :source="basicInfoData.docs_url" />
+                    <AgCopyButton :source="basicInfoData.docs_url" />
                   </template>
                 </div>
               </div>
@@ -487,7 +511,7 @@
                       {{ basicInfoData.public_key_fingerprint }}
                     </span>
                     <div>
-                      <CopyButton :source="basicInfoData.public_key" />
+                      <AgCopyButton :source="basicInfoData.public_key" />
                       <AgIcon
                         name="download"
                         size="16"
@@ -636,7 +660,7 @@
     <BkDialog
       width="540"
       :is-show="delApigwDialog.isShow"
-      :title="t(`确认删除网关【{basicInfoDataName}】？`, { basicInfoDataName: basicInfoData.name })"
+      :title="t(`确认删除网关【{basicInfoDataName}】？`, { basicInfoDataName: getGatewayFullName(basicInfoData) })"
       :theme="'primary'"
       @closed="delApigwDialog.isShow = false"
     >
@@ -725,9 +749,9 @@
       </template>
     </BkDialog>
 
-    <CreateGateway
+    <EditBasicInfoDialog
       v-model="createGatewayShow"
-      :init-data="(basicInfoDetailData as ParamType)"
+      :init-data="basicInfoDetailData"
       @done="getBasicInfo()"
     />
     <EditAPIDoc
@@ -741,7 +765,7 @@
       :width="960"
     >
       <section class="markdown-box">
-        <Guide :markdown-html="markdownHtml" />
+        <AgMarkdownViewer :markdown-html="markdownHtml" />
       </section>
     </AgSideslider>
   </div>
@@ -757,22 +781,22 @@ import {
   getGatewayDetail,
   getGuideDocs,
   patchGateway,
-  putGatewayBasics,
-  toggleStatus,
-} from '@/services/source/gateway.ts';
+  updateGateway,
+  updateGatewayStatus,
+} from '@/services/source/gateway/gateway';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
 import type { IExtractApiReturn } from '@/services/types/utils.ts';
-import type { IGatewayUpdateInputSLZ } from '@/services/types/body/patch/gateways.ts';
+import type { IGatewayUpdateInputSLZ } from '@/services/types/gateway/gateway.ts';
 import EditDesc from './components/EditDesc.vue';
 import { cloneDeep } from 'lodash-es';
 import MarkdownIt from 'markdown-it';
-import hljs from 'highlight.js';
+import hljs from 'highlight.js/lib/common';
 import ProgramProcess from '@/images/program-process.png';
 import EditMember from './components/EditMember.vue';
 import EditRelatedAppCodes from './components/EditRelatedAppCodes.vue';
-import AgSideslider from '@/components/ag-sideslider/Index.vue';
-import Guide from '@/components/guide/Index.vue';
-import CreateGateway, { type ParamType } from '@/components/create-gateway/Index.vue';
+import AgSideslider from '@/components/base/ag-sideslider/Index.vue';
+import AgMarkdownViewer from '@/components/base/ag-markdown-viewer/Index.vue';
+import EditBasicInfoDialog from './components/EditBasicInfoDialog.vue';
 import { TENANT_MODE_TEXT_MAP } from '@/enums';
 import {
   useEnv,
@@ -781,11 +805,12 @@ import {
   useGatewayRoleStore,
 } from '@/stores';
 import { useGatewayRole, usePopInfoBox } from '@/hooks';
-import TenantUserSelector from '@/components/tenant-user-selector/Index.vue';
+import TenantUserEditor from '@/components/user/tenant-user-editor/Index.vue';
 import EditAPIDoc from '@/views/basic-info/components/EditAPIDoc.vue';
 import { useGatewayReleasingStatus } from '@/hooks/use-gateway-releasing-status';
 import { getGatewayErrorRoute } from '@/utils/gateway-access-error';
 import { isGatewayNavigationPending } from '@/router/gateway-role-guard';
+import { getGatewayDisplayName, getGatewayFullName, hasDistinctDisplayName } from '@/utils/gateway-name';
 
 interface IBasicInfoType extends IExtractApiReturn<typeof getGatewayDetail> {
   programmable_gateway_git_info?: {
@@ -811,14 +836,20 @@ const basicInfoDetailLoading = ref(false);
 const isShowMarkdown = ref(false);
 const markdownHtml = ref('');
 const isShowApiDoc = ref(false);
-const dropdownList = ref([
+// 弃用操作互斥：未弃用仅显示「标记为弃用」，已弃用仅显示「取消弃用标记」
+const dropdownList = computed(() => [
+  basicInfoData.value.is_deprecated
+    ? {
+      name: t('取消弃用标记'),
+      value: 'undeprecated',
+    }
+    : {
+      name: t('标记为弃用'),
+      value: 'deprecated',
+    },
   {
-    name: t('标记为弃用'),
-    value: 'deprecated',
-  },
-  {
-    name: t('去除弃用标记'),
-    value: 'undeprecated',
+    name: t('删除'),
+    value: 'delete',
   },
 ]);
 
@@ -829,13 +860,23 @@ const {
 } = useGatewayReleasingStatus(apigwId, canEditBasicInfo);
 
 const dropdownItemDisabled = (item: { value: string }) => {
-  if (item?.value === 'deprecated') {
-    return basicInfoData.value.is_deprecated || !basicInfoData.value.status;
+  if (item?.value === 'delete') {
+    return basicInfoData.value.status > 0;
   }
-  if (item?.value === 'undeprecated') {
-    return !basicInfoData.value.is_deprecated || !basicInfoData.value.status;
+  // 弃用/取消弃用：仅启用中的网关可操作
+  return !basicInfoData.value.status;
+};
+
+const handleDropdownClick = (item: { value: string }) => {
+  if (dropdownItemDisabled(item)) {
+    return;
   }
-  return false;
+  if (item.value === 'delete') {
+    handleOperate('delete');
+  }
+  else {
+    handleDeprecatedClick(item.value);
+  }
 };
 
 // 当前网关基本信息（默认值仅在 API 数据加载前作为占位，会在 getBasicInfo 中立即替换）
@@ -843,6 +884,7 @@ const basicInfoData = ref<IBasicInfoType>({
   id: 0,
   status: 1,
   name: '',
+  display_name: '',
   description: '',
   description_en: '',
   public_key_fingerprint: '',
@@ -910,8 +952,18 @@ const formRemoveApigw = computed(() => {
 });
 
 const delTips = computed(() => {
-  return t(`请完整输入<code class="gateway-del-tips">${basicInfoData.value.name}</code> 来确认删除网关！`);
+  return t('请完整输入 <code class="gateway-del-tips">{name}</code> 来确认删除网关！', {
+    name: basicInfoData.value.name,
+  });
 });
+
+// 展示名和认证协议在基本信息弹窗中更新，其他入口保存时省略。
+const buildUpdatePayload = (data: object) => {
+  const payload = cloneDeep(data) as Record<string, any>;
+  delete payload.display_name;
+  delete payload.oauth2_app_enabled;
+  return payload as IGatewayUpdateInputSLZ;
+};
 
 const linksData = computed(() => (basicInfoData.value.links as unknown) as {
   develop?: {
@@ -1046,7 +1098,7 @@ const handleDeleteApigw = async () => {
 
 const handleChangePublic = async (value: boolean) => {
   basicInfoData.value.is_public = value;
-  await patchGateway(apigwId.value, basicInfoData.value as IGatewayUpdateInputSLZ);
+  await patchGateway(apigwId.value, buildUpdatePayload(basicInfoData.value));
   syncBasicInfo();
   Message({
     message: t('更新成功'),
@@ -1059,7 +1111,7 @@ const handleChangeApigwStatus = async () => {
   const status = basicInfoData.value.status === 1 ? 0 : 1;
   try {
     statusChanging.value = true;
-    await toggleStatus(apigwId.value, { status });
+    await updateGatewayStatus(apigwId.value, { status });
     basicInfoData.value = Object.assign(basicInfoData.value, { status });
     syncBasicInfo();
     Message({
@@ -1093,14 +1145,14 @@ const handleDeprecatedClick = (type: string) => {
   else if (type === 'undeprecated' && basicInfoData.value.is_deprecated) {
     usePopInfoBox({
       isShow: true,
-      title: t('确认去除弃用标记？'),
+      title: t('确认取消弃用标记？'),
       subTitle: t('去除后，API 文档中的“deprecated”标记将被移除'),
       cancelText: t('取消'),
       onConfirm: async () => {
         basicInfoData.value.is_deprecated = false;
         basicInfoData.value.deprecated_note = '';
 
-        await patchGateway(apigwId.value, basicInfoData.value as IGatewayUpdateInputSLZ);
+        await patchGateway(apigwId.value, buildUpdatePayload(basicInfoData.value));
         syncBasicInfo();
         Message({
           message: t('更新成功'),
@@ -1121,7 +1173,7 @@ const handleDeprecatedConfirm = async () => {
     basicInfoData.value.is_deprecated = true;
     basicInfoData.value.deprecated_note = deprecated_note;
 
-    await patchGateway(apigwId.value, basicInfoData.value as IGatewayUpdateInputSLZ);
+    await patchGateway(apigwId.value, buildUpdatePayload(basicInfoData.value));
     syncBasicInfo();
     Message({
       message: t('更新成功'),
@@ -1161,7 +1213,7 @@ const handleOperate = async (type: string) => {
     let title = t('确认要启用网关？');
     let subTitle = '';
     if (basicInfoData.value.status > 0) {
-      title = t('确认是否停用网关？');
+      title = t('确认是否停用网关【{name}】？', { name: getGatewayFullName(basicInfoData.value) });
       subTitle = t('网关停用后，网关下所有资源不可访问，请确认是否继续操作？');
     }
 
@@ -1220,7 +1272,7 @@ const handleInfoChange = async (payload: Record<string, string>) => {
     ...basicInfoData.value,
     ...payload,
   };
-  await patchGateway(apigwId.value, params as IGatewayUpdateInputSLZ);
+  await patchGateway(apigwId.value, buildUpdatePayload(params));
   basicInfoData.value = Object.assign(basicInfoData.value, params);
   syncBasicInfo();
   Message({
@@ -1235,7 +1287,7 @@ const handleRelatedAppCodesChange = async (payload: Record<string, string[]>) =>
     ...basicInfoData.value,
     ...payload,
   };
-  await putGatewayBasics(apigwId.value, params as IGatewayUpdateInputSLZ);
+  await updateGateway(apigwId.value, buildUpdatePayload(params));
   basicInfoData.value = Object.assign(basicInfoData.value, params);
   syncBasicInfo();
   Message({
@@ -1293,16 +1345,36 @@ onUnmounted(() => {
     }
 
     &-right {
+      display: flex;
       flex: 1;
-      padding: 16px 16px 0;
+      min-width: 0;
+      padding: 0 16px;
+      align-items: center;
+
+      .header-info-main {
+        flex: 1;
+        min-width: 0;
+      }
 
       .header-info-name {
         display: flex;
 
-        .name {
-          font-size: 16px;
-          font-weight: 700;
-          color: #313238;
+        .gateway-name {
+          display: flex;
+          flex-direction: column;
+
+          .name {
+            font-size: 16px;
+            font-weight: 700;
+            line-height: 24px;
+            color: #4d4f56;
+          }
+
+          .gateway-id {
+            font-size: 12px;
+            line-height: 20px;
+            color: #979ba5;
+          }
         }
 
         .header-info-tag {
@@ -1343,21 +1415,15 @@ onUnmounted(() => {
       }
 
       .header-info-description {
-        margin-top: 8px;
-        margin-bottom: 23px;
+        margin-top: 12px;
+        margin-bottom: 24px;
       }
 
       .header-info-button {
         display: flex;
+        margin-left: 16px;
         align-items: center;
-
-        .btn-line {
-          width: 1px;
-          height: 16px;
-          margin-top: 8px;
-          margin-right: 8px;
-          background-color: #DCDEE5;
-        }
+        flex: none;
 
         .operate-btn {
           min-width: 88px;
@@ -1427,7 +1493,7 @@ onUnmounted(() => {
     }
 
     .pannel-content {
-      width: 1060px;
+      max-width: 1060px;
       padding-top: 24px;
       padding-left: 100px;
 
@@ -1553,7 +1619,6 @@ onUnmounted(() => {
       }
 
       .guide-wrapper {
-        width: 912px;
         border-top: 1px solid #DCDEE5;
 
         .guide-item {
@@ -1594,8 +1659,8 @@ onUnmounted(() => {
       }
 
       .process-img {
-        width: 912px;
-        height: 223px;
+        width: 100%;
+        height: auto;
         background: #F5F7FA;
       }
     }

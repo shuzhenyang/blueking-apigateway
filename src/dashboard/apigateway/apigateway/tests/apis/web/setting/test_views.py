@@ -19,36 +19,27 @@
 import pytest
 from environ import Env
 
-from apigateway.apis.web.setting.views import FeatureFlagListApi
+from apigateway.apis.web.setting.views import EnvVarListApi, FeatureFlagListApi
 from apigateway.conf.utils import get_default_feature_flags
 from apigateway.tests.utils.testing import get_response_json
 
 
 class TestFeatureFlagListApi:
-    @pytest.mark.parametrize(
-        "is_superuser, expected",
-        [
-            (True, True),
-            (False, False),
-        ],
-    )
-    def test_list(self, settings, request_factory, mocker, faker, is_superuser, expected):
-        settings.DEFAULT_FEATURE_FLAG = {"MENU_ITEM_ESB_API": True, "MENU_ITEM_ESB_API_DOC": True}
+    def test_list(self, settings, request_factory, mocker):
+        settings.DEFAULT_FEATURE_FLAG = {"ENABLE_MONITOR": True, "ENABLE_RUN_DATA": False}
         mocker.patch(
             "apigateway.apis.web.setting.views.UserFeatureFlag.objects.get_feature_flags",
-            return_value={faker.color_name(): False},
+            return_value={"ENABLE_MONITOR": False, "CUSTOM_FLAG": True},
         )
 
-        # user is not suerperuser
-        request = request_factory.get("")
-        request.user = mocker.MagicMock(username=faker.color_name(), is_superuser=is_superuser)
-        view = FeatureFlagListApi.as_view()
-        response = view(request)
-        result = get_response_json(response)
-        assert len(result["data"]) == 3
-        assert settings.DEFAULT_FEATURE_FLAG == {"MENU_ITEM_ESB_API": True, "MENU_ITEM_ESB_API_DOC": True}
-        assert result["data"]["MENU_ITEM_ESB_API"] == expected
-        assert result["data"]["MENU_ITEM_ESB_API_DOC"] is True
+        response = FeatureFlagListApi.as_view()(request_factory.get(""))
+
+        assert get_response_json(response)["data"] == {
+            "ENABLE_MONITOR": False,
+            "ENABLE_RUN_DATA": False,
+            "CUSTOM_FLAG": True,
+        }
+        assert settings.DEFAULT_FEATURE_FLAG == {"ENABLE_MONITOR": True, "ENABLE_RUN_DATA": False}
 
 
 @pytest.mark.parametrize("env_value, expected", [(None, False), ("false", False), ("true", True)])
@@ -71,3 +62,25 @@ def test_resource_path_conflict_flag_rendering(monkeypatch, settings, request_fa
     request.user = mocker.MagicMock(username="tester", is_superuser=False)
     response = FeatureFlagListApi.as_view()(request)
     assert get_response_json(response)["data"]["ENABLE_RESOURCE_PATH_CONFLICT_CHECK"] is expected
+
+
+def test_env_var_list_adds_localized_cli_overview_without_mutating_settings(settings, request_factory, mocker):
+    settings.ENV_VARS_FOR_FRONTEND = {"CLI": {"DETAIL_URL": "https://cli.example.com"}}
+    settings.BK_APIGATEWAY_VERSION = "1.22.0"
+    settings.BK_DOCS_URL_PREFIX = "https://docs.example.com"
+    mocker.patch(
+        "apigateway.apis.web.setting.views.DataPlane.objects.get_active_data_planes",
+        return_value=[],
+    )
+    mocker.patch("apigateway.apis.web.setting.views.get_current_language_code", return_value="en")
+
+    request = request_factory.get("")
+    response = EnvVarListApi.as_view()(request)
+
+    cli = get_response_json(response)["data"]["CLI"]
+    assert cli["DETAIL_URL"] == "https://cli.example.com"
+    assert cli["OVERVIEW"][-1] == {
+        "service": "Developer Center",
+        "title": "Create Application, Deploy Application, View Access Address",
+    }
+    assert settings.ENV_VARS_FOR_FRONTEND == {"CLI": {"DETAIL_URL": "https://cli.example.com"}}

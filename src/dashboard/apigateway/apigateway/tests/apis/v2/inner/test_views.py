@@ -16,6 +16,7 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import datetime
 import json
 import time
 from unittest import mock
@@ -34,6 +35,7 @@ from apigateway.apps.mcp_server.constants import (
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerAppPermissionGrantTypeEnum,
     MCPServerLeastPrivilegeEnum,
+    MCPServerPermissionActionEnum,
     MCPServerPermissionStatusEnum,
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
@@ -46,13 +48,38 @@ from apigateway.apps.mcp_server.models import (
 )
 from apigateway.apps.monitor.constants import AlarmStatusEnum, AlarmTypeEnum
 from apigateway.apps.monitor.models import AlarmRecord
-from apigateway.apps.permission.models import AppPermissionRecord
+from apigateway.apps.permission.constants import ApplyStatusEnum, GrantDimensionEnum
+from apigateway.apps.permission.models import AppPermissionApply, AppPermissionApplyStatus, AppPermissionRecord
 from apigateway.apps.rbac.constants import GatewayRoleEnum
 from apigateway.apps.rbac.models import GatewayMember
 from apigateway.common.tenant.constants import TenantModeEnum
-from apigateway.core.constants import GatewayKindEnum, GatewayStatusEnum, StageStatusEnum
+from apigateway.core.constants import GatewayKindEnum, GatewayStatusEnum, PublishSourceEnum, StageStatusEnum
 from apigateway.core.models import Gateway, Release, Resource, Stage
 from apigateway.tests.utils.testing import get_response_json
+
+
+class TestPermissionApplyRecordOperateInputSLZ:
+    @pytest.mark.parametrize("operated_by", ["", " ", "a" * 33])
+    def test_rejects_invalid_operated_by(self, operated_by):
+        slz = inner_serializers.PermissionApplyRecordOperateInputSLZ(
+            data={
+                "target_app_code": "test-app",
+                "operated_by": operated_by,
+            }
+        )
+
+        assert not slz.is_valid()
+        assert "operated_by" in slz.errors
+
+    def test_accepts_operated_by_at_max_length(self):
+        slz = inner_serializers.PermissionApplyRecordOperateInputSLZ(
+            data={
+                "target_app_code": "test-app",
+                "operated_by": "a" * 32,
+            }
+        )
+
+        assert slz.is_valid(), slz.errors
 
 
 class TestGatewayListApi:
@@ -133,6 +160,63 @@ class TestGatewayRetrieveApi:
         assert response.status_code == 200
         assert result["data"]["name"] == fake_gateway.name
         assert result["data"]["kind"] == "ai"
+
+
+class TestGatewayMaintainerDeleteApi:
+    def test_delete_maintainers(self, request_to_view, request_factory, fake_gateway):
+        GatewayMember.objects.add_gateway_administrators(fake_gateway.id, ["second-admin"], "operator-user")
+        request = request_factory.delete("/?maintainers=second-admin,missing,second-admin")
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.inner.gateway.maintainer.delete",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+        result = get_response_json(response)
+
+        assert response.status_code == 200
+        assert result["data"] == {"deleted": ["second-admin"]}
+        assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin"]
+        audit_log = AuditEventLog.objects.get(
+            op_object_type=OpObjectTypeEnum.GATEWAY.value,
+            op_object_id=fake_gateway.id,
+        )
+        assert audit_log.comment == "移除网关维护人(test)"
+        assert json.loads(audit_log.data_before) == {
+            "maintainers": [
+                {"username": "admin", "role": GatewayRoleEnum.ADMINISTRATOR.value},
+                {"username": "second-admin", "role": GatewayRoleEnum.ADMINISTRATOR.value},
+            ]
+        }
+        assert json.loads(audit_log.data_after) == {
+            "maintainers": [{"username": "admin", "role": GatewayRoleEnum.ADMINISTRATOR.value}]
+        }
+
+    def test_delete_maintainers_rejects_empty_list(self, request_to_view, request_factory, fake_gateway):
+        request = request_factory.delete("/?maintainers=")
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.inner.gateway.maintainer.delete",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+
+        assert response.status_code == 400
+
+    def test_delete_maintainers_rejects_last_administrator(self, request_to_view, request_factory, fake_gateway):
+        request = request_factory.delete("/?maintainers=admin")
+        request.app = mock.MagicMock(app_code="test")
+
+        response = request_to_view(
+            request,
+            view_name="openapi.v2.inner.gateway.maintainer.delete",
+            path_params={"gateway_name": fake_gateway.name},
+        )
+
+        assert response.status_code == 400
+        assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin"]
 
 
 class TestGatewayOutputSLZ:
@@ -257,6 +341,113 @@ class TestGatewayAppPermissionApplyCreateApi:
         assert "resource_ids" in result["error"]["message"]
         get_released_public_resources.assert_called_once_with(fake_gateway.id)
         get_manager.assert_not_called()
+
+
+class TestGatewayPermissionResourceListApi:
+    def test_list_returns_approval_url(
+        self, request_view, fake_gateway, fake_resource, fake_resource_echo, mocker, settings
+    ):
+        settings.DASHBOARD_FE_URL = "https://dashboard.example.com"
+        settings.BK_ITSM4_TICKET_URL_TEMPLATE = "https://itsm.example.com/ticket/{ticket_id}"
+        apply = G(
+            AppPermissionApply,
+            gateway=fake_gateway,
+            bk_app_code="test-app",
+            applied_by="tester",
+            grant_dimension=GrantDimensionEnum.RESOURCE.value,
+            status=ApplyStatusEnum.PENDING.value,
+            itsm_ticket_id="itsm-001",
+            _resource_ids=str(fake_resource.id),
+        )
+        G(
+            AppPermissionApplyStatus,
+            apply=apply,
+            bk_app_code="test-app",
+            gateway=fake_gateway,
+            resource=fake_resource,
+            grant_dimension=GrantDimensionEnum.RESOURCE.value,
+            status=ApplyStatusEnum.PENDING.value,
+        )
+        mocker.patch(
+            "apigateway.apis.v2.inner.views.ResourceVersionHandler.get_released_public_resources",
+            return_value=[
+                {
+                    "id": resource.id,
+                    "name": resource.name,
+                    "description": resource.description or "",
+                    "description_en": resource.description_en,
+                    "app_verified_required": True,
+                    "resource_perm_required": True,
+                    "allow_apply_permission": True,
+                }
+                for resource in (fake_resource, fake_resource_echo)
+            ],
+        )
+
+        response = request_view(
+            method="GET",
+            view_name="openapi.v2.inner.gateway.permission.resource.list",
+            path_params={"gateway_name": fake_gateway.name},
+            gateway=fake_gateway,
+            data={"target_app_code": "test-app"},
+            app=mock.MagicMock(app_code="test"),
+        )
+        result = response.json()
+
+        assert response.status_code == 200
+        approval_urls = {item["id"]: item["approval_url"] for item in result["data"]}
+        assert approval_urls[fake_resource.id] == "https://itsm.example.com/ticket/itsm-001"
+        assert (
+            approval_urls[fake_resource_echo.id] == f"https://dashboard.example.com/{fake_gateway.id}/permission/apply"
+        )
+
+    def test_list_filters_resources_by_app_permission_check(self, request_view, fake_gateway, mocker):
+        def _resource(resource_id, *, user, app, perm, allow_apply):
+            return {
+                "id": resource_id,
+                "name": f"resource_{resource_id}",
+                "description": "",
+                "description_en": None,
+                "user_verified_required": user,
+                "app_verified_required": app,
+                "resource_perm_required": perm,
+                "allow_apply_permission": allow_apply,
+            }
+
+        mocker.patch(
+            "apigateway.apis.v2.inner.views.ResourceVersionHandler.get_released_public_resources",
+            return_value=[
+                _resource(1, user=True, app=True, perm=True, allow_apply=True),
+                # 层级约束落地前的存量数据：未校验应用认证，但仍校验应用权限
+                _resource(2, user=True, app=False, perm=True, allow_apply=True),
+                # 应用认证、不校验应用权限：允许申请与否都以 unlimited 列出
+                _resource(3, user=True, app=True, perm=False, allow_apply=True),
+                _resource(4, user=True, app=True, perm=True, allow_apply=False),
+                # 仅用户认证：以 unlimited 列出
+                _resource(5, user=True, app=False, perm=False, allow_apply=False),
+                # 无需认证：以 unlimited 列出
+                _resource(6, user=False, app=False, perm=False, allow_apply=False),
+                _resource(7, user=False, app=True, perm=False, allow_apply=False),
+            ],
+        )
+
+        response = request_view(
+            method="GET",
+            view_name="openapi.v2.inner.gateway.permission.resource.list",
+            path_params={"gateway_name": fake_gateway.name},
+            gateway=fake_gateway,
+            data={"target_app_code": "test-app"},
+            app=mock.MagicMock(app_code="test"),
+        )
+
+        assert response.status_code == 200
+        assert [(item["id"], item["permission_level"]) for item in response.json()["data"]] == [
+            (1, "normal"),
+            (3, "unlimited"),
+            (5, "unlimited"),
+            (6, "unlimited"),
+            (7, "unlimited"),
+        ]
 
 
 class TestMCPServerPermissionListApi:
@@ -632,6 +823,46 @@ class TestMCPServerPermissionListApi:
 
         permission_data = result["data"][0]["permission"]
         assert permission_data["status"] == MCPServerPermissionStatusEnum.NEED_APPLY.value
+
+    def test_list_with_canceled_apply_allows_reapply(self, request_view, fake_gateway, fake_stage):
+        """测试已取消申请不影响重新申请 MCP Server 权限"""
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="test-mcp-server-canceled",
+            is_public=True,
+            status=MCPServerStatusEnum.ACTIVE.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            bk_app_code="test-app",
+            mcp_server=mcp_server,
+            applied_by="test-user",
+            applied_time=timezone.now() - datetime.timedelta(days=1),
+            status=MCPServerAppPermissionApplyStatusEnum.REJECTED.value,
+        )
+        G(
+            MCPServerAppPermissionApply,
+            bk_app_code="test-app",
+            mcp_server=mcp_server,
+            applied_by="test-user",
+            applied_time=timezone.now(),
+            status=MCPServerAppPermissionApplyStatusEnum.CANCELED.value,
+        )
+
+        resp = request_view(
+            method="GET",
+            view_name="openapi.v2.inner.mcp_server.permission.list",
+            data={"target_app_code": "test-app"},
+            app=mock.MagicMock(app_code="test"),
+        )
+        result = resp.json()
+
+        assert resp.status_code == 200
+        permission_data = result["data"][0]["permission"]
+        assert permission_data["status"] == MCPServerPermissionStatusEnum.NEED_APPLY.value
+        assert permission_data["action"] == MCPServerPermissionActionEnum.APPLY.value
 
     def test_list_grant_overrides_apply_status(self, request_view, fake_gateway, fake_stage):
         """测试主动授权（grant）优先级高于申请记录状态"""
@@ -1356,7 +1587,7 @@ class TestMCPServerAppPermissionRecordListApi:
         assert mcp_server_data["tool_names"] == ["tool_name_1", "tool_name_2"]
 
 
-class TestMCPServerAppPermissionRecordRetrieveApi:
+class TestMCPServerAppPermissionRecordRetrieveDestroyApi:
     @patch("apigateway.biz.permission.permission.settings.ENABLE_MULTI_TENANT_MODE", True)
     @patch("apigateway.biz.permission.permission.query_display_names_for_readonly")
     def test_retrieve_converts_handled_by_to_display_name(
@@ -1514,7 +1745,7 @@ class TestGatewayUpdateStatusApi:
         mcp_server = G(MCPServer, gateway=fake_gateway, status=MCPServerStatusEnum.ACTIVE.value)
 
         # Mock 触发发布
-        mocker.patch(
+        publish = mocker.patch(
             "apigateway.apis.v2.inner.views.trigger_gateway_publish",
             return_value=None,
         )
@@ -1530,6 +1761,9 @@ class TestGatewayUpdateStatusApi:
         )
 
         assert response.status_code == 204
+        publish.assert_called_once_with(
+            PublishSourceEnum.GATEWAY_DISABLE, request.user.username, fake_gateway.id, user_credentials=None
+        )
 
         # 验证网关状态已更新
         fake_gateway.refresh_from_db()
@@ -1549,7 +1783,7 @@ class TestGatewayUpdateStatusApi:
         fake_gateway.save()
 
         # Mock 触发发布
-        mocker.patch(
+        publish = mocker.patch(
             "apigateway.apis.v2.inner.views.trigger_gateway_publish",
             return_value=None,
         )
@@ -1565,10 +1799,34 @@ class TestGatewayUpdateStatusApi:
         )
 
         assert response.status_code == 204
+        publish.assert_called_once_with(
+            PublishSourceEnum.GATEWAY_ENABLE, request.user.username, fake_gateway.id, user_credentials=None
+        )
 
         # 验证网关状态已更新
         fake_gateway.refresh_from_db()
         assert fake_gateway.status == GatewayStatusEnum.ACTIVE.value
+
+    @pytest.mark.parametrize("status", [0, 1, 99])
+    def test_unchanged_or_invalid_status_does_not_publish(self, request_view, fake_gateway, mocker, status):
+        fake_gateway.name = "bp-status-test"
+        fake_gateway.status = status if status in (0, 1) else 1
+        fake_gateway.save()
+        before = fake_gateway.status
+        publish = mocker.patch("apigateway.apis.v2.inner.views.trigger_gateway_publish")
+        response = request_view(
+            method="PUT",
+            view_name="openapi.v2.inner.gateway.update_status",
+            path_params={"gateway_name": fake_gateway.name},
+            gateway=fake_gateway,
+            app=mock.MagicMock(app_code="test"),
+            data={"status": status},
+            format="json",
+        )
+        assert response.status_code == (400 if status == 99 else 204)
+        fake_gateway.refresh_from_db()
+        assert fake_gateway.status == before
+        publish.assert_not_called()
 
 
 class TestGatewayDestroyApi:
@@ -1627,7 +1885,7 @@ class TestGatewayDestroyApi:
             "apigateway.apis.v2.inner.views.trigger_gateway_publish",
             return_value=None,
         )
-        mocker.patch(
+        delete_gateway = mocker.patch(
             "apigateway.apis.v2.inner.views.GatewayHandler.delete_gateway",
             return_value=None,
         )
@@ -1643,6 +1901,7 @@ class TestGatewayDestroyApi:
         )
 
         assert response.status_code == 204
+        delete_gateway.assert_called_once_with(gateway_id, operated_by=request.user.username)
 
 
 class TestAppPermissionRecordListApi:
@@ -2958,4 +3217,243 @@ def test_v2_inner_does_not_import_shared_api_mcp_module():
     assert not any(getattr(obj, "__module__", "") == shared_api_mcp_module for obj in inner_views.__dict__.values())
     assert not any(
         getattr(obj, "__module__", "") == shared_api_mcp_module for obj in inner_serializers.__dict__.values()
+    )
+
+
+class TestPermissionApplyRecordOperateApi:
+    def test_cancel_gateway_permission_apply(self, request_view, fake_gateway, mocker):
+        record = G(
+            AppPermissionRecord,
+            gateway=fake_gateway,
+            bk_app_code="test-app",
+            status=ApplyStatusEnum.PENDING.value,
+        )
+        apply = G(
+            AppPermissionApply,
+            gateway=fake_gateway,
+            bk_app_code="test-app",
+            applied_by="applicant",
+            status=ApplyStatusEnum.PENDING.value,
+            apply_record_id=record.id,
+        )
+        mock_audit = mocker.patch("apigateway.biz.personal_workbench.permission.Auditor.record_permission_op_success")
+
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.inner.permission.apply-record-cancel",
+            path_params={"record_id": record.id},
+            data={"target_app_code": "test-app", "operated_by": "operator"},
+            app=mock.MagicMock(app_code="paas"),
+        )
+
+        assert response.status_code == 204
+        apply.refresh_from_db()
+        record.refresh_from_db()
+        assert apply.status == ApplyStatusEnum.CANCELED.value
+        assert record.status == ApplyStatusEnum.CANCELED.value
+        assert mock_audit.call_args.kwargs["username"] == "operator"
+
+    def test_delete_gateway_permission_apply(self, request_view, fake_gateway, mocker):
+        record = G(
+            AppPermissionRecord,
+            gateway=fake_gateway,
+            bk_app_code="test-app",
+            status=ApplyStatusEnum.CANCELED.value,
+        )
+        apply = G(
+            AppPermissionApply,
+            gateway=fake_gateway,
+            bk_app_code="test-app",
+            applied_by="applicant",
+            status=ApplyStatusEnum.CANCELED.value,
+            apply_record_id=record.id,
+        )
+        mocker.patch("apigateway.biz.personal_workbench.permission.Auditor.record_permission_op_success")
+
+        response = request_view(
+            method="DELETE",
+            view_name="openapi.v2.inner.permission.apply-record-detail",
+            path_params={"record_id": record.id},
+            QUERY_STRING="target_app_code=test-app&operated_by=operator",
+            app=mock.MagicMock(app_code="paas"),
+        )
+
+        assert response.status_code == 204
+        assert not AppPermissionApply.objects.filter(id=apply.id).exists()
+        assert not AppPermissionRecord.objects.filter(id=record.id).exists()
+
+    def test_cancel_mcp_permission_apply(self, request_view, fake_gateway, fake_stage, mocker):
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="mcp-server-cancel",
+        )
+        apply = G(
+            MCPServerAppPermissionApply,
+            mcp_server=mcp_server,
+            bk_app_code="test-app",
+            applied_by="applicant",
+            status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+            is_deleted=False,
+        )
+        mock_audit = mocker.patch(
+            "apigateway.biz.personal_workbench.permission.Auditor.record_mcp_server_permission_op_success"
+        )
+
+        response = request_view(
+            method="POST",
+            view_name="openapi.v2.inner.mcp_server.permission.apply-record-cancel",
+            path_params={"record_id": apply.id},
+            data={"target_app_code": "test-app", "operated_by": "operator"},
+            app=mock.MagicMock(app_code="paas"),
+        )
+
+        assert response.status_code == 204
+        apply.refresh_from_db()
+        assert apply.status == MCPServerAppPermissionApplyStatusEnum.CANCELED.value
+        assert mock_audit.call_args.kwargs["username"] == "operator"
+
+    def test_delete_mcp_permission_apply(self, request_view, fake_gateway, fake_stage, mocker):
+        mcp_server = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            name="mcp-server-delete-canceled",
+        )
+        apply = G(
+            MCPServerAppPermissionApply,
+            mcp_server=mcp_server,
+            bk_app_code="test-app",
+            applied_by="applicant",
+            status=MCPServerAppPermissionApplyStatusEnum.CANCELED.value,
+            is_deleted=False,
+        )
+        mocker.patch("apigateway.biz.personal_workbench.permission.Auditor.record_mcp_server_permission_op_success")
+
+        response = request_view(
+            method="DELETE",
+            view_name="openapi.v2.inner.mcp_server.permission.apply-record-detail",
+            path_params={"record_id": apply.id},
+            QUERY_STRING="target_app_code=test-app&operated_by=operator",
+            app=mock.MagicMock(app_code="paas"),
+        )
+
+        assert response.status_code == 204
+        assert not MCPServerAppPermissionApply.objects.filter(id=apply.id).exists()
+
+    @pytest.mark.parametrize("permission_type", ["gateway", "mcp"])
+    def test_cancel_permission_apply_is_scoped_to_target_app(
+        self,
+        permission_type,
+        request_view,
+        fake_gateway,
+        fake_stage,
+    ):
+        if permission_type == "gateway":
+            record = G(
+                AppPermissionRecord,
+                gateway=fake_gateway,
+                bk_app_code="target-app",
+                status=ApplyStatusEnum.PENDING.value,
+            )
+            apply = G(
+                AppPermissionApply,
+                gateway=fake_gateway,
+                bk_app_code="target-app",
+                applied_by="applicant",
+                status=ApplyStatusEnum.PENDING.value,
+                apply_record_id=record.id,
+            )
+            view_name = "openapi.v2.inner.permission.apply-record-cancel"
+            record_id = record.id
+        else:
+            mcp_server = G(
+                MCPServer,
+                gateway=fake_gateway,
+                stage=fake_stage,
+                name="mcp-server-app-scope",
+            )
+            apply = G(
+                MCPServerAppPermissionApply,
+                mcp_server=mcp_server,
+                bk_app_code="target-app",
+                applied_by="applicant",
+                status=MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+                is_deleted=False,
+            )
+            view_name = "openapi.v2.inner.mcp_server.permission.apply-record-cancel"
+            record_id = apply.id
+
+        response = request_view(
+            method="POST",
+            view_name=view_name,
+            path_params={"record_id": record_id},
+            data={"target_app_code": "other-app", "operated_by": "operator"},
+            app=mock.MagicMock(app_code="paas"),
+        )
+
+        assert response.status_code == 404
+        apply.refresh_from_db()
+        assert apply.status in {
+            ApplyStatusEnum.PENDING.value,
+            MCPServerAppPermissionApplyStatusEnum.PENDING.value,
+        }
+
+
+@pytest.mark.parametrize("surface", ["create", "list", "retrieve"])
+@pytest.mark.parametrize(
+    ("ticket_id", "ticket_template", "expected_itsm_url"),
+    [
+        ("itsm-001", "https://itsm.example.com/ticket/{ticket_id}", "https://itsm.example.com/ticket/itsm-001"),
+        ("", "https://itsm.example.com/ticket/{ticket_id}", ""),
+        ("itsm-001", "", ""),
+    ],
+)
+def test_api_permission_approval_url(
+    surface, ticket_id, ticket_template, expected_itsm_url, request_view, fake_gateway, settings, mocker
+):
+    settings.DASHBOARD_FE_URL = "https://dashboard.example.com"
+    settings.BK_ITSM4_TICKET_URL_TEMPLATE = ticket_template
+    record = G(
+        AppPermissionRecord,
+        gateway=fake_gateway,
+        bk_app_code="test-app",
+        grant_dimension="api",
+        status="pending",
+        itsm_ticket_id=ticket_id,
+    )
+    kwargs = {
+        "method": "GET",
+        "data": {"target_app_code": "test-app"},
+        "app": mock.MagicMock(app_code="test"),
+    }
+    if surface == "create":
+        mocker.patch(
+            "apigateway.apis.v2.inner.views.PermissionDimensionManager.get_manager"
+        ).return_value.create_apply_record.return_value = record
+        mocker.patch("apigateway.apis.v2.inner.views.apply_async_on_commit")
+        kwargs.update(
+            method="POST",
+            view_name="openapi.v2.inner.gateway.permission.apply",
+            path_params={"gateway_name": fake_gateway.name},
+            data={"target_app_code": "test-app", "grant_dimension": "api", "expire_days": 180},
+        )
+    elif surface == "list":
+        kwargs["view_name"] = "openapi.v2.inner.permission.apply-records"
+    else:
+        kwargs.update(
+            view_name="openapi.v2.inner.permission.apply-record-detail",
+            path_params={"record_id": record.id},
+        )
+
+    response = request_view(**kwargs)
+    assert response.status_code == (201 if surface == "create" else 200), response.content
+    data = response.json()["data"]
+    if surface == "list":
+        data = data["results"][0]
+    assert data["itsm_ticket_id"] == ticket_id
+    assert data["itsm_ticket_url"] == expected_itsm_url
+    assert data["approval_url"] == (
+        expected_itsm_url or f"https://dashboard.example.com/{fake_gateway.id}/permission/apply"
     )

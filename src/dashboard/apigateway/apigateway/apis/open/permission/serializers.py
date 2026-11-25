@@ -53,6 +53,7 @@ class AppResourcePermissionOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(label="ID", read_only=True)
     name = serializers.CharField()
     api_name = serializers.CharField()
+    gateway_display_name = serializers.CharField(read_only=True)
     gateway_id = serializers.IntegerField(required=False, allow_null=True)
     description = SerializerTranslatedField(translated_fields={"en": "description_en"})
     description_en = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -130,20 +131,6 @@ class PaaSAppPermissionApplyInputSLZ(serializers.Serializer):
             )
 
         return data
-
-
-class GatewayResourceIDs(serializers.Serializer):
-    gateway_id = serializers.IntegerField(
-        help_text="gateway_id",
-        required=True,
-    )
-    resource_ids = serializers.ListField(
-        help_text="如果不传则为网关维度申请",
-        child=serializers.IntegerField(),
-        allow_empty=True,
-        required=False,
-        max_length=100,
-    )
 
 
 class AppPermissionApplyV1InputSLZ(serializers.Serializer):
@@ -251,6 +238,7 @@ class AppPermissionRecordInputSLZ(serializers.Serializer):
 
 class AppPermissionRecordSLZ(serializers.ModelSerializer):
     api_name = serializers.SerializerMethodField()
+    gateway_display_name = serializers.CharField(source="gateway.display_name_or_name", read_only=True)
     apply_status = serializers.SerializerMethodField()
     apply_status_display = serializers.SerializerMethodField()
     handled_by = serializers.SerializerMethodField()
@@ -273,6 +261,7 @@ class AppPermissionRecordSLZ(serializers.ModelSerializer):
             "reason",
             "expire_days",
             "api_name",
+            "gateway_display_name",
         ]
 
     def get_api_name(self, obj):
@@ -320,6 +309,7 @@ class AppPermissionRecordOutputSLZ(AppPermissionRecordSLZ):
             "reason",
             "expire_days",
             "api_name",
+            "gateway_display_name",
             "resources",
         ]
 

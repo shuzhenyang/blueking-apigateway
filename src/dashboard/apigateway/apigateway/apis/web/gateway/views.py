@@ -15,10 +15,12 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+import logging
 from typing import List, Optional
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext as _
@@ -44,6 +46,7 @@ from apigateway.common.tenant.constants import (
 )
 from apigateway.common.tenant.request import get_user_tenant_id
 from apigateway.common.tenant.user_credentials import get_user_credentials_from_request
+from apigateway.common.tenant.validators import check_user_can_access_gateway
 from apigateway.components.bkauth import list_all_apps_of_tenant, list_available_apps_for_tenant
 from apigateway.components.bkpaas import create_paas_app, get_paas_repo_authorization, update_app_maintainers
 from apigateway.components.bkuser import list_tenants
@@ -59,9 +62,12 @@ from apigateway.core.models import Gateway, Release, Stage
 from apigateway.service.contexts import GatewayAuthContext
 from apigateway.utils.django import get_model_dict
 from apigateway.utils.git import check_git_credentials
+from apigateway.utils.local import local
 from apigateway.utils.responses import OKJsonResponse
 
 from .serializers import (
+    GatewayCheckDisplayNameAvailableInputSLZ,
+    GatewayCheckDisplayNameAvailableOutputSLZ,
     GatewayCheckNameAvailableInputSLZ,
     GatewayCheckNameAvailableOutputSLZ,
     GatewayCreateInputSLZ,
@@ -75,6 +81,8 @@ from .serializers import (
     GatewayUpdateInputSLZ,
     GatewayUpdateStatusInputSLZ,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RequestGatewayObjectMixin:
@@ -154,7 +162,7 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
         queryset = Gateway.objects.filter(id__in=gateway_ids)
 
         if keyword:
-            queryset = queryset.filter(name__icontains=keyword)
+            queryset = queryset.filter(Q(name__icontains=keyword) | Q(display_name__icontains=keyword))
 
         return queryset.order_by(order_by)
 
@@ -195,12 +203,21 @@ class GatewayListCreateApi(generics.ListCreateAPIView):
                 if not git_info:
                     raise error_codes.INVALID_ARGUMENT.format(_("可编程网关 Git 信息不能为空。"), replace=True)
                 # 校验 git_info 合法性
-                if not check_git_credentials(
+                ok, message = check_git_credentials(
                     repo_url=git_info.get("repository"),
                     username=git_info.get("account"),
                     token=git_info.get("password"),
-                ):
-                    raise error_codes.INVALID_ARGUMENT.format(_("Git 信息无效。"), replace=True)
+                )
+                if not ok:
+                    logger.warning(
+                        "Git repository probe failed: %s, request_id=%s",
+                        message,
+                        local.request_id,
+                    )
+                    raise error_codes.INVALID_ARGUMENT.format(
+                        _("Git 凭据检查失败：%(detail)s") % {"detail": message},
+                        replace=True,
+                    )
 
             user_credentials = get_user_credentials_from_request(request)
             if settings.EDITION != "te" and not git_info:
@@ -336,13 +353,13 @@ class GatewayRetrieveUpdateDestroyApi(RequestGatewayObjectMixin, generics.Retrie
         slz.is_valid(raise_exception=True)
 
         bk_app_codes = slz.validated_data.pop("bk_app_codes", None)
+        related_app_codes = slz.validated_data.pop("related_app_codes", None)
 
         slz.save(updated_by=request.user.username)
 
         if bk_app_codes is not None:
             GatewayAppBindingHandler.update_gateway_app_bindings(instance, bk_app_codes)
 
-        related_app_codes = slz.validated_data.pop("related_app_codes", None)
         if related_app_codes is not None:
             GatewayRelatedAppHandler.update_related_app_codes(request.gateway, related_app_codes)
 
@@ -365,7 +382,6 @@ class GatewayRetrieveUpdateDestroyApi(RequestGatewayObjectMixin, generics.Retrie
 
         return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
-    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         data_before = get_model_dict(instance)
@@ -387,7 +403,7 @@ class GatewayRetrieveUpdateDestroyApi(RequestGatewayObjectMixin, generics.Retrie
                 user_credentials=None,
             )
 
-        GatewayHandler.delete_gateway(instance_id)
+        GatewayHandler.delete_gateway(instance_id, operated_by=request.user.username)
 
         Auditor.record_gateway_op_success(
             op_type=OpTypeEnum.DELETE,
@@ -512,6 +528,8 @@ class GatewayTenantAppListApi(RequestGatewayObjectMixin, generics.ListAPIView):
     ),
 )
 class GatewayDevGuidelineRetrieveApi(RequestGatewayObjectMixin, generics.RetrieveAPIView):
+    gateway_action = GatewayActionEnum.OPERATE_GATEWAY.value
+
     serializer_class = GatewayDevGuidelineOutputSLZ
 
     def retrieve(self, request, *args, **kwargs):
@@ -594,12 +612,39 @@ class GatewayCheckNameAvailableApi(generics.RetrieveAPIView):
         slz.is_valid(raise_exception=True)
         name = slz.validated_data.get("name")
 
-        is_available = True
-        if Gateway.objects.filter(name=name).exists():
-            is_available = False
+        is_available = not Gateway.objects.filter(name=name).exists()
 
         slz = self.get_serializer({"is_available": is_available})
         return OKJsonResponse(data=slz.data)
+
+
+@method_decorator(
+    name="post",
+    decorator=extend_schema(
+        description="检查网关展示名是否可用",
+        request=GatewayCheckDisplayNameAvailableInputSLZ,
+        responses={status.HTTP_200_OK: GatewayCheckDisplayNameAvailableOutputSLZ()},
+        tags=["WebAPI.Gateway"],
+    ),
+)
+class GatewayCheckDisplayNameAvailableApi(generics.GenericAPIView):
+    serializer_class = GatewayCheckDisplayNameAvailableOutputSLZ
+    gateway_action = GatewayActionEnum.MANAGE_GATEWAY.value
+
+    def post(self, request, *args, **kwargs):
+        gateway_id = kwargs.get("gateway_id")
+        if gateway_id is not None and settings.ENABLE_MULTI_TENANT_MODE:
+            gateway = request.gateway
+            check_user_can_access_gateway(gateway.tenant_mode, gateway.tenant_id, get_user_tenant_id(request))
+
+        slz = GatewayCheckDisplayNameAvailableInputSLZ(data=request.data)
+        slz.is_valid(raise_exception=True)
+        is_available = (
+            not Gateway.objects.exclude(pk=gateway_id)
+            .filter(display_name__iexact=slz.validated_data["display_name"])
+            .exists()
+        )
+        return OKJsonResponse(data={"is_available": is_available})
 
 
 @method_decorator(

@@ -18,7 +18,10 @@
 
 <template>
   <div class="component-doc">
-    <div class="component-content">
+    <div
+      ref="componentContentRef"
+      class="component-content"
+    >
       <div class="component-mate mb-12px">
         <div class="min-w-0 truncate">
           <strong
@@ -29,7 +32,7 @@
           </strong>
           <span
             v-bk-tooltips.top="{
-              content: curComponent.description,
+              content: curComponent.description ?? '',
               disabled: !curComponent.description,
               allowHTML: false,
             }"
@@ -101,6 +104,33 @@
               </div>
             </div>
           </div>
+          <!--  调用地址：请求方法 + 完整调用地址  -->
+          <section class="call-guide">
+            <h3>{{ t('调用地址') }}</h3>
+            <div class="url-hero">
+              <span
+                class="method-badge"
+                :class="curMethod"
+              >
+                {{ curMethod || '--' }}
+              </span>
+              <code
+                class="url-text"
+                :title="curComponent.resource_url || '--'"
+              >
+                {{ curComponent.resource_url || '--' }}
+              </code>
+              <AgCopyButton
+                v-if="curComponent.resource_url"
+                v-bk-tooltips="t('复制')"
+                class="url-copy"
+                :source="curComponent.resource_url"
+              />
+            </div>
+          </section>
+          <!--  认证方式：默认折叠，内容由后端接口的 auth_content 动态返回  -->
+          <DocAuthSection :markdown-html="curComponent.authMarkdownHtml" />
+          <!--  文档正文：请求参数、接口说明等，由后端接口的 body_content 返回  -->
           <div
             id="markdown"
             :key="renderHtmlIndex"
@@ -116,17 +146,19 @@
 <script setup lang="ts">
 import { useGateway } from '@/stores';
 import { copy } from '@/utils';
-import MarkdownIt from 'markdown-it';
-import hljs from 'highlight.js';
+import { createMarkdownRenderer } from '@/utils/markdown';
 import {
-  getApigwResourceDocDocs,
-  getApigwResourceSDKDocs,
-  getGatewaysDetailsDocs,
-} from '@/services/source/docs';
-import { getResourcesOnline } from '@/services/source/online-debugging';
+  getDocsGatewayDetail,
+  getDocsResourceDoc,
+  getDocsSDKUsageExample,
+} from '@/services/source/docs/gateway';
+import { getReleasedStageResources } from '@/services/source/gateway/release';
+import DocAuthSection from '@/views/api-docs/components/DocAuthSection.vue';
 import type { IExtractApiReturn } from '@/services/types/utils.ts';
-import type { IDocsGatewaysSdksUsageExampleReadQuery } from '@/services/types/query/docs.ts';
-import type { IDocsGatewaysResourcesListResponse } from '@/services/types/responses/docs.ts';
+import type {
+  IDocsGatewaysResourcesListResponse,
+  IDocsGatewaysSdksUsageExampleReadQuery,
+} from '@/services/types/docs/gateway.ts';
 
 interface IProps {
   stageName?: string
@@ -143,12 +175,18 @@ const {
 const { t } = useI18n();
 const gatewayStore = useGateway();
 
-type IGatewayDocsDetail = IExtractApiReturn<typeof getGatewaysDetailsDocs>;
+type IGatewayDocsDetail = IExtractApiReturn<typeof getDocsGatewayDetail>;
 
 type IDocCom = IDocsGatewaysResourcesListResponse & {
   content: string
   innerHtml: string
   markdownHtml: string
+  // 后端拆分后的资源文档字段
+  resource_url?: string
+  auth_content?: string
+  body_content?: string
+  // 认证说明渲染结果
+  authMarkdownHtml: string
   kind?: string
 };
 
@@ -163,10 +201,14 @@ const curComponent = ref<IDocCom>({
   verified_app_required: false,
   resource_perm_required: false,
   allow_apply_permission: false,
-  labels: '',
+  labels: [],
   content: '',
   innerHtml: '',
   markdownHtml: '',
+  authMarkdownHtml: '',
+  resource_url: '',
+  is_deprecated: false,
+  deprecated_note: '',
 });
 const curApigw = ref<Partial<IGatewayDocsDetail>>({
   name: '',
@@ -175,96 +217,32 @@ const curApigw = ref<Partial<IGatewayDocsDetail>>({
 const curDocUpdated = ref('');
 const sdkMarkdownHtml = ref('');
 const renderHtmlIndex = ref(0);
+const componentContentRef = ref<HTMLElement | null>(null);
 
-const md = new MarkdownIt({
-  linkify: false,
-  html: true,
-  breaks: true,
-  highlight(str: string, lang: string) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return hljs.highlight(lang, str, true).value;
-      }
-      catch (err) {
-        console.error(err);
-      }
-    }
+// 请求方法统一大写，用于调用地址徽标展示
+const curMethod = computed(() => (curComponent.value.method || '').toUpperCase());
 
-    return '';
-  },
-});
+// 统一 Markdown 渲染：代码块带复制按钮、链接新窗口打开
+const { md } = createMarkdownRenderer();
 
-const initMarkdownHtml = (box: string) => {
-  nextTick(() => {
-    const markdownDom = document.getElementById(box);
-    // 右侧导航
-    // const titles = markdownDom?.querySelectorAll('h3');
-    if (box === 'sdk-markdown') {
-      // sdkNavList.value = [];
-      // const sdkNavArr = [];
-      // titles?.forEach((item) => {
-      //   const name = String(item?.firstChild?.nodeValue).trim();
-      //   const id = slugify(name);
-      //   item.id = `${curComponentName.value}?${id}`;
-      //   sdkNavArr.push({
-      //     id: `${curComponentName.value}?${id}`,
-      //     name,
-      //   });
-      // });
-      // sdkNavList.value = sdkNavArr;
-    }
-    else {
-      // componentNavList.value = [];
-      // const componentNavArr = [];
-      // titles?.forEach((item) => {
-      //   const name = String(item?.innerText).trim();
-      //   const id = slugify(name);
-      //   item.id = `${curComponentName.value}?${id}`;
-      //   componentNavArr.push({
-      //     id: `${curComponentName.value}?${id}`,
-      //     name,
-      //   });
-      // });
-      // componentNavList.value = componentNavArr;
-    }
-
-    // 复制代码
-    markdownDom?.querySelectorAll('a')?.forEach((item) => {
-      item.target = '_blank';
-    });
-    markdownDom?.querySelectorAll('pre')?.forEach((item) => {
-      const parentDiv = document.createElement('div');
-      const btn = document.createElement('button');
-      const codeBox = document.createElement('div');
-      const code = item?.querySelector('code')?.innerText;
-      parentDiv.className = 'pre-wrapper';
-      btn.className = 'ag-copy-btn';
-      codeBox.className = 'code-box';
-      btn.innerHTML = '<span title="复制"><i class="apigateway-icon icon-ag-copy-info"></i></span>';
-      btn.setAttribute('data-copy', code as string);
-      parentDiv?.appendChild(btn);
-      codeBox?.appendChild(item?.querySelector('code') as Node);
-      item?.appendChild(codeBox);
-      item?.parentNode?.replaceChild(parentDiv, item);
-      parentDiv?.appendChild(item);
-    });
-
-    setTimeout(() => {
-      const copyDoms = Array.from(document.getElementsByClassName('ag-copy-btn'));
-
-      const handleCopy = function (this: HTMLElement) {
-        copy(this.dataset?.copy ?? '');
-      };
-
-      copyDoms.forEach((dom) => {
-        (dom as HTMLElement).onclick = handleCopy as any;
-      });
-    }, 1000);
-  });
+// 事件委托：点击复制按钮时复制对应 pre 内的文本
+const handleCopyClick = (e: MouseEvent) => {
+  const btn = (e.target as HTMLElement).closest('.ag-copy-btn');
+  if (!btn) return;
+  const pre = btn.closest('.pre-wrapper')?.querySelector('pre');
+  if (pre) copy(pre.innerText);
 };
 
+onMounted(() => {
+  componentContentRef.value?.addEventListener('click', handleCopyClick);
+});
+
+onUnmounted(() => {
+  componentContentRef.value?.removeEventListener('click', handleCopyClick);
+});
+
 const getApigwAPIDetail = async () => {
-  curApigw.value = await getGatewaysDetailsDocs(gatewayStore.currentGateway?.name ?? '', { source: 'api_debug' });
+  curApigw.value = await getDocsGatewayDetail(gatewayStore.currentGateway?.name ?? '', { source: 'api_debug' });
 };
 
 const getApigwResourceDetail = async () => {
@@ -272,7 +250,7 @@ const getApigwResourceDetail = async () => {
     limit: 10000,
     offset: 0,
   };
-  const res = await getResourcesOnline(gatewayStore.currentGateway?.id ?? 0, stageId, query);
+  const res = await getReleasedStageResources(gatewayStore.currentGateway?.id ?? 0, stageId, query);
 
   const match = res?.find((item) => {
     return item.name === resourceName;
@@ -290,14 +268,23 @@ const getApigwResourceDoc = async () => {
     stage_name: stageName,
     source: 'api_debug',
   };
-  const res = await getApigwResourceDocDocs(gatewayStore.currentGateway?.name ?? '', resourceName, query);
-  const { content } = res;
+  const res = await getDocsResourceDoc(gatewayStore.currentGateway?.name ?? '', resourceName, query);
+  const {
+    content,
+    method,
+    resource_url,
+    auth_content,
+    body_content,
+  } = res;
+  // 拆分后的资源文档：调用地址、认证方式、正文分别展示，不再渲染完整 content
+  const isSplitDoc = Boolean(resource_url || auth_content || body_content);
   curComponent.value.content = content;
-  curComponent.value.markdownHtml = md.render(content);
+  curComponent.value.method = method || curComponent.value.method;
+  curComponent.value.resource_url = resource_url || '';
+  curComponent.value.authMarkdownHtml = md.render(auth_content || '');
+  curComponent.value.markdownHtml = md.render(isSplitDoc ? (body_content || '') : (content || ''));
   renderHtmlIndex.value += 1;
-  curDocUpdated.value = res.updated_time;
-
-  initMarkdownHtml('markdown');
+  curDocUpdated.value = res.updated_time ?? '';
 };
 
 const getApigwResourceSDK = async () => {
@@ -307,10 +294,9 @@ const getApigwResourceSDK = async () => {
     resource_name: resourceName,
     source: 'api_debug',
   };
-  const res = await getApigwResourceSDKDocs(gatewayStore.currentGateway?.name ?? '', query);
+  const res = await getDocsSDKUsageExample(gatewayStore.currentGateway?.name ?? '', query);
   const { content } = res;
   sdkMarkdownHtml.value = md.render(content);
-  initMarkdownHtml('sdk-markdown');
 };
 
 // const getApigwSDK = async (language: string) => {
@@ -839,5 +825,80 @@ h3 {
 .component-content {
   width: 100%;
   max-height: 100%;
+}
+
+.call-guide {
+  margin-bottom: 24px;
+
+  h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 22px;
+    color: #313238;
+  }
+}
+
+.url-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 40px;
+  padding: 9px 12px;
+  background: #f5f7fa;
+  border: 1px solid #dcdee5;
+  border-radius: 2px;
+}
+
+.method-badge {
+  flex-shrink: 0;
+  min-width: 56px;
+  padding: 2px 8px;
+  margin-top: 1px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  color: #3a84ff;
+  text-align: center;
+  background: #e1ecff;
+  border-radius: 2px;
+
+  &.GET {
+    color: #14a568;
+    background: #e4f5e9;
+  }
+
+  &.POST {
+    color: #3a84ff;
+    background: #e1ecff;
+  }
+
+  &.PUT,
+  &.PATCH {
+    color: #e38b02;
+    background: #fff3e0;
+  }
+
+  &.DELETE {
+    color: #ea3636;
+    background: #feebea;
+  }
+}
+
+.url-text {
+  flex: 1;
+  min-width: 0;
+  font-family: "Lucida Console", "Courier New", Monaco, monospace;
+  font-size: 13px;
+  line-height: 22px;
+  color: #313238;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.url-copy {
+  flex-shrink: 0;
+  margin-top: 3px;
 }
 </style>

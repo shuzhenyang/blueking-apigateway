@@ -27,9 +27,11 @@ from apigateway.biz.gateway import (
     add_gateway_members,
     build_gateway_doc_maintainers,
     delete_gateway_member,
+    delete_gateway_members,
     replace_gateway_administrators,
     update_gateway_member_role,
 )
+from apigateway.biz.gateway import members as gateway_members
 from apigateway.common.error_codes import APIError
 from apigateway.core.constants import GatewayKindEnum
 
@@ -182,6 +184,243 @@ def test_delete_gateway_member_rolls_back_when_paas_sync_fails(fake_gateway, moc
     )
 
     with pytest.raises(RuntimeError, match="failed"):
-        delete_gateway_member(fake_gateway, member.id)
+        delete_gateway_member(fake_gateway, member.id, "operator-user")
 
     assert GatewayMember.objects.filter(id=member.id).exists()
+
+
+def test_delete_gateway_members_does_not_sync_back_to_paas(fake_gateway, mocker):
+    GatewayMember.objects.add_gateway_administrators(fake_gateway.id, ["second-admin"], "operator-user")
+    fake_gateway.kind = GatewayKindEnum.PROGRAMMABLE.value
+    fake_gateway.save(update_fields=["kind"])
+    update_app_maintainers = mocker.patch("apigateway.biz.gateway.members.update_app_maintainers")
+
+    deleted = delete_gateway_members(fake_gateway, ["second-admin", "missing"], "operator-user")
+
+    assert [member.username for member in deleted] == ["second-admin"]
+    assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin"]
+    update_app_maintainers.assert_not_called()
+
+
+def test_member_write_locks_gateway_before_reading_snapshot(fake_gateway, mocker):
+    events = []
+    original_lock = gateway_members._lock_gateway
+    original_snapshot = gateway_members._get_gateway_member_snapshot
+    mocker.patch(
+        "apigateway.biz.gateway.members._lock_gateway",
+        side_effect=lambda gateway: (events.append("lock"), original_lock(gateway))[1],
+    )
+    mocker.patch(
+        "apigateway.biz.gateway.members._get_gateway_member_snapshot",
+        side_effect=lambda gateway_id: (events.append("snapshot"), original_snapshot(gateway_id))[1],
+    )
+
+    add_gateway_administrators(fake_gateway, ["new-admin"], "operator-user")
+
+    assert events[:2] == ["lock", "snapshot"]
+
+
+def test_all_member_writes_apply_iam_deltas(settings, fake_gateway, mocker):
+    settings.BK_IAM_V4_ENABLED = True
+    apply_iam = mocker.patch("apigateway.biz.gateway.members.apply_gateway_member_snapshots_to_iam")
+
+    replace_gateway_administrators(fake_gateway, ["admin", "second-admin"], "operator-user")
+    add_gateway_administrators(fake_gateway, ["third-admin"], "operator-user")
+    result = add_gateway_members(
+        fake_gateway,
+        [GatewayMemberInput(username="operator", role=GatewayRoleEnum.OPERATOR)],
+        "operator-user",
+    )
+    update_gateway_member_role(
+        fake_gateway,
+        result.created[0].id,
+        GatewayRoleEnum.ADMINISTRATOR,
+        "operator-user",
+    )
+    delete_gateway_member(fake_gateway, result.created[0].id, "operator-user")
+    delete_gateway_members(fake_gateway, ["third-admin"], "operator-user")
+
+    assert apply_iam.call_count == 6
+    assert all(call.args[0] == fake_gateway for call in apply_iam.call_args_list)
+    assert all(call.args[3] == "operator-user" for call in apply_iam.call_args_list)
+
+
+@pytest.mark.parametrize(
+    ("tenant_mode", "gateway_tenant_id", "expected_tenant_id"),
+    [
+        ("global", "", "system"),
+        ("single", "tenant-a", "tenant-a"),
+    ],
+)
+def test_member_write_uses_gateway_maintainer_tenant(
+    settings,
+    fake_gateway,
+    mocker,
+    tenant_mode,
+    gateway_tenant_id,
+    expected_tenant_id,
+):
+    settings.BK_IAM_V4_ENABLED = True
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    fake_gateway.tenant_mode = tenant_mode
+    fake_gateway.tenant_id = gateway_tenant_id
+    fake_gateway.save(update_fields=["tenant_mode", "tenant_id"])
+    add_authorization = mocker.patch("apigateway.biz.iam.authorization.add_authorization")
+
+    add_gateway_administrators(fake_gateway, ["new-admin"], "operator-user")
+
+    assert add_authorization.call_args.kwargs == {
+        "tenant_id": expected_tenant_id,
+        "skip_missing_users": False,
+        "gateway_id": fake_gateway.id,
+        "gateway_name": fake_gateway.name,
+    }
+
+
+def test_member_write_skips_excluded_user_locally_and_iam(settings, fake_gateway, mocker):
+    settings.BK_IAM_V4_ENABLED = True
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+    GatewayMember.objects.filter(gateway=fake_gateway).delete()
+    add_authorization = mocker.patch("apigateway.biz.iam.authorization.add_authorization")
+
+    assert add_gateway_administrators(fake_gateway, ["admin"], "operator-user") == []
+    assert not GatewayMember.objects.filter(gateway=fake_gateway, username="admin").exists()
+    add_authorization.assert_not_called()
+
+
+def test_member_write_keeps_excluded_username_when_single_tenant(settings, fake_gateway):
+    settings.ENABLE_MULTI_TENANT_MODE = False
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+    GatewayMember.objects.filter(gateway=fake_gateway).delete()
+
+    assert add_gateway_administrators(fake_gateway, ["admin"], "operator-user") == ["admin"]
+
+
+def test_member_write_drops_excluded_usernames_and_keeps_real_users(settings, fake_gateway):
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+
+    assert add_gateway_administrators(fake_gateway, ["bk_admin", "alice"], "operator-user") == ["admin", "alice"]
+    assert not GatewayMember.objects.filter(gateway=fake_gateway, username="bk_admin").exists()
+
+
+def test_replace_drops_excluded_administrators(settings, fake_gateway):
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+
+    assert replace_gateway_administrators(fake_gateway, ["alice", "admin"], "operator-user") == ["alice"]
+    assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["alice"]
+
+
+def test_replace_only_excluded_usernames_keeps_existing_administrators(settings, fake_gateway):
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+
+    with pytest.raises(APIError, match="网关至少需要保留一个管理员"):
+        replace_gateway_administrators(fake_gateway, ["admin", "bk_admin"], "operator-user")
+
+    assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin"]
+
+
+def test_add_gateway_administrators_ignores_only_excluded_usernames(settings, fake_gateway, mocker):
+    settings.BK_IAM_V4_ENABLED = True
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+    add_authorization = mocker.patch("apigateway.biz.iam.authorization.add_authorization")
+
+    assert add_gateway_administrators(fake_gateway, ["bk_admin"], "operator-user") == ["admin"]
+    assert not GatewayMember.objects.filter(gateway=fake_gateway, username="bk_admin").exists()
+    add_authorization.assert_not_called()
+
+
+def test_add_gateway_members_drops_excluded_usernames(settings, fake_gateway):
+    settings.ENABLE_MULTI_TENANT_MODE = True
+    settings.BK_IAM_V4_EXCLUDED_USERNAMES = frozenset({"admin", "bk_admin"})
+
+    result = add_gateway_members(
+        fake_gateway,
+        [
+            GatewayMemberInput(username="bk_admin", role=GatewayRoleEnum.OPERATOR),
+            GatewayMemberInput(username="bk_admin", role=GatewayRoleEnum.ADMINISTRATOR),
+            GatewayMemberInput(username="alice", role=GatewayRoleEnum.OPERATOR),
+        ],
+        "operator-user",
+    )
+
+    assert [member.username for member in result.created] == ["alice"]
+    assert not GatewayMember.objects.filter(gateway=fake_gateway, username="bk_admin").exists()
+
+
+def test_member_write_does_not_call_iam_when_disabled(settings, fake_gateway, mocker):
+    settings.BK_IAM_V4_ENABLED = False
+    apply_iam = mocker.patch("apigateway.biz.gateway.members.apply_gateway_member_snapshots_to_iam")
+
+    add_gateway_administrators(fake_gateway, ["new-admin"], "operator-user")
+
+    apply_iam.assert_not_called()
+
+
+def test_member_write_rolls_back_local_state_when_iam_fails(settings, fake_gateway, mocker):
+    settings.BK_IAM_V4_ENABLED = True
+    mocker.patch(
+        "apigateway.biz.gateway.members.apply_gateway_member_snapshots_to_iam",
+        side_effect=RuntimeError("iam failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="iam failed"):
+        add_gateway_members(
+            fake_gateway,
+            [GatewayMemberInput(username="operator", role=GatewayRoleEnum.OPERATOR)],
+            "operator-user",
+        )
+
+    assert not GatewayMember.objects.filter(gateway=fake_gateway, username="operator").exists()
+
+
+def test_iam_failure_restores_programmable_gateway_administrators(settings, fake_gateway, mocker):
+    settings.BK_IAM_V4_ENABLED = True
+    fake_gateway.kind = GatewayKindEnum.PROGRAMMABLE.value
+    fake_gateway.save(update_fields=["kind"])
+    update_app_maintainers = mocker.patch("apigateway.biz.gateway.members.update_app_maintainers")
+    mocker.patch(
+        "apigateway.biz.gateway.members.apply_gateway_member_snapshots_to_iam",
+        side_effect=RuntimeError("iam failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="iam failed"):
+        add_gateway_members(
+            fake_gateway,
+            [GatewayMemberInput(username="new-admin", role=GatewayRoleEnum.ADMINISTRATOR)],
+            "operator-user",
+        )
+
+    assert update_app_maintainers.call_args_list == [
+        mocker.call(fake_gateway.name, ["admin", "new-admin"]),
+        mocker.call(fake_gateway.name, ["admin"]),
+    ]
+    assert not GatewayMember.objects.filter(gateway=fake_gateway, username="new-admin").exists()
+
+
+def test_iam_failure_does_not_sync_paas_when_administrator_set_is_unchanged(
+    settings,
+    fake_gateway,
+    mocker,
+):
+    settings.BK_IAM_V4_ENABLED = True
+    fake_gateway.kind = GatewayKindEnum.PROGRAMMABLE.value
+    fake_gateway.save(update_fields=["kind"])
+    update_app_maintainers = mocker.patch("apigateway.biz.gateway.members.update_app_maintainers")
+    mocker.patch(
+        "apigateway.biz.gateway.members.apply_gateway_member_snapshots_to_iam",
+        side_effect=RuntimeError("iam failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="iam failed"):
+        add_gateway_members(
+            fake_gateway,
+            [GatewayMemberInput(username="operator", role=GatewayRoleEnum.OPERATOR)],
+            "operator-user",
+        )
+
+    update_app_maintainers.assert_not_called()

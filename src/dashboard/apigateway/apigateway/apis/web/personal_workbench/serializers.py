@@ -16,13 +16,12 @@
 # to the current version of the project delivered to anyone in the future.
 #
 
-from typing import Any
-
 from rest_framework import serializers
 
 from apigateway.apps.mcp_server.constants import MCPServerAppPermissionApplyStatusEnum
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerAppPermissionApply
 from apigateway.apps.permission.constants import (
+    ApplyStatusEnum,
     GrantDimensionEnum,
     PermissionApplyExpireDaysEnum,
 )
@@ -32,6 +31,25 @@ from apigateway.core.models import Gateway, Resource
 from apigateway.service.bk_itsm import ItsmPermissionApplyHelper
 
 from .constants import WorkbenchFilterTypeEnum
+
+
+class WorkbenchPermissionOperateInputSLZ(serializers.Serializer):
+    """个人工作台权限申请操作无请求参数。"""
+
+    class Meta:
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchPermissionOperateInputSLZ"
+
+
+class WorkbenchPendingPermissionCountOutputSLZ(serializers.Serializer):
+    """个人工作台 - 我的待办计数"""
+
+    gateways = serializers.IntegerField(read_only=True, help_text="API 网关待办数量")
+    mcp_servers = serializers.IntegerField(read_only=True, help_text="MCP Server 待办数量")
+    total = serializers.IntegerField(read_only=True, help_text="待办合计")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchPendingPermissionCountOutputSLZ"
+
 
 # ========== 下拉筛选项序列化器 ==========
 
@@ -52,10 +70,12 @@ class WorkbenchFilterOptionQueryInputSLZ(serializers.Serializer):
 class WorkbenchGatewayFilterOptionSLZ(serializers.ModelSerializer):
     """个人工作台 - 网关下拉筛选项"""
 
+    display_name = serializers.CharField(source="display_name_or_name", read_only=True)
+
     class Meta:
         ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchGatewayFilterOptionSLZ"
         model = Gateway
-        fields = ["id", "name"]
+        fields = ["id", "name", "display_name"]
         read_only_fields = fields
 
 
@@ -72,11 +92,12 @@ class WorkbenchMCPServerFilterOptionSLZ(serializers.ModelSerializer):
 
     title = serializers.SerializerMethodField(help_text="MCP Server 展示名称（为空时回退到 name）")
     gateway_name = serializers.SerializerMethodField(help_text="所属网关名称")
+    gateway_display_name = serializers.CharField(source="gateway.display_name_or_name", read_only=True)
 
     class Meta:
         ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchMCPServerFilterOptionSLZ"
         model = MCPServer
-        fields = ["id", "name", "title", "gateway_id", "gateway_name"]
+        fields = ["id", "name", "title", "gateway_id", "gateway_name", "gateway_display_name"]
         read_only_fields = fields
 
     def get_title(self, obj) -> str:
@@ -89,50 +110,42 @@ class WorkbenchMCPServerFilterOptionSLZ(serializers.ModelSerializer):
 # ========== API 网关 输出序列化器 ==========
 
 
-class ResourceDetailMixin:
-    """资源详情 Mixin，提供 get_resources 方法
+def _get_resources(serializer, obj) -> list:
+    if obj.grant_dimension != GrantDimensionEnum.RESOURCE.value:
+        return []
+    resource_ids = obj.resource_ids
+    if not resource_ids:
+        return []
 
-    使用方式：View 层通过 serializer context 传入 prefetched_resources（批量预取的资源映射），
-    避免 N+1 查询问题。若 context 中无预取数据，则回退到单条查询。
-    """
+    prefetched = serializer.context.get("prefetched_resources")
+    if prefetched is not None:
+        return [prefetched[rid] for rid in sorted(resource_ids) if rid in prefetched]
 
-    context: dict[str, Any]
-
-    def get_resources(self, obj) -> list:
-        if obj.grant_dimension != GrantDimensionEnum.RESOURCE.value:
-            return []
-        resource_ids = obj.resource_ids
-        if not resource_ids:
-            return []
-
-        # 优先使用 View 层预取的资源数据
-        prefetched = self.context.get("prefetched_resources")
-        if prefetched is not None:
-            return [prefetched[rid] for rid in sorted(resource_ids) if rid in prefetched]
-
-        return list(Resource.objects.filter(id__in=resource_ids).values("id", "name", "path", "method").order_by("id"))
+    return list(Resource.objects.filter(id__in=resource_ids).values("id", "name", "path", "method").order_by("id"))
 
 
-class WorkbenchGatewayPermissionApplyOutputSLZ(ResourceDetailMixin, serializers.ModelSerializer):
-    """个人工作台 - API 网关待办/我的申请 输出序列化器"""
+class WorkbenchGatewayPermissionPendingOutputSLZ(serializers.ModelSerializer):
+    """个人工作台 - API 网关待办 输出序列化器"""
 
     gateway_id = serializers.IntegerField(read_only=True, help_text="网关 ID")
     gateway_name = serializers.SerializerMethodField(help_text="网关名称")
+    gateway_display_name = serializers.CharField(source="gateway.display_name_or_name", read_only=True)
     expire_days_display = serializers.SerializerMethodField(help_text="权限期限显示")
     grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度显示")
+    resources = serializers.SerializerMethodField(help_text="资源维度时的资源列表")
     applied_by = serializers.SerializerMethodField(help_text="申请人")
     approvers = serializers.SerializerMethodField(help_text="当前审批责任人列表（非历史实际审批人）")
     itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
-    resources = serializers.SerializerMethodField(help_text="资源维度时的资源列表")
 
     class Meta:
-        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchGatewayPermissionApplyOutputSLZ"
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchGatewayPermissionPendingOutputSLZ"
         model = AppPermissionApply
         fields = [
             "id",
             "bk_app_code",
             "gateway_id",
             "gateway_name",
+            "gateway_display_name",
             "grant_dimension",
             "grant_dimension_display",
             "expire_days",
@@ -157,6 +170,9 @@ class WorkbenchGatewayPermissionApplyOutputSLZ(ResourceDetailMixin, serializers.
     def get_grant_dimension_display(self, obj) -> str:
         return GrantDimensionEnum.get_choice_label(obj.grant_dimension)
 
+    def get_resources(self, obj) -> list:
+        return _get_resources(self, obj)
+
     def get_applied_by(self, obj) -> str:
         return ResourcePermissionHandler.convert_applied_by_to_display_name(
             obj.bk_app_code,
@@ -172,25 +188,98 @@ class WorkbenchGatewayPermissionApplyOutputSLZ(ResourceDetailMixin, serializers.
         return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
 
 
-class WorkbenchGatewayPermissionRecordOutputSLZ(ResourceDetailMixin, serializers.ModelSerializer):
-    """个人工作台 - API 网关已办 输出序列化器"""
+class WorkbenchGatewayPermissionMyApplyOutputSLZ(serializers.ModelSerializer):
+    """个人工作台 - API 网关我的申请 输出序列化器"""
 
     gateway_id = serializers.IntegerField(read_only=True, help_text="网关 ID")
     gateway_name = serializers.SerializerMethodField(help_text="网关名称")
+    gateway_display_name = serializers.CharField(source="gateway.display_name_or_name", read_only=True)
     expire_days_display = serializers.SerializerMethodField(help_text="权限期限显示")
     grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度显示")
-    applied_by = serializers.SerializerMethodField(help_text="申请人")
-    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
     resources = serializers.SerializerMethodField(help_text="资源维度时的资源列表")
+    applied_by = serializers.SerializerMethodField(help_text="申请人")
+    approvers = serializers.SerializerMethodField(help_text="当前审批责任人列表（非历史实际审批人）")
+    created_time = serializers.DateTimeField(source="applied_time", read_only=True, help_text="申请时间")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
 
     class Meta:
-        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchGatewayPermissionRecordOutputSLZ"
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchGatewayPermissionMyApplyOutputSLZ"
         model = AppPermissionRecord
         fields = [
             "id",
             "bk_app_code",
             "gateway_id",
             "gateway_name",
+            "gateway_display_name",
+            "grant_dimension",
+            "grant_dimension_display",
+            "expire_days",
+            "expire_days_display",
+            "resources",
+            "reason",
+            "applied_by",
+            "approvers",
+            "applied_time",
+            "created_time",
+            "status",
+            "itsm_ticket_id",
+            "itsm_ticket_url",
+        ]
+        read_only_fields = fields
+
+    def get_gateway_name(self, obj) -> str:
+        return obj.gateway.name
+
+    def get_expire_days_display(self, obj) -> str:
+        return PermissionApplyExpireDaysEnum.get_choice_label(obj.expire_days)
+
+    def get_grant_dimension_display(self, obj) -> str:
+        return GrantDimensionEnum.get_choice_label(obj.grant_dimension)
+
+    def get_resources(self, obj) -> list:
+        resources = _get_resources(self, obj)
+        if obj.status != ApplyStatusEnum.PARTIAL_APPROVED.value:
+            return resources
+
+        approved_ids = set(obj.handled_resource_ids.get(ApplyStatusEnum.APPROVED.value) or [])
+        return [resource for resource in resources if resource["id"] in approved_ids]
+
+    def get_applied_by(self, obj) -> str:
+        return ResourcePermissionHandler.convert_applied_by_to_display_name(
+            obj.bk_app_code,
+            obj.applied_by,
+            obj.gateway.tenant_mode,
+            obj.gateway.tenant_id,
+        )
+
+    def get_approvers(self, obj) -> list[str]:
+        return self.context["gateway_approvers"].get(obj.gateway_id, [])
+
+    def get_itsm_ticket_url(self, obj) -> str:
+        return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
+
+
+class WorkbenchGatewayPermissionHandledOutputSLZ(serializers.ModelSerializer):
+    """个人工作台 - API 网关已办 输出序列化器"""
+
+    gateway_id = serializers.IntegerField(read_only=True, help_text="网关 ID")
+    gateway_name = serializers.SerializerMethodField(help_text="网关名称")
+    gateway_display_name = serializers.CharField(source="gateway.display_name_or_name", read_only=True)
+    expire_days_display = serializers.SerializerMethodField(help_text="权限期限显示")
+    grant_dimension_display = serializers.SerializerMethodField(help_text="授权维度显示")
+    resources = serializers.SerializerMethodField(help_text="资源维度时的资源列表")
+    applied_by = serializers.SerializerMethodField(help_text="申请人")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchGatewayPermissionHandledOutputSLZ"
+        model = AppPermissionRecord
+        fields = [
+            "id",
+            "bk_app_code",
+            "gateway_id",
+            "gateway_name",
+            "gateway_display_name",
             "grant_dimension",
             "grant_dimension_display",
             "expire_days",
@@ -217,6 +306,9 @@ class WorkbenchGatewayPermissionRecordOutputSLZ(ResourceDetailMixin, serializers
     def get_grant_dimension_display(self, obj) -> str:
         return GrantDimensionEnum.get_choice_label(obj.grant_dimension)
 
+    def get_resources(self, obj) -> list:
+        return _get_resources(self, obj)
+
     def get_applied_by(self, obj) -> str:
         return ResourcePermissionHandler.convert_applied_by_to_display_name(
             obj.bk_app_code,
@@ -240,6 +332,7 @@ class WorkbenchMCPServerBaseSLZ(serializers.Serializer):
     title = serializers.SerializerMethodField(help_text="MCPServer 显示名称")
     gateway_id = serializers.IntegerField(read_only=True, help_text="所属网关 ID")
     gateway_name = serializers.SerializerMethodField(help_text="所属网关名称")
+    gateway_display_name = serializers.CharField(source="gateway.display_name_or_name", read_only=True)
 
     class Meta:
         ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchMCPServerBaseSLZ"
@@ -251,8 +344,8 @@ class WorkbenchMCPServerBaseSLZ(serializers.Serializer):
         return obj.gateway.name
 
 
-class WorkbenchMCPPermissionApplyOutputSLZ(serializers.ModelSerializer):
-    """个人工作台 - MCP Server 待办/我的申请 输出序列化器"""
+class WorkbenchMCPPermissionMyApplyOutputSLZ(serializers.ModelSerializer):
+    """个人工作台 - MCP Server 我的申请 输出序列化器"""
 
     mcp_server = WorkbenchMCPServerBaseSLZ(help_text="MCP Server 信息")
     applied_by = serializers.SerializerMethodField(help_text="申请人")
@@ -261,7 +354,54 @@ class WorkbenchMCPPermissionApplyOutputSLZ(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField(help_text="审批状态显示")
 
     class Meta:
-        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchMCPPermissionApplyOutputSLZ"
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchMCPPermissionMyApplyOutputSLZ"
+        model = MCPServerAppPermissionApply
+        fields = [
+            "id",
+            "bk_app_code",
+            "mcp_server",
+            "applied_by",
+            "approvers",
+            "applied_time",
+            "reason",
+            "expire_days",
+            "status",
+            "status_display",
+            "itsm_ticket_id",
+            "itsm_ticket_url",
+        ]
+        read_only_fields = fields
+
+    def get_applied_by(self, obj) -> str:
+        gateway = obj.mcp_server.gateway
+        return ResourcePermissionHandler.convert_applied_by_to_display_name(
+            obj.bk_app_code,
+            obj.applied_by,
+            gateway.tenant_mode,
+            gateway.tenant_id,
+        )
+
+    def get_approvers(self, obj) -> list[str]:
+        return self.context["gateway_approvers"].get(obj.mcp_server.gateway_id, [])
+
+    def get_itsm_ticket_url(self, obj) -> str:
+        return ItsmPermissionApplyHelper.build_ticket_url(obj.itsm_ticket_id)
+
+    def get_status_display(self, obj) -> str:
+        return MCPServerAppPermissionApplyStatusEnum.get_choice_label(obj.status)
+
+
+class WorkbenchMCPPermissionPendingOutputSLZ(serializers.ModelSerializer):
+    """个人工作台 - MCP Server 待办 输出序列化器"""
+
+    mcp_server = WorkbenchMCPServerBaseSLZ(help_text="MCP Server 信息")
+    applied_by = serializers.SerializerMethodField(help_text="申请人")
+    approvers = serializers.SerializerMethodField(help_text="当前审批责任人列表（非历史实际审批人）")
+    itsm_ticket_url = serializers.SerializerMethodField(help_text="ITSM 单据中心链接")
+    status_display = serializers.SerializerMethodField(help_text="审批状态显示")
+
+    class Meta:
+        ref_name = "apigateway.apis.web.personal_workbench.serializers.WorkbenchMCPPermissionPendingOutputSLZ"
         model = MCPServerAppPermissionApply
         fields = [
             "id",

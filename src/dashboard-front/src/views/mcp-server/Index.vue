@@ -19,7 +19,7 @@
 <template>
   <div>
     <div class="page-wrapper">
-      <AgMcpTopBar
+      <McpServerToolbar
         v-model:search-value="searchValue"
         v-model:publish-time="filterData.order_by"
         class="mb-16px"
@@ -89,7 +89,7 @@
             </div>
           </div>
         </template>
-      </AgMcpTopBar>
+      </McpServerToolbar>
       <BkLoading
         :loading="isLoading"
         :z-index="99"
@@ -120,7 +120,7 @@
           class="mcp-server-list"
         >
           <template v-if="['searchEmpty', 'error'].includes(cardEmptyType ?? '') && mcpList.length < 1 && !isLoading">
-            <TableEmpty
+            <AgTableEmpty
               background="#f5f7fa"
               :empty-type="cardEmptyType"
               @clear-filter="handleClearFilter"
@@ -128,7 +128,7 @@
             />
           </template>
           <template v-else>
-            <AgMcpCard
+            <McpServerCard
               v-for="server of mcpList"
               :key="server.id"
               :server="server"
@@ -156,11 +156,10 @@
                 </div>
               </template>
               <template
-                v-if="server?.oauth2_public_client_enabled && isEnabledOAuth"
+                v-if="hasAppPermissionRisk(server)"
                 #externalTag
               >
                 <div
-                  v-if="server?.app_permission_risk?.has_risk"
                   v-bk-tooltips="renderRiskToolToolTip(server)"
                   class="external-oauth-tag bg-#ffebeb"
                 >
@@ -171,7 +170,7 @@
                   />
                 </div>
               </template>
-            </AgMcpCard>
+            </McpServerCard>
             <div
               class="flex items-center justify-center add-server-card"
               @click.stop="handleAddServerClick"
@@ -191,7 +190,7 @@
         @updated="handleServerUpdated"
       />
       <!-- 复制 MCP 配置 -->
-      <AgMcpCopyConfigDialog
+      <McpAccessConfigDialog
         v-model:is-show="isShowConfig"
         :loading="copyConfigLoading"
         :list="mcpConfigList"
@@ -211,25 +210,23 @@ import { Plus } from 'bkui-vue/lib/icon';
 import { vIntersectionObserver } from '@vueuse/components';
 import type { ISearchItem } from 'bkui-vue/lib/search-select/utils';
 import {
-  type IMCPFilterParams,
-  type IMCPServerCategory,
-  type IMCPServerWithUIState,
   deleteServer,
-  getMcpBatchCopyConfigList,
+  getMcpServerBatchConfigs,
   getMcpServerFilterOptions,
   getServers,
   patchServerStatus,
-} from '@/services/source/mcp-server';
+} from '@/services/source/gateway/mcp-server/server';
+import type { IMCPFilterParams, IMCPServerCategory, IMCPServerWithUIState } from '@/types/mcp-server';
 import type { ISearchSelect } from '@/types/common.ts';
 import { useFeatureFlag } from '@/stores';
-import { useMcpBatchCopyConfig, usePopInfoBox } from '@/hooks';
+import { useMcpAuthRisk, useMcpBatchCopyConfig, usePopInfoBox } from '@/hooks';
 import { filterSimpleEmpty } from '@/utils/filterEmptyValues';
 import CreateSlider from '@/views/mcp-server/components/CreateSlider.vue';
 import ServerCardTable from '@/views/mcp-server/components/ServerCardTable.vue';
-import AgMcpTopBar from '@/components/ag-mcp-search-bar/Index.vue';
-import AgMcpCard from '@/components/ag-mcp-card/Index.vue';
-import AgMcpCopyConfigDialog from '@/components/ag-mcp-card/components/CopyConfigDialog.vue';
-import TableEmpty from '@/components/table-empty/Index.vue';
+import McpServerToolbar from '@/components/mcp/mcp-server-toolbar/Index.vue';
+import McpServerCard from '@/components/mcp/mcp-server-card/Index.vue';
+import McpAccessConfigDialog from '@/components/mcp/mcp-access-config-dialog/Index.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
 
 interface IProps { gatewayId?: number }
 
@@ -238,6 +235,7 @@ const { gatewayId = 0 } = defineProps<IProps>();
 const { t } = useI18n();
 const router = useRouter();
 const featureFlagStore = useFeatureFlag();
+const { hasAppPermissionRisk, getAppPermissionRiskTips } = useMcpAuthRisk();
 
 const createSliderRef = ref<InstanceType<typeof CreateSlider>>();
 const serverCardTableRef = ref<InstanceType<typeof ServerCardTable>>();
@@ -248,6 +246,8 @@ const activeStatusTab = ref('all');
 const activeViewTab = ref('card');
 const cardEmptyType = ref<'empty' | 'searchEmpty' | 'error' | undefined>(undefined);
 const isLoading = ref(true);
+// 触底加载更多中（不显示全屏 loading，避免滚动闪屏）
+const isLoadMore = ref(false);
 const isShowConfig = ref(false);
 const pagination = ref({
   current: 1,
@@ -274,7 +274,7 @@ const {
   mcpConfigList,
   fetchMcpBatchCopyConfigList,
 } = useMcpBatchCopyConfig({
-  fetchApi: getMcpBatchCopyConfigList as any,
+  fetchApi: getMcpServerBatchConfigs,
   gatewayId,
 });
 
@@ -343,22 +343,14 @@ const mcpViewList = shallowRef([
 ]);
 
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
-const isEnabledOAuth = computed(() =>
-  featureFlagStore?.flags?.ENABLE_MCP_SERVER_OAUTH2_PUBLIC_CLIENT,
-);
 const isTableView = computed(() => activeViewTab.value.includes('table'));
 
-const renderRiskToolToolTip = (row: IMCPServerWithUIState & { app_permission_risk?: boolean }) => {
+const renderRiskToolToolTip = (row: IMCPServerWithUIState) => {
+  const tips = getAppPermissionRiskTips(row);
   return {
     content: () => (
       <div class="break-all">
-        { t('此 MCP Server 已开启 OAuth2 公开客户端模式，且包含{count}个应用态鉴权工具（{content}）。',
-          {
-            count: row?.app_permission_risk?.risk_tools?.length,
-            content: row?.app_permission_risk?.risk_tools?.join('、'),
-          })}
-        <div class="h-24px" />
-        { t('该工具通过 public 应用身份调用，所有 OAuth2 授权用户均可访问。') }
+        { tips.map(tip => <div>{ tip }</div>) }
       </div>
     ),
     extCls: 'max-w-300px',
@@ -411,12 +403,18 @@ const calculateMaxVisibleCards = (): number => {
 // 获取MCPServer列表
 const fetchMcpServerList = async () => {
   const { hasNoMore, current, limit } = pagination.value;
-  isLoading.value = true;
 
-  if (hasNoMore) {
-    isLoading.value = false;
+  if (hasNoMore || isLoadMore.value) {
     return;
   };
+
+  // 统一加载锁：防止 IntersectionObserver 在加载期间重复触发导致并发请求
+  isLoadMore.value = true;
+
+  // 首屏加载显示 loading 遮罩；加载更多时不显示，避免滚动闪屏
+  if (current === 1) {
+    isLoading.value = true;
+  }
 
   try {
     const params = {
@@ -439,12 +437,20 @@ const fetchMcpServerList = async () => {
     };
   }
   catch {
-    cardEmptyType.value = 'error';
+    if (current === 1) {
+      cardEmptyType.value = 'error';
+    }
   }
   finally {
-    setTimeout(() => {
-      isLoading.value = false;
-    }, 100);
+    if (current === 1) {
+      setTimeout(() => {
+        isLoading.value = false;
+        isLoadMore.value = false;
+      }, 100);
+    }
+    else {
+      isLoadMore.value = false;
+    }
   }
 };
 
@@ -620,8 +626,8 @@ const handleResize = debounce(() => {
 }, 300);
 
 const onIntersectionObserver = ([entry]: IntersectionObserverEntry[]) => {
-  // 表格视图时，禁用滚动加载
-  if (isTableView.value) return;
+  // 表格视图时，禁用滚动加载；请求进行中时跳过，防止重复请求
+  if (isTableView.value || isLoadMore.value) return;
 
   if (entry?.isIntersecting) {
     fetchMcpServerList();

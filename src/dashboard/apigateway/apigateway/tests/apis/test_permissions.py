@@ -3,10 +3,14 @@ from unittest import mock
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+from django.urls import resolve
+from django_dynamic_fixture import G
 
 from apigateway.apis.permissions import GatewayActionPermission
 from apigateway.apps.rbac.constants import GatewayActionEnum, GatewayRoleEnum
 from apigateway.apps.rbac.models import GatewayMember
+from apigateway.common.error_codes import error_codes
+from apigateway.core.models import Gateway
 
 pytestmark = pytest.mark.django_db
 
@@ -128,3 +132,151 @@ def test_gateway_permission_rejects_invalid_member_role(mocker, fake_request, fa
             _view(fake_gateway.id, gateway_action=GatewayActionEnum.OPERATE_GATEWAY.value),
         )
     assert "unknown gateway member role" in caplog.text
+
+
+def test_active_iam_allow_sets_local_member(mocker, fake_request, fake_gateway):
+    permission = GatewayActionPermission()
+    mocker.patch.object(permission, "get_gateway_object", return_value=fake_gateway)
+    mocker.patch("apigateway.apis.permissions.is_iam_auth_active", return_value=True)
+    is_allowed = mocker.patch("apigateway.apis.permissions.is_iam_gateway_action_allowed", return_value=True)
+    fake_request.user = mock.MagicMock(username="admin")
+
+    assert permission.has_permission(
+        fake_request,
+        _view(fake_gateway.id, gateway_action=GatewayActionEnum.MANAGE_GATEWAY.value),
+    )
+
+    is_allowed.assert_called_once_with(fake_gateway, "admin", GatewayActionEnum.MANAGE_GATEWAY.value)
+    assert fake_request.gateway_member.username == "admin"
+
+
+def test_active_iam_explicit_deny_has_no_local_fallback(mocker, fake_request, fake_gateway):
+    permission = GatewayActionPermission()
+    mocker.patch.object(permission, "get_gateway_object", return_value=fake_gateway)
+    mocker.patch("apigateway.apis.permissions.is_iam_auth_active", return_value=True)
+    is_allowed = mocker.patch("apigateway.apis.permissions.is_iam_gateway_action_allowed", return_value=False)
+    fake_request.user = mock.MagicMock(username="admin")
+
+    assert not permission.has_permission(
+        fake_request,
+        _view(fake_gateway.id, gateway_action=GatewayActionEnum.MANAGE_GATEWAY.value),
+    )
+
+    is_allowed.assert_called_once()
+
+
+def test_active_iam_allow_does_not_require_local_permission(mocker, fake_request, fake_gateway):
+    permission = GatewayActionPermission()
+    mocker.patch.object(permission, "get_gateway_object", return_value=fake_gateway)
+    mocker.patch("apigateway.apis.permissions.is_iam_auth_active", return_value=True)
+    is_allowed = mocker.patch("apigateway.apis.permissions.is_iam_gateway_action_allowed", return_value=True)
+    fake_request.user = mock.MagicMock(username="guest")
+
+    assert permission.has_permission(
+        fake_request,
+        _view(fake_gateway.id, gateway_action=GatewayActionEnum.OPERATE_GATEWAY.value),
+    )
+    is_allowed.assert_called_once_with(fake_gateway, "guest", GatewayActionEnum.OPERATE_GATEWAY.value)
+    assert fake_request.gateway_member is None
+
+
+def test_unavailable_iam_falls_back_to_local_permission(mocker, fake_request, fake_gateway, caplog):
+    permission = GatewayActionPermission()
+    mocker.patch.object(permission, "get_gateway_object", return_value=fake_gateway)
+    mocker.patch("apigateway.apis.permissions.is_iam_auth_active", return_value=True)
+    mocker.patch(
+        "apigateway.apis.permissions.is_iam_gateway_action_allowed",
+        side_effect=error_codes.REMOTE_REQUEST_ERROR.format("timeout"),
+    )
+    fake_request.user = mock.MagicMock(username="admin")
+
+    with caplog.at_level("WARNING"):
+        assert permission.has_permission(
+            fake_request,
+            _view(fake_gateway.id, gateway_action=GatewayActionEnum.MANAGE_GATEWAY.value),
+        )
+
+    assert "fallback to local" in caplog.text
+    assert "timeout" in caplog.text
+
+
+def test_unavailable_iam_rejects_without_local_permission(mocker, fake_request, fake_gateway, caplog):
+    permission = GatewayActionPermission()
+    mocker.patch.object(permission, "get_gateway_object", return_value=fake_gateway)
+    mocker.patch("apigateway.apis.permissions.is_iam_auth_active", return_value=True)
+    is_allowed = mocker.patch(
+        "apigateway.apis.permissions.is_iam_gateway_action_allowed",
+        side_effect=error_codes.REMOTE_REQUEST_ERROR.format("timeout"),
+    )
+    fake_request.user = mock.MagicMock(username="guest")
+
+    with caplog.at_level("WARNING"):
+        assert not permission.has_permission(
+            fake_request,
+            _view(fake_gateway.id, gateway_action=GatewayActionEnum.OPERATE_GATEWAY.value),
+        )
+
+    is_allowed.assert_called_once_with(fake_gateway, "guest", GatewayActionEnum.OPERATE_GATEWAY.value)
+    assert "fallback to local" in caplog.text
+
+
+def test_iam_error_falls_back_to_local_permission(mocker, fake_request, fake_gateway, caplog):
+    permission = GatewayActionPermission()
+    mocker.patch.object(permission, "get_gateway_object", return_value=fake_gateway)
+    mocker.patch("apigateway.apis.permissions.is_iam_auth_active", return_value=True)
+    mocker.patch(
+        "apigateway.apis.permissions.is_iam_gateway_action_allowed",
+        side_effect=error_codes.REMOTE_REQUEST_ERROR.format("bad request"),
+    )
+    fake_request.user = mock.MagicMock(username="admin")
+
+    with caplog.at_level("WARNING"):
+        assert permission.has_permission(
+            fake_request,
+            _view(fake_gateway.id, gateway_action=GatewayActionEnum.MANAGE_GATEWAY.value),
+        )
+
+    assert "fallback to local" in caplog.text
+    assert "bad request" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "endpoint, method",
+    [
+        (endpoint, "GET")
+        for endpoint in (
+            "resources/",
+            "backends/",
+            "stages/",
+            "monitors/alarm/strategies/",
+            "mcp-servers/",
+            "dev-guideline/",
+        )
+    ]
+    + [
+        (endpoint, "POST")
+        for endpoint in (
+            "resources/",
+            "backends/",
+            "stages/",
+            "monitors/alarm/strategies/",
+            "mcp-servers/",
+        )
+    ],
+)
+@pytest.mark.parametrize("identity", ["administrator", "operator", "nonmember", "other_gateway_operator"])
+def test_operator_page_dependency_permissions(fake_request, fake_gateway, endpoint, method, identity):
+    # Resolve the real route so permission declarations cannot drift from the page's URL.
+    if identity in ("administrator", "operator"):
+        GatewayMember.objects.create(gateway=fake_gateway, username=identity, role=identity)
+    elif identity == "other_gateway_operator":
+        GatewayMember.objects.create(gateway=G(Gateway), username=identity, role=GatewayRoleEnum.OPERATOR.value)
+
+    match = resolve(f"/backend/gateways/{fake_gateway.id}/{endpoint}")
+    view = match.func.cls(**match.func.initkwargs)
+    view.kwargs = match.kwargs
+    fake_request.user = mock.MagicMock(username=identity)
+    fake_request.method = method
+
+    expected = identity == "administrator" or (identity == "operator" and method == "GET")
+    assert GatewayActionPermission().has_permission(fake_request, view) == expected

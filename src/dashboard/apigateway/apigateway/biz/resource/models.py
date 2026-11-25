@@ -15,6 +15,7 @@
 # We undertake not to change the open source license (MIT license) applicable
 # to the current version of the project delivered to anyone in the future.
 #
+from enum import StrEnum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -22,6 +23,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from apigateway.biz.plugin import PluginConfigData
 from apigateway.core.constants import ResourceKindEnum
 from apigateway.core.models import Backend, Resource
+
+
+class ResourceAuthFilterType(StrEnum):
+    NONE = "none"
+    APP = "app"
+    PERSONAL = "personal"
+    PUBLIC = "public"
+    OAUTH = "oauth"
 
 
 class ResourceAuthConfig(BaseModel):
@@ -37,6 +46,13 @@ class ResourceAuthConfig(BaseModel):
             self.oauth2_public_client_enabled or self.oauth2_personal_client_enabled
         ) and not self.auth_verified_required:
             raise ValueError("OAuth2 public/personal clients require user authentication")
+        return self
+
+    @model_validator(mode="after")
+    def normalize_resource_perm_required(self):
+        # 层级约束：校验应用权限依赖应用认证；上层关闭时下层静默写为 false
+        if not self.app_verified_required:
+            self.resource_perm_required = False
         return self
 
 
@@ -63,6 +79,8 @@ class ResourceData(BaseModel):
     path: str = Field(...)
     match_subpath: bool = Field(default=False)
     enable_websocket: bool = Field(default=False)
+    is_deprecated: bool = Field(default=False, strict=True)
+    deprecated_note: str = Field(default="", max_length=2048, strict=True)
     is_public: bool = Field(default=True)
     allow_apply_permission: bool = Field(default=True)
     # auth config
@@ -91,6 +109,19 @@ class ResourceData(BaseModel):
             raise ValueError(f"unsupported resource kind: {self.kind}")
         return self
 
+    @model_validator(mode="after")
+    def normalize_allow_apply_permission(self):
+        # 层级约束：允许申请权限依赖“公开”与“校验应用权限”；不记忆原值
+        if not (self.is_public and self.auth_config.resource_perm_required):
+            self.allow_apply_permission = False
+        return self
+
+    @model_validator(mode="after")
+    def normalize_deprecation(self):
+        if not self.is_deprecated and "is_deprecated" in self.model_fields_set:
+            self.deprecated_note = ""
+        return self
+
     @property
     def basic_data(self) -> Dict[str, Any]:
         return self.model_dump(include=set(self.basic_field_names()))
@@ -106,6 +137,8 @@ class ResourceData(BaseModel):
             "path",
             "match_subpath",
             "enable_websocket",
+            "is_deprecated",
+            "deprecated_note",
             "is_public",
             "allow_apply_permission",
         ]
@@ -129,21 +162,3 @@ class ResourceData(BaseModel):
             "backend_config": self.backend_config.model_dump() if self.backend_config else {},
             "metadata": self.metadata,
         }
-
-    def snapshot_for_checking(self) -> Dict[str, Any]:
-        base_info = {
-            "kind": self.kind,
-            "name": self.name,
-            "description": self.description,
-            "method": self.method,
-            "path": self.path,
-            "match_subpath": self.match_subpath,
-            "enable_websocket": self.enable_websocket,
-            "is_public": self.is_public,
-            "allow_apply_permission": self.allow_apply_permission,
-            "auth_config": self.auth_config.model_dump(),
-            "metadata": self.metadata,
-        }
-        if self.resource:
-            base_info["id"] = self.resource.id
-        return base_info

@@ -16,12 +16,9 @@
  * to the current version of the project delivered to anyone in the future.
  */
 
-import {
-  type IMCPAIConfig,
-  type IMCPServerWithUIState,
-} from '@/services/source/mcp-server.ts';
-import type { IMarketplaceItemWithUIState } from '@/services/source/mcp-market.ts';
-import type { IMcpClientConfig } from '@/services/types/responses/mcp-marketplace.ts';
+import type { IMCPAIConfig, IMCPServerWithUIState } from '@/types/mcp-server';
+import type { IMarketplaceItemWithUIState } from '@/types/mcp-marketplace';
+import type { IMCPServerBatchConfigInput, IMcpClientConfig } from '@/services/types/mcp-client-config.ts';
 
 // 客户端类型枚举
 export const CLIENT_TYPE_ENUMS = ['codebuddy', 'cursor', 'claude', 'vscode'] as const;
@@ -31,15 +28,10 @@ type ClientType = typeof CLIENT_TYPE_ENUMS[number];
 // 通用的MCP Server行数据类型（兼容列表和市场两种场景）
 type IMCPServerItem = IMCPServerWithUIState | IMarketplaceItemWithUIState;
 
-type IMcpBatchConfigQuery = {
-  client_type: string
-  mcp_server_ids: number[]
-};
-
-// 定义动态接口函数类型
-type FetchConfigFunc = (
-  apigwIdOrData?: number | IMcpBatchConfigQuery,
-  data?: IMcpBatchConfigQuery,
+// 定义动态接口函数类型（兼容 网关列表页带 apigwId / 市场页不带 两种调用形态）
+export type FetchConfigFunc = (
+  apigwIdOrData?: number | IMCPServerBatchConfigInput,
+  data?: IMCPServerBatchConfigInput,
 ) => Promise<IMcpClientConfig>;
 
 /**
@@ -52,8 +44,9 @@ export const useMcpBatchCopyConfig = ({
   fetchApi,
 }: {
   gatewayId?: number
-  fetchApi: FetchConfigFunc
+  fetchApi: (...args: any[]) => Promise<IMcpClientConfig>
 }) => {
+  const api = fetchApi as FetchConfigFunc;
   // 复制配置加载状态
   const copyConfigLoading = ref(false);
   // 复制配置列表
@@ -89,16 +82,16 @@ export const useMcpBatchCopyConfig = ({
     try {
       // 批量请求不同客户端类型的配置
       const requestList = CLIENT_TYPE_ENUMS.map((clientType: ClientType) => {
-        const params: IMcpBatchConfigQuery = {
+        const params: IMCPServerBatchConfigInput = {
           mcp_server_ids: mcpServerIds,
           client_type: clientType,
         };
 
         if (gatewayId) {
-          return fetchApi(gatewayId, params);
+          return api(gatewayId, params);
         }
         else {
-          return fetchApi(params);
+          return api(params);
         }
       });
 

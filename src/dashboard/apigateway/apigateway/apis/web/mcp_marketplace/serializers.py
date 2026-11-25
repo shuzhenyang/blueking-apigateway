@@ -173,7 +173,7 @@ class MCPServerBaseOutputSLZ(serializers.Serializer):
 
     def get_url(self, obj) -> str:
         least_privileges = self.context.get("least_privileges", {})
-        least_privilege = least_privileges.get((obj.gateway.id, obj.stage.id), "")
+        least_privilege = least_privileges.get(obj.id, "")
         return MCPServerHandler.get_mcp_server_url(obj, least_privilege)
 
     def get_prompts_count(self, obj) -> int:
@@ -311,14 +311,3 @@ class MCPServerBatchConfigOutputSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPServerBatchConfigOutputSLZ"
-
-
-class MCPMarketplaceApplicableAppOutputSLZ(serializers.Serializer):
-    """发起 MCPServer 权限申请时，可选择的蓝鲸应用列表"""
-
-    bk_app_code = serializers.CharField(help_text="应用代码")
-    name = serializers.CharField(help_text="应用名称")
-    logo_url = serializers.CharField(help_text="应用 Logo 地址", allow_blank=True)
-
-    class Meta:
-        ref_name = "apigateway.apis.web.mcp_marketplace.serializers.MCPMarketplaceApplicableAppOutputSLZ"

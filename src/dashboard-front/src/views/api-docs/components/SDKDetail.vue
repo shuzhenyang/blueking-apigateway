@@ -156,7 +156,7 @@
         </div>
         <div class="value">
           <span
-            v-bk-tooltips="{ content: doc.stage?.name, placement: 'top' }"
+            v-bk-tooltips="{ content: doc.stage?.name ?? '', placement: 'top' }"
             class="column-value"
           >{{ doc.stage?.name || '--' }}</span>
         </div>
@@ -168,10 +168,22 @@
 <script lang="ts" setup>
 import { copy } from '@/utils';
 import { HelpFill } from 'bkui-vue/lib/icon';
-import type {
-  IApiGatewaySdkDoc,
-  ISdk,
-} from '../types.d.ts';
+import type { IDocsEsbBoardsSdksListResponse } from '@/services/types/docs/esb.ts';
+import type { IDocsGatewaySDK, IDocsGatewaysSdksListResponse } from '@/services/types/docs/gateway.ts';
+
+// 展示层同时兼容网关 SDK 与组件 SDK 的字段命名。
+export interface ISdk extends Partial<IDocsGatewaySDK>, Partial<IDocsEsbBoardsSdksListResponse> {}
+
+export interface ISdkDoc {
+  resource_version: IDocsGatewaysSdksListResponse['resource_version'] | string
+  stage?: IDocsGatewaysSdksListResponse['stage']
+}
+
+interface IProps {
+  isApigw?: boolean
+  sdk?: ISdk | null
+  doc?: ISdkDoc | null
+}
 
 const {
   isApigw = false,
@@ -180,12 +192,6 @@ const {
 } = defineProps<IProps>();
 
 const { t } = useI18n();
-
-interface IProps {
-  isApigw?: boolean
-  sdk?: ISdk | null
-  doc?: IApiGatewaySdkDoc | null
-}
 
 const handleDownload = () => {
   const url = sdk?.url || sdk?.sdk_download_url;

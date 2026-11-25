@@ -22,7 +22,8 @@ from django.conf import settings
 from django.utils.translation import gettext as _
 from rest_framework import serializers
 
-from apigateway.biz.gateway import build_gateway_doc_maintainers
+from apigateway.apis.gateway_name import validate_gateway_display_name
+from apigateway.biz.gateway import GatewayHandler, build_gateway_doc_maintainers
 from apigateway.biz.validators import BKAppCodeListValidator, GatewayAPIDocMaintainerValidator
 from apigateway.common.constants import GATEWAY_NAME_PATTERN, GatewayAPIDocMaintainerTypeEnum, UserAuthTypeEnum
 from apigateway.common.django.validators import NameValidator
@@ -36,6 +37,7 @@ from apigateway.core.constants import (
     convert_gateway_kind_name_to_value,
     convert_gateway_kind_to_name,
 )
+from apigateway.core.gateway_name import GATEWAY_DISPLAY_NAME_MAX_LENGTH, normalize_display_name_en
 from apigateway.core.models import Gateway
 from apigateway.service.gateway_name import validate_gateway_name_kind
 
@@ -51,10 +53,12 @@ class GatewayListV1InputSLZ(serializers.Serializer):
 class GatewayListV1OutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
+    display_name = SerializerTranslatedField(default_field="display_name_or_name", read_only=True)
     description = SerializerTranslatedField(default_field="description_i18n", allow_blank=True, read_only=True)
     maintainers = serializers.SerializerMethodField()
     doc_maintainers = serializers.SerializerMethodField()
     api_type = serializers.SerializerMethodField()
+    is_official = serializers.BooleanField(read_only=True)
     user_auth_type = serializers.SerializerMethodField()
     tenant_mode = serializers.CharField(read_only=True)
     tenant_id = serializers.CharField(read_only=True)
@@ -124,6 +128,12 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
         max_length=64,
         validators=[NameValidator()],
     )
+    display_name = serializers.CharField(
+        max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, required=False, allow_blank=True, allow_null=True
+    )
+    display_name_en = serializers.CharField(
+        max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, required=False, allow_blank=True, allow_null=True
+    )
     maintainers = serializers.ListField(child=serializers.CharField(), allow_empty=True, required=False)
     doc_maintainers = GatewayAPIDocMaintainerSLZ(required=False)
     status = serializers.ChoiceField(choices=GatewayStatusEnum.get_choices(), default=GatewayStatusEnum.ACTIVE.value)
@@ -131,6 +141,7 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
     api_type = serializers.ChoiceField(
         choices=[GatewayTypeEnum.OFFICIAL_API.value, GatewayTypeEnum.CLOUDS_API.value], required=False
     )
+    is_official = serializers.BooleanField(required=False)
     user_config = UserConfigSLZ(required=False)
     allow_delete_sensitive_params = serializers.BooleanField(default=True)
     kind = serializers.ChoiceField(
@@ -151,6 +162,8 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
         model = Gateway
         fields = [
             "name",
+            "display_name",
+            "display_name_en",
             "description",
             "description_en",
             "maintainers",
@@ -158,6 +171,7 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
             "status",
             "is_public",
             "api_type",
+            "is_official",
             "user_config",
             "allow_delete_sensitive_params",
             "data_planes",
@@ -170,17 +184,38 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
         }
         ref_name = "apigateway.apis.open.gateway.serializers.GatewaySyncInputSLZ"
 
+    def validate_display_name_en(self, value):
+        value = normalize_display_name_en(value)
+        if (
+            value is not None
+            and Gateway.objects.exclude(pk=self.instance.pk if self.instance else None)
+            .filter(display_name_en__iexact=value)
+            .exists()
+        ):
+            raise serializers.ValidationError(_("This display name is already in use."), code="unique")
+        return value
+
     def validate(self, data):
         kind = convert_gateway_kind_name_to_value(data["kind"])
         effective_kind = self.instance.kind if self.instance else kind
-        self._validate_name(data["name"], data.get("api_type"), effective_kind)
+        is_official = data.pop("is_official", None)
+        api_type = data.pop("api_type", None)
+        if is_official is not None:
+            api_type = GatewayTypeEnum.OFFICIAL_API.value if is_official else GatewayTypeEnum.CLOUDS_API.value
+            if self.instance and GatewayHandler.get_gateway_auth_config(self.instance.id).get("api_type") == (
+                GatewayTypeEnum.SUPER_OFFICIAL_API.value
+            ):
+                api_type = GatewayTypeEnum.SUPER_OFFICIAL_API.value
+        self._validate_name(data["name"], api_type, effective_kind)
         if "maintainers" in data and not data["maintainers"]:
             raise serializers.ValidationError({"maintainers": _("网关至少需要保留一个管理员。")})
 
         if self.instance is None:
             validate_gateway_name_kind(data["name"], kind)
 
-        data["gateway_type"] = data.pop("api_type", None)
+        validate_gateway_display_name(data, self.instance)
+
+        data["gateway_type"] = api_type
         data["kind"] = kind
 
         return data
@@ -202,9 +237,9 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
 
         raise serializers.ValidationError(
             {
-                "name": _("api_type 为 {api_type} 时，网关名 name 需以 {prefix} 开头。").format(
-                    api_type=api_type, prefix=", ".join(settings.OFFICIAL_GATEWAY_NAME_PREFIXES)
-                )
+                "name": _("官方网关名 name 需以 {prefix} 开头。").format(
+                    prefix=", ".join(settings.OFFICIAL_GATEWAY_NAME_PREFIXES)
+                ),
             }
         )
 

@@ -18,7 +18,7 @@
 
 import { defineStore } from 'pinia';
 import { MEMBER_ROLES, type MemberRole } from '@/constants/gateway-permission';
-import { getUserGatewayRole } from '@/services/source/me';
+import { getMyGatewayRole } from '@/services/source/gateway/member';
 import { useUserInfo } from './useUserInfo';
 
 export type GatewayRoleStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -30,6 +30,8 @@ interface IGatewayRoleState {
   // 空字符串表示当前没有可信角色，权限判断应拒绝放行。
   role: MemberRole | ''
   status: Exclude<GatewayRoleStatus, 'idle'>
+  // 仅供刷新期间保持菜单展示，不能作为页面或操作的授权依据。
+  previousRole?: MemberRole | ''
   expiresAt?: number
   error?: unknown
 }
@@ -88,8 +90,9 @@ export const useGatewayRoleStore = defineStore('useGatewayRole', () => {
     roles.value[gatewayId] = {
       role: '',
       status: 'loading',
+      previousRole: cached?.status === 'ready' ? cached.role : undefined,
     };
-    const request: Promise<MemberRole | ''> = getUserGatewayRole(gatewayId)
+    const request: Promise<MemberRole | ''> = getMyGatewayRole(gatewayId)
       .then((data) => {
         // 身份变化、主动失效或新请求已替代当前请求时，旧响应既不写缓存，也不返回旧角色，
         // 避免等待该 Promise 的旧导航继续用过期结果授权。

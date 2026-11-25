@@ -26,6 +26,7 @@ class ApplyStatusEnum(StructuredEnum):
     APPROVED = EnumField("approved", label=_("全部通过"))
     REJECTED = EnumField("rejected", label=_("全部驳回"))
     PENDING = EnumField("pending", label=_("待审批"))
+    CANCELED = EnumField("canceled", label=_("已取消"))
 
 
 # Restricted Enum subclassing
@@ -90,6 +91,13 @@ class FormattedGrantDimensionEnum(StructuredEnum):
     GATEWAY = EnumField("gateway", label=_("网关"))
     RESOURCE = EnumField("resource", label=_("资源"))
     MCP_SERVER = EnumField("mcp_server", label=_("MCPServer"))
+
+
+# v2 api 对外的授权维度 -> db 中使用的授权维度
+FORMATTED_TO_DB_GRANT_DIMENSION = {
+    FormattedGrantDimensionEnum.GATEWAY.value: GrantDimensionEnum.API.value,
+    FormattedGrantDimensionEnum.RESOURCE.value: GrantDimensionEnum.RESOURCE.value,
+}
 
 
 # 默认的权限有效期天数

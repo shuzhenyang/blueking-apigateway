@@ -15,6 +15,9 @@
  * We undertake not to change the open source license (MIT license) applicable
  * to the current version of the project delivered to anyone in the future.
  */
+
+// 这里导出的工具会进入首屏共享 chunk。依赖大体积库的工具（如 json2Yaml、yaml2Json、echarts）
+// 不要加到这里，使用处按文件路径引入
 export * from './calcTextWidth';
 export * from './dom';
 export * from './encode';
@@ -29,10 +32,7 @@ export * from './sortByKey';
 export * from './downloadFile';
 export * from './getStatusText';
 export * from './getStageStatus';
-export * from './json2Yaml';
-export * from './yaml2Json';
 export * from './getMethodsTheme';
-export * from './blobDownload';
 export * from './getStrFromFile';
 export * from './getLoginURL';
 export * from './dayUtc';

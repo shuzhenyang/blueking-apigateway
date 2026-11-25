@@ -56,6 +56,7 @@
           <AgTable
             ref="tableRef"
             v-model:table-data="tableData"
+            cache-identifier="OnlineDebugging"
             row-class-name="cursor-pointer"
             :columns="columns"
             resizable
@@ -83,7 +84,7 @@
                     </div>
                   </div>
                   <div
-                    v-show="!['requestHeader', 'responseHeader']?.includes(row?.activeIndex)"
+                    v-show="!['requestHeader', 'responseHeader'].includes(row?.activeIndex ?? '')"
                     class="header-copy"
                   >
                     <CopyShape @click="() => handleCopyDetails(row)" />
@@ -95,7 +96,7 @@
                     class="content-item code"
                     :class="`code-${row?.id}`"
                   >
-                    <EditorMonaco
+                    <AgCodeEditor
                       v-if="row?.editorText"
                       ref="resourceEditorRef"
                       v-model="row.editorText"
@@ -123,11 +124,11 @@
                       class="request-header-table"
                       size="small"
                       max-height="400px"
-                      table-row-key="value"
-                      local-page
+                      table-row-key="name"
+                      :immediate="false"
                       :show-pagination="false"
                       :show-settings="false"
-                      :table-data="getRequestHeader(row)"
+                      :table-data="row?.requestHeaderList ?? []"
                       :columns="requestHeaderCols"
                     />
                   </div>
@@ -137,7 +138,7 @@
                     class="content-item request-body"
                     :class="`request-body-${row?.id}`"
                   >
-                    <EditorMonaco
+                    <AgCodeEditor
                       v-if="row?.requestBody"
                       v-model="row.requestBody"
                       theme="Visual Studio"
@@ -153,7 +154,7 @@
                     class="content-item response-body"
                     :class="`response-body-${row?.id}`"
                   >
-                    <EditorMonaco
+                    <AgCodeEditor
                       v-if="row?.responseBody"
                       v-model="row.responseBody"
                       theme="Visual Studio"
@@ -172,11 +173,11 @@
                       class="request-header-table"
                       size="small"
                       max-height="400px"
-                      table-row-key="value"
-                      local-page
+                      table-row-key="name"
+                      :immediate="false"
                       :show-pagination="false"
                       :show-settings="false"
-                      :table-data="getResponseHeader(row)"
+                      :table-data="row?.responseHeaderList ?? []"
                       :columns="requestHeaderCols"
                     />
                   </div>
@@ -192,24 +193,46 @@
 
 <script lang="tsx" setup>
 import { useGateway } from '@/stores';
-import { useDatePicker } from '@/hooks';
-import EditorMonaco from '@/components/ag-editor/Index.vue';
-import AgSideslider from '@/components/ag-sideslider/Index.vue';
-import AgTable from '@/components/ag-table/Index.vue';
-import type { ExpandOptions, PrimaryTableProps } from '@blueking/tdesign-ui';
-import {
-  getTestHistories,
-  getTestHistoriesDetails,
-} from '@/services/source/online-debugging';
+import { RECENT_DATE_PRESETS, useDatePicker } from '@/hooks';
+import AgCodeEditor from '@/components/base/ag-code-editor/Index.vue';
+import AgSideslider from '@/components/base/ag-sideslider/Index.vue';
+import AgTable, {
+  type ExpandOptions,
+  type IAgTableInstance,
+  type ITableColumn,
+  type TableRow,
+} from '@/components/base/ag-table';
+import { getApiTestHistoryDetail, getApiTestHistoryList } from '@/services/source/gateway/api-test';
+import type { IAPIDebugHistoriesListOutput } from '@/services/types/gateway/api-test';
 import { CopyShape } from 'bkui-vue/lib/icon';
 import { copy } from '@/utils';
+import { toTimeRangeQuery } from '@/utils/time-range';
+import type { ITimeRangeFilter } from '@/types/common';
 
-const emit = defineEmits<{ retry: [data: any] }>();
+interface IRequestRecordFilter extends ITimeRangeFilter {
+  resource_name: string
+}
+
+interface IHeaderRow {
+  name: string
+  value: unknown
+}
+
+interface IRequestRecordRow extends IAPIDebugHistoriesListOutput {
+  activeIndex?: string
+  editorText?: string
+  requestBody?: string
+  responseBody?: string
+  requestHeaderList?: IHeaderRow[]
+  responseHeaderList?: IHeaderRow[]
+}
+
+const emit = defineEmits<{ retry: [data: IRequestRecordRow] }>();
 const { t } = useI18n();
 const gatewayStore = useGateway();
 
 const isShow = ref<boolean>(false);
-const filterData = ref<any>({
+const filterData = ref<IRequestRecordFilter>({
   resource_name: '',
   time_start: '',
   time_end: '',
@@ -221,17 +244,18 @@ const {
   shortcutSelectedIndex,
   handleChange,
   handleClear,
+  resetSelection,
   handleConfirm,
   handleShortcutChange,
   handleSelectionModeChange,
-} = useDatePicker(filterData);
+} = useDatePicker(filterData, { presets: RECENT_DATE_PRESETS });
 
 const dateKey = ref<string>('dateKey');
 const topDatePicker = ref();
-const tableData = ref<any[]>([]);
+const tableData = ref<IRequestRecordRow[]>([]);
 const expandedRowKeys = ref<Array<string | number>>([]);
-const tableRef = useTemplateRef<InstanceType<typeof AgTable>>('tableRef');
-const resourceEditorRef: any = ref<InstanceType<typeof EditorMonaco>>();
+const tableRef = useTemplateRef<IAgTableInstance<IRequestRecordRow>>('tableRef');
+const resourceEditorRef: any = ref<InstanceType<typeof AgCodeEditor>>();
 const tabList = ref([
   {
     name: t('请求代码'),
@@ -258,7 +282,7 @@ const tabList = ref([
     id: 'responseHeader',
   },
 ]);
-const requestHeaderCols = [
+const requestHeaderCols: ITableColumn<IHeaderRow>[] = [
   {
     title: t('名称'),
     colKey: 'name',
@@ -269,7 +293,7 @@ const requestHeaderCols = [
   },
 ];
 
-const columns = shallowRef<PrimaryTableProps['columns']>([
+const columns = shallowRef<ITableColumn<IRequestRecordRow>[]>([
   {
     title: t('资源名称'),
     colKey: 'resource_name',
@@ -280,7 +304,7 @@ const columns = shallowRef<PrimaryTableProps['columns']>([
     colKey: 'status_code',
     ellipsis: true,
     width: 120,
-    cell: (h: any, { row }: { row: Record<string, any> }) => (
+    cell: (_h, { row }) => (
       <div>
         <span
           class={[String(row.response?.data?.status_code)?.startsWith('2') ? 'dot success' : 'dot failure']}
@@ -294,7 +318,7 @@ const columns = shallowRef<PrimaryTableProps['columns']>([
     colKey: 'proxy_time',
     ellipsis: true,
     width: 120,
-    cell: (h: any, { row }: { row: Record<string, any> }) => (
+    cell: (_h, { row }) => (
       <span>
         { row.response?.data?.proxy_time }
         ms
@@ -310,20 +334,20 @@ const columns = shallowRef<PrimaryTableProps['columns']>([
     title: t('操作'),
     colKey: 'act',
     width: 140,
-    cell: (h: any, { row }: { row: Record<string, any> }) => (
+    cell: (_h, { row }) => (
       <div class="flex items-center">
         <bk-button
           theme="primary"
           class="mr-10px"
           text
-          onClick={(e: any) => handleShowDetails(e, row)}
+          onClick={(e: MouseEvent) => handleShowDetails(e, row)}
         >
           { t('请求详情') }
         </bk-button>
         <bk-button
           theme="primary"
           text
-          onClick={(e: any) => handleRetry(e, row)}
+          onClick={(e: MouseEvent) => handleRetry(e, row)}
         >
           { t('去重试') }
         </bk-button>
@@ -334,66 +358,51 @@ const columns = shallowRef<PrimaryTableProps['columns']>([
 
 const apigwId = computed(() => gatewayStore.apigwId);
 
-const handleTabClick = (row: Record<string, any>, id: string) => {
+const handleTabClick = (row: IRequestRecordRow, id: string) => {
   row.activeIndex = id;
 };
 
-const handleCopyDetails = (row: Record<string, any>) => {
+const handleCopyDetails = (row: IRequestRecordRow) => {
   const { activeIndex } = row;
 
   let copyValue = '';
   switch (activeIndex) {
     case 'code':
-      copyValue = row.editorText;
+      copyValue = row.editorText ?? '';
       break;
     case 'url':
-      copyValue = row.request.request_url;
+      copyValue = row.request?.request_url ?? '';
       break;
     case 'requestBody':
-      copyValue = row.requestBody;
+      copyValue = row.requestBody ?? '';
       break;
     case 'responseBody':
-      copyValue = row.responseBody;
+      copyValue = row.responseBody ?? '';
       break;
   }
 
   copy(copyValue);
 };
 
-const getRequestHeader = (row: Record<string, any>) => {
-  if (!row) return [];
+const formatHeaders = (headers?: Record<string, any>): IHeaderRow[] => {
+  const keys = Object.keys(headers ?? {});
 
-  const { headers } = row.request;
-  const keys = Object.keys(headers);
-
-  if (!keys?.length) {
-    return [];
-  }
-
-  return keys.map((key) => {
-    return {
-      name: key,
-      value: headers[key],
-    };
-  });
+  return keys.map(key => ({
+    name: key,
+    value: headers?.[key],
+  }));
 };
 
-const getResponseHeader = (row: Record<string, any>) => {
+const getRequestHeader = (row: IAPIDebugHistoriesListOutput): IHeaderRow[] => {
   if (!row) return [];
 
-  const { headers } = row.response.data;
-  const keys = Object.keys(headers);
+  return formatHeaders(row.request?.headers);
+};
 
-  if (!keys?.length) {
-    return [];
-  }
+const getResponseHeader = (row: IAPIDebugHistoriesListOutput): IHeaderRow[] => {
+  if (!row) return [];
 
-  return keys.map((key) => {
-    return {
-      name: key,
-      value: headers[key],
-    };
-  });
+  return formatHeaders(row.response?.data?.headers);
 };
 
 const handlePickClear = () => {
@@ -402,7 +411,9 @@ const handlePickClear = () => {
 };
 
 const handlePickSuccess = () => {
-  handleConfirm();
+  if (!handleConfirm()) {
+    return;
+  }
   getList();
 };
 
@@ -410,8 +421,7 @@ const clear = () => {
   filterData.value.resource_name = '';
   filterData.value.time_start = '';
   filterData.value.time_end = '';
-  shortcutSelectedIndex.value = -1;
-  dateValue.value = [];
+  resetSelection();
   expandedRowKeys.value = [];
 };
 
@@ -422,21 +432,25 @@ const show = () => {
 };
 
 const getList = async () => {
+  const { resource_name } = filterData.value;
+  // 后端直接把时间按整数解析：只在两端都是有效秒数时成对传，不传空字符串
   const data = {
     offset: 0,
     limit: 10000,
-    ...filterData.value,
+    resource_name: resource_name || undefined,
+    ...toTimeRangeQuery(filterData.value),
   };
-  const results = await getTestHistories(apigwId.value, data);
+  const results = await getApiTestHistoryList(apigwId.value, data);
 
-  results?.forEach((item: any) => {
-    item.editorText = '';
-    item.requestBody = '';
-    item.responseBody = '';
-    item.activeIndex = 'code';
-  });
-
-  tableData.value = results || [];
+  tableData.value = (results || []).map(item => ({
+    ...item,
+    editorText: '',
+    requestBody: '',
+    responseBody: '',
+    activeIndex: 'code',
+    requestHeaderList: getRequestHeader(item),
+    responseHeaderList: getResponseHeader(item),
+  }));
 };
 
 const handleClearFilterKey = () => {
@@ -451,17 +465,17 @@ const handleInput = () => {
   }
 };
 
-const getDetails = async (id: number, row: Record<string, any>) => {
-  const response = await getTestHistoriesDetails(apigwId.value, id);
+const getDetails = async (id: number, row: IRequestRecordRow) => {
+  const response = await getApiTestHistoryDetail(apigwId.value, id);
 
-  row.editorText = response?.response?.data?.curl;
-  row.requestBody = response?.request?.body;
-  row.responseBody = response?.response?.data?.body;
+  row.editorText = response?.response?.data?.curl ?? '';
+  row.requestBody = response?.request?.body ?? '';
+  row.responseBody = response?.response?.data?.body ?? '';
 
   nextTick(() => {
-    const editorTextLen = Math.ceil(row.editorText?.length / 200);
-    const requestBodyLen = Math.ceil(row.requestBody?.length / 200);
-    const responseBodyLen = Math.ceil(row.responseBody?.length / 200);
+    const editorTextLen = Math.ceil((row.editorText?.length ?? 0) / 200);
+    const requestBodyLen = Math.ceil((row.requestBody?.length ?? 0) / 200);
+    const responseBodyLen = Math.ceil((row.responseBody?.length ?? 0) / 200);
 
     const styleElement = document.createElement('style');
     styleElement.textContent = `
@@ -479,7 +493,7 @@ const getDetails = async (id: number, row: Record<string, any>) => {
   });
 };
 
-const handleShowDetails = async (event: Event, row: Record<string, any>) => {
+const handleShowDetails = async (event: Event, row: IRequestRecordRow) => {
   event.stopPropagation();
 
   if (!expandedRowKeys.value.includes(row.id)) {
@@ -491,8 +505,10 @@ const handleShowDetails = async (event: Event, row: Record<string, any>) => {
   }
 };
 
-const handleExpandChange = async (expandedKeys: Array<string | number>,
-  expandedRowData: ExpandOptions<Record<string, any>>) => {
+const handleExpandChange = async (
+  expandedKeys: Array<string | number>,
+  expandedRowData: ExpandOptions<TableRow<IRequestRecordRow>>,
+) => {
   expandedRowKeys.value = expandedKeys;
   const { currentRowData } = expandedRowData;
 
@@ -501,7 +517,7 @@ const handleExpandChange = async (expandedKeys: Array<string | number>,
   }
 };
 
-const handleRetry = (event: Event, row: Record<string, any>) => {
+const handleRetry = (event: Event, row: IRequestRecordRow) => {
   event.stopPropagation();
   emit('retry', row);
   isShow.value = false;

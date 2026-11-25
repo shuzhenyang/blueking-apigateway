@@ -58,7 +58,7 @@
                 >
                   {{ getStageAddress(currentStage?.name) || '--' }}
                 </p>
-                <CopyButton
+                <AgCopyButton
                   v-if="getStageAddress(currentStage?.name)"
                   :source="getStageAddress(currentStage?.name)"
                 />
@@ -266,7 +266,7 @@
     />
 
     <!-- 发布普通网关的资源至环境 -->
-    <ReleaseStage
+    <ReleaseStageSlider
       ref="releaseStageRef"
       :current-assets="currentStage"
       @release-success="handleReleaseSuccess"
@@ -287,13 +287,13 @@
 <script setup lang="ts">
 import { Message } from 'bkui-vue';
 import { getStageStatus } from '@/utils';
-import { getProgrammableStageDetail } from '@/services/source/programmable';
+import { getProgrammableStageDetail } from '@/services/source/gateway/programmable';
 import {
   deleteStage,
   getStageDetail,
   getStageList,
-  toggleStatus,
-} from '@/services/source/stage';
+  updateStageStatus,
+} from '@/services/source/gateway/stage';
 import {
   useEnv,
   useFeatureFlag,
@@ -304,7 +304,7 @@ import { usePopInfoBox } from '@/hooks';
 import { useTimeoutPoll } from '@vueuse/core';
 import ReleaseProgrammable from '../components/ReleaseProgrammable.vue';
 import CreateStage from '../components/CreateStage.vue';
-import ReleaseStage from '@/components/release-stage/Index.vue';
+import ReleaseStageSlider from '@/components/release/release-stage-slider/Index.vue';
 import ResourceInfo from './components/ResourceInfo.vue';
 import PluginManagement from './components/PluginManagement.vue';
 import VarManagement from './components/VarManagement.vue';
@@ -564,7 +564,7 @@ const handleStageUnlist = async () => {
       isDeleteLoading.value = true;
       const data = { status: 0 };
       try {
-        await toggleStatus(gatewayId.value, currentStage.value!.id, data);
+        await updateStageStatus(gatewayId.value, currentStage.value!.id, data);
         Message({
           message: t('下架成功'),
           theme: 'success',

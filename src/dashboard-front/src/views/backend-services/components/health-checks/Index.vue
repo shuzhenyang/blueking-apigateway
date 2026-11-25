@@ -8,7 +8,7 @@
       <AgIcon
         :class="{ 'rotate-180': visible }"
         color="#3a84ff"
-        name="arrows-down"
+        name="down-small"
         size="22"
       />
     </div>
@@ -39,11 +39,11 @@
 <script setup lang="ts">
 import ActiveChecks from './components/ActiveChecks.vue';
 import PassiveChecks from './components/PassiveChecks.vue';
-import type { IHealthCheck } from '@/services/source/backend-services.ts';
+import type { IHealthCheck } from '@/types/backend';
 import { isPlainObject } from 'lodash-es';
 
 interface IProps {
-  checks?: IHealthCheck
+  checks?: Partial<IHealthCheck>
   disabled?: boolean
 }
 
@@ -86,14 +86,15 @@ watch(isActiveEnabled, () => {
 
 defineExpose({
   getValue: () => {
-    const checks = {};
-    if (isActiveEnabled.value) {
-      Object.assign(checks, { active: activeChecksRef.value!.getValue() });
+    const active = isActiveEnabled.value ? activeChecksRef.value?.getValue() : undefined;
+    const passive = isPassiveEnabled.value ? passiveChecksRef.value?.getValue() : undefined;
+    if (!active && !passive) {
+      return undefined;
     }
-    if (isPassiveEnabled.value) {
-      Object.assign(checks, { passive: passiveChecksRef.value!.getValue() });
-    }
-    return Object.keys(checks).length > 0 ? checks : undefined;
+    return {
+      ...(active && { active }),
+      ...(passive && { passive }),
+    };
   },
 });
 

@@ -51,10 +51,10 @@
                 </template>
                 {{ subMenu.title }}
                 <BkBadge
-                  v-if="['MyPending'].includes(subMenu.name) && isExistPending"
-                  dot
+                  v-if="['MyPending'].includes(subMenu.name) && pendingCount > 0"
+                  :count="pendingCount"
                   theme="danger"
-                  :class="{ 'en': locale.indexOf('zh-cn') === -1 }"
+                  class="menu-icon-badge"
                 />
               </BkMenuItem>
             </template>
@@ -84,16 +84,17 @@
 </template>
 
 <script setup lang="ts">
-import { locale, t } from '@/locales';
+import { t } from '@/locales';
 import { useFeatureFlag } from '@/stores';
 import type { IMenu } from '@/types/common';
 import { usePersonalWorkbench } from '@/hooks';
-import AgIcon from '@/components/ag-icon/Index.vue';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
 
 const route = useRoute();
 const router = useRouter();
 const featureFlagStore = useFeatureFlag();
 const {
+  pendingCount,
   isExistPending,
   getMyPendingData,
   resetPersonalWorkbenchTab,
@@ -113,7 +114,7 @@ const personalWorkbenchMenu = computed<IMenu[]>(() => [
       {
         name: 'MyApply',
         title: t('我的申请'),
-        icon: 'wodeshenqing',
+        icon: 'my-application',
         enabled: true,
       },
     ],
@@ -127,13 +128,13 @@ const personalWorkbenchMenu = computed<IMenu[]>(() => [
       {
         name: 'MyPending',
         title: t('我的待办'),
-        icon: 'wodedaiban',
+        icon: 'pending',
         enabled: true,
       },
       {
         name: 'MyHandled',
         title: t('我的已办'),
-        icon: 'wodeyiban',
+        icon: 'done',
         enabled: true,
       },
     ],
@@ -200,6 +201,24 @@ watch(
 
       .nav-slider-list {
         padding-top: 4px;
+
+        .menu-icon-badge {
+          margin-left: 4px !important;
+          vertical-align: middle;
+
+          .bk-badge.bk-danger {
+            min-width: 16px;
+            height: 16px;
+            padding: 0 6px;
+            line-height: 16px;
+            font-size: 12px;
+            color: #ffffff;
+            background-color: #ff5656;
+            border: none;
+            border-radius: 8px;
+            text-align: center;
+          }
+        }
       }
     }
 
@@ -228,12 +247,13 @@ watch(
 
         .bk-menu-item {
           margin: 0;
-          color: rgb(99 101 110);
+          color: #4d4f56;
 
           .item-icon {
+            color: #979ba5;
 
             .default-icon {
-              background-color: rgb(197 199 205);
+              background-color: #c5c7cd;
             }
           }
 
@@ -241,28 +261,24 @@ watch(
             position: relative;
 
             .bk-badge-main {
-              position: absolute;
-              top: 8px;
-              left: 60px;
-
-              &.en {
-                left: 84px;
-              }
+              margin-left: 8px;
+              line-height: 1;
             }
           }
 
           &:hover {
-            background-color: #f0f1f5;
+            background: #f0f1f5;
           }
 
           &.is-active {
-            color: rgb(58 132 255);
-            background: rgb(225 236 255);
+            color: #3a84ff;
+            background: #e1ecff;
 
             .item-icon {
+              color: inherit;
 
               .default-icon {
-                background-color: rgb(58 132 255);
+                background-color: #3a84ff;
               }
             }
           }
@@ -312,9 +328,8 @@ watch(
       }
 
       .default-header-view {
-        height: calc(100vh - 105px);
-        overflow: auto;
-        scrollbar-gutter: stable;
+        height: calc(100vh - 100px);
+        overflow-y: auto;
 
         &.custom-header-view {
           height: 100%;
@@ -323,7 +338,7 @@ watch(
         }
 
         &.show-notice {
-          height: calc(100vh - 145px);
+          height: calc(100vh - 140px);
         }
       }
     }

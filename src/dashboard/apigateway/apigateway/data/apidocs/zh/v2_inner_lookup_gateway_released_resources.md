@@ -19,7 +19,7 @@
 | 参数名称 | 参数类型 | 必选 | 描述 |
 |---|---|---|---|
 | names | string | 是 | 资源名称列表，精确匹配，多个以逗号分隔，去重后最多 50 个 |
-| fields | string | 否 | 返回字段列表，多个以逗号分隔；支持 `id`、`name`、`description`、`is_public`、`oauth2_public_client_enabled`、`oauth2_personal_client_enabled`，不传返回全部字段 |
+| fields | string | 否 | 返回字段列表，多个以逗号分隔；支持 `id`、`name`、`description`、`is_public`、`oauth2_public_client_enabled`、`oauth2_personal_client_enabled`、`oauth2_app_delegated_enabled`、`oauth2_app_only_enabled`、`is_deprecated`、`deprecated_note`，不传返回全部字段 |
 
 ### 响应示例
 
@@ -28,11 +28,15 @@
   "data": [
     {
       "id": 101,
+      "is_deprecated": false,
+      "deprecated_note": "",
       "name": "get_user",
       "description": "查询用户",
       "is_public": true,
       "oauth2_public_client_enabled": true,
-      "oauth2_personal_client_enabled": false
+      "oauth2_personal_client_enabled": false,
+      "oauth2_app_delegated_enabled": true,
+      "oauth2_app_only_enabled": false
     }
   ]
 }
@@ -44,10 +48,14 @@
 |---|---|---|
 | data | array | 匹配的当前已发布资源列表，无分页包装 |
 | data[].id | int | 资源 ID |
+| data[].is_deprecated | boolean | 是否弃用，来自已发布资源快照；旧版本默认为 false |
+| data[].deprecated_note | string | 弃用说明；旧版本默认为空字符串 |
 | data[].name | string | 资源名称 |
 | data[].description | string | 当前快照中的资源描述，随请求语言返回中文或英文 |
 | data[].is_public | bool | 资源是否公开 |
 | data[].oauth2_public_client_enabled | bool | 资源是否允许 OAuth2 公共客户端访问 |
 | data[].oauth2_personal_client_enabled | bool | 资源是否允许 OAuth2 个人客户端访问 |
+| data[].oauth2_app_delegated_enabled | bool | 资源是否接受蓝鲸应用的用户委托 token：用户认证且应用认证，且网关当前开启 OAuth 应用通道 |
+| data[].oauth2_app_only_enabled | bool | 资源是否接受蓝鲸应用的应用 token：仅应用认证，且网关当前开启 OAuth 应用通道 |
 
 网关不存在或对当前租户不可见时返回 `404`；网关不存在当前发布版本或名称均未匹配时返回空数组。

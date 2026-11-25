@@ -35,15 +35,16 @@ from apigateway.apis.web.resource.validators import (
 from apigateway.apps.support.constants import DocLanguageEnum, OpenAPIFormatEnum
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND
 from apigateway.biz.gateway import GatewayLabelHandler
-from apigateway.biz.resource import ResourceAuthConfig, ResourceHandler
+from apigateway.biz.openapi import ResourceImportChangeTypeEnum
+from apigateway.biz.resource import ResourceAuthConfig, ResourceAuthFilterType, ResourceHandler
 from apigateway.biz.validators import MaxCountPerGatewayValidator
 from apigateway.common.django.validators import NameValidator
 from apigateway.common.fields import CurrentGatewayDefault
 from apigateway.common.gateway_limits import get_max_resource_count
-from apigateway.core.constants import HTTP_METHOD_ANY, HTTP_METHOD_CHOICES, RESOURCE_METHOD_CHOICES, ResourceKindEnum
+from apigateway.core.constants import HTTP_METHOD_ANY, RESOURCE_METHOD_CHOICES, ResourceKindEnum
 from apigateway.core.models import Backend, Gateway, Resource
 from apigateway.core.utils import get_path_display
-from apigateway.service.contexts import RESOURCE_OAUTH2_CLIENT_FIELDS
+from apigateway.service.contexts import RESOURCE_OAUTH2_CLIENT_FIELDS, ResourceAuthContext
 from apigateway.utils.openapi import extract_openapi_parameters_from_path
 
 from .constants import MAX_LABEL_COUNT_PER_RESOURCE, PATH_PATTERN, RESOURCE_NAME_PATTERN
@@ -51,6 +52,8 @@ from .legacy_serializers import LegacyTransformHeadersSLZ, LegacyUpstreamsSLZ
 
 if TYPE_CHECKING:
     from apigateway.apps.plugin.models import PluginConfig
+
+RESOURCE_AUTH_REQUIREMENT_FIELDS = ("auth_verified_required", "app_verified_required", "resource_perm_required")
 
 
 class ResourceQueryInputSLZ(serializers.Serializer):
@@ -84,6 +87,27 @@ class ResourceQueryInputSLZ(serializers.Serializer):
             raise serializers.ValidationError(_("标签 ID 请用逗号分割"))
 
 
+class ResourceListQueryInputSLZ(ResourceQueryInputSLZ):
+    auth_type = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="认证方式，多个值用逗号分隔并取并集。none：不认证，app：应用认证，personal：个人令牌，"
+        "public：公开客户端，oauth：OAuth 授权",
+    )
+
+    class Meta:
+        ref_name = "apigateway.apis.web.resource.serializers.ResourceListQueryInputSLZ"
+
+    def validate_auth_type(self, value: str) -> set[ResourceAuthFilterType]:
+        if not value:
+            return set()
+
+        try:
+            return {ResourceAuthFilterType(auth_type.strip()) for auth_type in value.split(",")}
+        except ValueError as err:
+            raise serializers.ValidationError(_("认证方式仅支持 none、app、personal、public、oauth")) from err
+
+
 class ResourceListOutputSLZ(serializers.ModelSerializer):
     path = serializers.CharField(source="path_display", read_only=True, help_text="前端请求路径")
     labels = serializers.SerializerMethodField(help_text="标签列表")
@@ -99,6 +123,8 @@ class ResourceListOutputSLZ(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "is_deprecated",
+            "deprecated_note",
             "description",
             "kind",
             "method",
@@ -356,9 +382,16 @@ class ResourceInputSLZ(serializers.ModelSerializer):
 
     def validate(self, data):
         if self.instance:
+            # 更新时，未传的认证与公开配置保留当前存储值，而不是取创建时的缺省值
+            current_auth_config = ResourceAuthContext().get_config_for_resource(self.instance)
             auth_config = data["auth_config"]
+            for field_name in RESOURCE_AUTH_REQUIREMENT_FIELDS:
+                if field_name in current_auth_config:
+                    auth_config.setdefault(field_name, current_auth_config[field_name])
             for field_name in RESOURCE_OAUTH2_CLIENT_FIELDS:
                 auth_config.setdefault(field_name, getattr(self.instance, field_name))
+            for field_name in ("is_public", "allow_apply_permission"):
+                data.setdefault(field_name, getattr(self.instance, field_name))
             ResourceAuthConfigSLZ._validate_auth_config(auth_config)
 
         self._validate_method(data["gateway"], data["path"], data["method"])
@@ -483,6 +516,8 @@ class ResourceOutputSLZ(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "is_deprecated",
+            "deprecated_note",
             "description",
             "description_en",
             "kind",
@@ -599,6 +634,16 @@ class ResourceBatchDestroyInputSLZ(serializers.Serializer):
         return value
 
 
+class ResourceDeprecationInputSLZ(serializers.Serializer):
+    is_deprecated = serializers.BooleanField(help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, max_length=2048, help_text="弃用说明")
+
+    def validate(self, attrs):
+        if not attrs["is_deprecated"]:
+            attrs["deprecated_note"] = ""
+        return attrs
+
+
 class ResourceLabelUpdateInputSLZ(serializers.Serializer):
     label_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -665,6 +710,8 @@ class ResourceDataImportSLZ(serializers.ModelSerializer):
             # 基本信息
             "kind",
             "name",
+            "is_deprecated",
+            "deprecated_note",
             "description",
             "description_en",
             "method",
@@ -785,6 +832,9 @@ class ResourceImportDocPreviewInputSLZ(serializers.Serializer):
 
 class ResourceImportCheckInputSLZ(serializers.Serializer):
     content = serializers.CharField(allow_blank=False, required=True, help_text="导入内容，yaml/json 格式字符串")
+    include_change_type = serializers.BooleanField(
+        default=False, help_text="是否返回资源配置变化类型，不包含 Markdown 文档和 Schema 版本变化，默认不返回"
+    )
 
     class Meta:
         ref_name = "apigateway.apis.web.resource.serializers.ResourceImportCheckInputSLZ"
@@ -800,6 +850,11 @@ class ResourceImportCheckFailOutputSLZ(serializers.Serializer):
 
 class ResourceImportInfoSLZ(serializers.Serializer):
     id = serializers.SerializerMethodField(help_text="资源 ID")
+    change_type = serializers.ChoiceField(
+        choices=ResourceImportChangeTypeEnum.get_choices(),
+        required=False,
+        help_text="仅 include_change_type=true 时返回：add 新增，update 更新，unchanged 配置未变化；不比较 Markdown 文档和 Schema 版本，跳过导入时需单独处理版本变化",
+    )
     name = serializers.CharField(read_only=True, help_text="资源名称")
     kind = serializers.ChoiceField(choices=ResourceKindEnum.get_choices(), help_text="资源类型")
     description = serializers.CharField(read_only=True, help_text="资源描述")
@@ -809,6 +864,8 @@ class ResourceImportInfoSLZ(serializers.Serializer):
     path_display = serializers.SerializerMethodField(required=False, help_text="请求路径(需要体现是否匹配所有子路径)")
     match_subpath = serializers.BooleanField(help_text="是否匹配所有子路径")
     enable_websocket = serializers.BooleanField(help_text="是否启用 websocket")
+    is_deprecated = serializers.BooleanField(default=False, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, help_text="弃用说明")
     is_public = serializers.BooleanField(help_text="是否公开")
     allow_apply_permission = serializers.BooleanField(help_text="是否允许应用在开发者中心申请访问资源的权限")
 
@@ -827,6 +884,13 @@ class ResourceImportInfoSLZ(serializers.Serializer):
 
     class Meta:
         ref_name = "apigateway.apis.web.resource.serializers.ResourceImportInfoSLZ"
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        change_types = self.context.get("change_types")
+        if change_types is not None:
+            data["change_type"] = change_types[instance.name]
+        return data
 
     def get_id(self, obj):
         return obj.resource and obj.resource.id
@@ -892,6 +956,8 @@ class ResourceExportOutputSLZ(serializers.Serializer):
     path = serializers.CharField(help_text="请求路径")
     match_subpath = serializers.BooleanField(help_text="是否匹配所有子路径")
     enable_websocket = serializers.BooleanField(help_text="是否启用 websocket")
+    is_deprecated = serializers.BooleanField(default=False, help_text="是否弃用")
+    deprecated_note = serializers.CharField(default="", allow_blank=True, help_text="弃用说明")
     is_public = serializers.BooleanField(help_text="是否公开")
     allow_apply_permission = serializers.BooleanField(help_text="是否允许应用在开发者中心申请访问资源的权限")
 
@@ -1004,7 +1070,9 @@ class ResourcePathConflictResourceOutputSLZ(serializers.Serializer):
 
 class ResourcePathConflictGroupOutputSLZ(serializers.Serializer):
     resources_truncated = serializers.BooleanField(read_only=True, help_text="本组是否存在未返回的资源")
-    method = serializers.ChoiceField(choices=HTTP_METHOD_CHOICES, read_only=True, help_text="本组对应的具体请求方法")
+    method = serializers.ChoiceField(
+        choices=RESOURCE_METHOD_CHOICES, read_only=True, help_text="冲突请求方法；纯 ANY 资源的重复冲突组合并为 ANY"
+    )
     type = serializers.ChoiceField(
         choices=["normalized_path", "literal_parameter"], read_only=True, help_text="路径重叠类型"
     )

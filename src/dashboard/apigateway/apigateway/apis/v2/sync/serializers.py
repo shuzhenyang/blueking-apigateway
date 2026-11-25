@@ -24,16 +24,22 @@ from django.utils.translation.trans_null import gettext_lazy
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
-from apigateway.apis.backend_config import validate_single_instance_ai_backend_config
+from apigateway.apis.backend_config import validate_ai_backend_config
+from apigateway.apis.gateway_name import validate_gateway_display_name
 from apigateway.apis.v2.validators import validate_comma_separated_ints, validate_comma_separated_names
 from apigateway.apps.mcp_server.constants import (
     MCPServerProtocolTypeEnum,
     MCPServerStatusEnum,
 )
 from apigateway.apps.mcp_server.models import MCPServer, MCPServerCategory
-from apigateway.apps.permission.constants import FormattedGrantDimensionEnum, GrantDimensionEnum
+from apigateway.apps.permission.constants import (
+    FORMATTED_TO_DB_GRANT_DIMENSION,
+    FormattedGrantDimensionEnum,
+    GrantDimensionEnum,
+)
 from apigateway.apps.support.constants import DocLanguageEnum, ProgrammingLanguageEnum
 from apigateway.biz.constants import MAX_BACKEND_TIMEOUT_IN_SECOND, SEMVER_PATTERN
+from apigateway.biz.gateway import GatewayHandler
 from apigateway.biz.stage import StageHandler, StageSyncHandler
 from apigateway.biz.validators import (
     BKAppCodeListValidator,
@@ -44,6 +50,7 @@ from apigateway.biz.validators import (
     SchemeHostInputValidator,
     StageVarsValidator,
     UpstreamValidator,
+    UserManagedBKAppCodeListValidator,
     UserManagedBKAppCodeValidator,
 )
 from apigateway.common.constants import (
@@ -70,6 +77,7 @@ from apigateway.core.constants import (
     convert_gateway_kind_name_to_value,
     convert_gateway_kind_to_name,
 )
+from apigateway.core.gateway_name import GATEWAY_DISPLAY_NAME_MAX_LENGTH, normalize_display_name_en
 from apigateway.core.models import Backend, Gateway, ResourceVersion, Stage
 from apigateway.service.gateway_name import validate_gateway_name_kind
 from apigateway.utils.time import NeverExpiresTime
@@ -116,6 +124,12 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
         max_length=64,
         validators=[NameValidator()],
     )
+    display_name = serializers.CharField(
+        max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, required=False, allow_blank=True, allow_null=True
+    )
+    display_name_en = serializers.CharField(
+        max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, required=False, allow_blank=True, allow_null=True
+    )
     maintainers = serializers.ListField(child=serializers.CharField(), allow_empty=True, required=False)
     doc_maintainers = GatewayAPIDocMaintainerSLZ(required=False)
     status = serializers.ChoiceField(choices=GatewayStatusEnum.get_choices(), default=GatewayStatusEnum.ACTIVE.value)
@@ -123,8 +137,13 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
     api_type = serializers.ChoiceField(
         choices=[GatewayTypeEnum.OFFICIAL_API.value, GatewayTypeEnum.CLOUDS_API.value], required=False
     )
+    is_official = serializers.BooleanField(required=False)
     user_config = UserConfigSLZ(required=False)
     allow_delete_sensitive_params = serializers.BooleanField(default=True)
+    oauth2_app_enabled = serializers.BooleanField(
+        required=False,
+        help_text="是否开启 OAuth 应用通道；不传时新建网关为 true，已有网关保留当前值",
+    )
     kind = serializers.ChoiceField(
         choices=GatewaySyncKindEnum.get_choices(),
         default=GatewaySyncKindEnum.NORMAL.value,
@@ -144,6 +163,8 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
         model = Gateway
         fields = [
             "name",
+            "display_name",
+            "display_name_en",
             "description",
             "description_en",
             "maintainers",
@@ -151,8 +172,10 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
             "status",
             "is_public",
             "api_type",
+            "is_official",
             "user_config",
             "allow_delete_sensitive_params",
+            "oauth2_app_enabled",
             "data_planes",
             "kind",
         ]
@@ -162,15 +185,36 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
             }
         }
 
+    def validate_display_name_en(self, value):
+        value = normalize_display_name_en(value)
+        if (
+            value is not None
+            and Gateway.objects.exclude(pk=self.instance.pk if self.instance else None)
+            .filter(display_name_en__iexact=value)
+            .exists()
+        ):
+            raise serializers.ValidationError(_("This display name is already in use."), code="unique")
+        return value
+
     def validate(self, data):
         kind = convert_gateway_kind_name_to_value(data["kind"])
         effective_kind = self.instance.kind if self.instance else kind
-        self._validate_name(data["name"], data.get("api_type"), effective_kind)
+        is_official = data.pop("is_official", None)
+        api_type = data.pop("api_type", None)
+        if is_official is not None:
+            api_type = GatewayTypeEnum.OFFICIAL_API.value if is_official else GatewayTypeEnum.CLOUDS_API.value
+            if self.instance and GatewayHandler.get_gateway_auth_config(self.instance.id).get("api_type") == (
+                GatewayTypeEnum.SUPER_OFFICIAL_API.value
+            ):
+                api_type = GatewayTypeEnum.SUPER_OFFICIAL_API.value
+        self._validate_name(data["name"], api_type, effective_kind)
 
         if self.instance is None:
             validate_gateway_name_kind(data["name"], kind)
 
-        data["gateway_type"] = data.pop("api_type", None)
+        validate_gateway_display_name(data, self.instance)
+
+        data["gateway_type"] = api_type
         data["kind"] = kind
 
         return data
@@ -192,9 +236,9 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
 
         raise serializers.ValidationError(
             {
-                "name": _("api_type 为 {api_type} 时，网关名 name 需以 {prefix} 开头。").format(
-                    api_type=api_type, prefix=", ".join(settings.OFFICIAL_GATEWAY_NAME_PREFIXES)
-                )
+                "name": _("官方网关名 name 需以 {prefix} 开头。").format(
+                    prefix=", ".join(settings.OFFICIAL_GATEWAY_NAME_PREFIXES)
+                ),
             }
         )
 
@@ -202,7 +246,9 @@ class GatewaySyncInputSLZ(serializers.ModelSerializer):
 class GatewaySyncOutputSLZ(serializers.Serializer):
     id = serializers.IntegerField(read_only=True, help_text="网关ID")
     name = serializers.CharField(read_only=True, help_text="网关名称")
+    display_name = SerializerTranslatedField(default_field="display_name_or_name", read_only=True)
     kind = serializers.SerializerMethodField(help_text="网关类型")
+    is_official = serializers.BooleanField(read_only=True, help_text="是否为官方网关")
 
     def get_kind(self, obj):
         return convert_gateway_kind_to_name(obj.kind)
@@ -399,7 +445,7 @@ class BackendSLZ(serializers.Serializer):
 
 class AIBackendConfigSLZ(serializers.Serializer):
     def to_internal_value(self, data):
-        return validate_single_instance_ai_backend_config(data)
+        return validate_ai_backend_config(data)
 
     class Meta:
         ref_name = "apigateway.apis.v2.sync.serializers.AIBackendConfigSLZ"
@@ -712,9 +758,36 @@ class GatewayAppPermissionGrantInputSLZ(serializers.Serializer):
 
     def validate_grant_dimension(self, value: str) -> str:
         """将 gateway 映射为 api（PermissionDimensionManager 使用 GrantDimensionEnum 值）"""
-        if value == FormattedGrantDimensionEnum.GATEWAY.value:
-            return GrantDimensionEnum.API.value
-        return value
+        return FORMATTED_TO_DB_GRANT_DIMENSION.get(value, value)
+
+
+class GatewayAppPermissionRevokeInputSLZ(serializers.Serializer):
+    """网关关联应用，回收应用访问网关 API 的权限"""
+
+    target_app_codes = serializers.ListField(
+        child=serializers.CharField(max_length=32),
+        allow_empty=False,
+        max_length=100,
+        validators=[UserManagedBKAppCodeListValidator()],
+    )
+    grant_dimension = serializers.ChoiceField(
+        choices=[FormattedGrantDimensionEnum.GATEWAY.value, FormattedGrantDimensionEnum.RESOURCE.value]
+    )
+    resource_names = serializers.ListField(child=serializers.CharField(), required=False, max_length=100)
+
+    class Meta:
+        ref_name = "apigateway.apis.v2.sync.serializers.GatewayAppPermissionRevokeInputSLZ"
+
+    def validate_grant_dimension(self, value: str) -> str:
+        """将 gateway 映射为 api（PermissionDimensionManager 使用 GrantDimensionEnum 值）"""
+        return FORMATTED_TO_DB_GRANT_DIMENSION.get(value, value)
+
+    def validate(self, data):
+        if data["grant_dimension"] == GrantDimensionEnum.RESOURCE.value and not data.get("resource_names"):
+            raise serializers.ValidationError(
+                {"resource_names": _("按资源回收权限时，参数 resource_names 不能为空。")}
+            )
+        return data
 
 
 class ResourceVersionCreateInputSLZ(serializers.Serializer):
@@ -920,10 +993,12 @@ class MCPServerSLZ(ExtensibleFieldMixin, serializers.ModelSerializer):
         if not category_names:
             return category_names
 
-        existing_names = set(MCPServerCategory.objects.filter(name__in=category_names).values_list("name", flat=True))
+        existing_names = set(
+            MCPServerCategory.objects.filter(name__in=category_names, is_active=True).values_list("name", flat=True)
+        )
         invalid_names = set(category_names) - existing_names
         if invalid_names:
-            raise serializers.ValidationError(f"分类不存在: {', '.join(invalid_names)}")
+            raise serializers.ValidationError(f"分类不存在或已停用: {', '.join(invalid_names)}")
 
         return category_names
 

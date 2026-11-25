@@ -56,7 +56,7 @@
           v-if="isEmptyResult"
           class="pt-126px"
         >
-          <TableEmpty
+          <AgTableEmpty
             :empty-type="emptyConfig.emptyType"
             :abnormal="emptyConfig.isAbnormal"
             @refresh="handleQueryTrace"
@@ -69,7 +69,7 @@
           v-else
           class="body-content"
         >
-          <AgMcpTraceChain
+          <McpTraceChain
             :key="componentKey"
             :trace-chain-detail="traceData"
           />
@@ -84,15 +84,15 @@ import { cloneDeep } from 'lodash-es';
 import { Message } from 'bkui-vue';
 import { useTrace } from '@/stores';
 import { t } from '@/locales';
+import type { IGatewayLog } from '@/types/observability';
 import {
-  type IGatewayLog,
-  fetchObservabilityLogInfo,
-  fetchObservabilityLogSummary,
-  fetchObservabilityTraceChain,
-} from '@/services/source/observability';
-import { DEFAULT_TRACE_DATA } from '@/components/trace-view/constants/trace';
-import AgMcpTraceChain from '@/components/ag-mcp-trace-chain/Index.vue';
-import TableEmpty from '@/components/table-empty/Index.vue';
+  queryMcpLogByRequestId,
+  queryMcpLogChain,
+  queryMcpLogSummary,
+} from '@/services/source/platform/toolbox';
+import { DEFAULT_TRACE_DATA } from '@/constants/trace';
+import McpTraceChain from '@/components/mcp/mcp-trace-chain/Index.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
 
 const route = useRoute();
 const traceStore = useTrace();
@@ -148,9 +148,9 @@ const handleQueryTrace = async () => {
 
   try {
     const promiseList = [
-      fetchObservabilityLogInfo(keyword),
-      fetchObservabilityLogSummary(keyword),
-      fetchObservabilityTraceChain(keyword),
+      queryMcpLogByRequestId(keyword),
+      queryMcpLogSummary(keyword),
+      queryMcpLogChain(keyword),
     ];
     const results = await Promise.allSettled(promiseList);
 

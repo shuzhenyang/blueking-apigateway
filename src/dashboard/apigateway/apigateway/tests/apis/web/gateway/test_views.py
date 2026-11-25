@@ -18,6 +18,7 @@
 from unittest.mock import ANY, patch
 
 import pytest
+import requests
 from django_dynamic_fixture import G
 
 from apigateway.apps.audit.constants import OpObjectTypeEnum
@@ -44,6 +45,27 @@ class TestGatewayListCreateApi:
 
         assert resp.status_code == 200
         assert len(result["data"]) >= 1
+
+    @pytest.mark.parametrize(
+        "is_deprecated,deprecated_note",
+        [(True, "请迁移至新版网关"), (False, ""), (False, None)],
+    )
+    def test_list_includes_deprecation(self, request_view, fake_gateway, is_deprecated, deprecated_note):
+        fake_gateway.is_deprecated = is_deprecated
+        fake_gateway.deprecated_note = deprecated_note
+        fake_gateway.save(update_fields=["is_deprecated", "deprecated_note"])
+
+        response = request_view(
+            method="GET",
+            view_name="gateways.list_create",
+            data={"limit": 5, "offset": 0, "ordering": "updated_time"},
+        )
+
+        assert response.status_code == 200
+        gateways = response.json()["data"]["results"]
+        gateway = next(item for item in gateways if item["id"] == fake_gateway.id)
+        assert gateway["is_deprecated"] is is_deprecated
+        assert gateway["deprecated_note"] == deprecated_note
 
     def test_list_includes_operator_gateways(self, request_view, fake_gateway, mocker):
         GatewayMember.objects.create(
@@ -197,6 +219,70 @@ class TestGatewayListCreateApi:
         assert "前缀【bkai-】仅供 AI 网关使用" in response.json()["error"]["message"]
         assert not Gateway.objects.filter(name="bkai-demo").exists()
 
+    @pytest.mark.parametrize(
+        "failure,expected_reason",
+        [
+            (200, "响应不是 Git Smart HTTP 格式"),
+            (401, "认证未通过"),
+            (403, "访问被拒绝"),
+            (404, "仓库不存在或当前账号无权访问"),
+            (429, "Git 服务请求受限"),
+            (500, "Git 服务返回异常"),
+            (418, "请求 Git 服务失败"),
+            (requests.ConnectionError, "无法连接 Git 服务"),
+        ],
+    )
+    def test_create_programmable_gateway_git_probe_failure(
+        self, request_view, unique_gateway_name, mocker, caplog, failure, expected_reason
+    ):
+        gateway_name = unique_gateway_name[:16]
+        mocker.patch("apigateway.apis.web.gateway.views.settings.EDITION", "ee")
+        mocker.patch("apigateway.apis.web.gateway.validators.is_app_code_occupied", return_value=False)
+        create_paas_app = mocker.patch("apigateway.apis.web.gateway.views.create_paas_app")
+        secret = "secret-user:secret-password/private-repository"
+        if isinstance(failure, int):
+            response = requests.Response()
+            response.status_code = failure
+            response.url = "https://git.example.com/private-repository.git/info/refs?service=git-upload-pack"
+            response._content = secret.encode()
+            response.headers["Location"] = f"https://git.example.com/{secret}"
+            mocker.patch("apigateway.utils.git.requests.Session.get", return_value=response)
+        else:
+            mocker.patch("apigateway.utils.git.requests.Session.get", side_effect=failure(secret))
+
+        response = request_view(
+            method="POST",
+            view_name="gateways.list_create",
+            data={
+                "name": gateway_name,
+                "maintainers": ["admin"],
+                "is_public": False,
+                "tenant_mode": "single",
+                "tenant_id": "default",
+                "kind": GatewayKindEnum.PROGRAMMABLE.value,
+                "extra_info": {"language": "python"},
+                "programmable_gateway_git_info": {
+                    "repository": "https://git.example.com/private-repository.git",
+                    "account": "secret-user",
+                    "password": "secret-password",
+                },
+            },
+        )
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "INVALID_ARGUMENT"
+        assert "Git 凭据检查失败" in error["message"]
+        assert expected_reason in error["message"]
+        if isinstance(failure, int):
+            assert "git.example.com" in error["message"]
+            assert f"HTTP {failure}" in error["message"]
+        for value in ("secret-user", "secret-password", "private-repository"):
+            assert value not in response.content.decode() + caplog.text
+        assert "request_id=" in caplog.text
+        assert not Gateway.objects.filter(name=gateway_name).exists()
+        create_paas_app.assert_not_called()
+
     def test_create_programmable_gateway_without_repo_authorization__non_te(
         self,
         request_view,
@@ -332,7 +418,7 @@ class TestGatewayListCreateApi:
                 {
                     "name": "test3",
                     "description": "test description",
-                    "maintainers": ["admin"],
+                    "maintainers": ["alice"],
                     "is_public": False,
                     "bk_app_codes": ["app1"],
                     "tenant_mode": "single",
@@ -393,6 +479,7 @@ class TestGatewayRetrieveUpdateDestroyApi:
 
         assert resp.status_code == 200
         assert result["data"]["id"] == fake_gateway.id
+        assert result["data"]["oauth2_app_enabled"] is True
 
     def test_update(self, request_view, faker, fake_gateway):
         data = {
@@ -433,6 +520,20 @@ class TestGatewayRetrieveUpdateDestroyApi:
         auth_config = GatewayHandler.get_gateway_auth_config(gateway.id)
         assert "allow_auth_from_params" not in auth_config
         assert "allow_delete_sensitive_params" not in auth_config
+        # 未传 oauth2_app_enabled 时保留当前值
+        assert gateway.oauth2_app_enabled is True
+
+    def test_partial_update_oauth2_app_enabled(self, request_view, fake_gateway):
+        resp = request_view(
+            method="PATCH",
+            view_name="gateways.retrieve_update_destroy",
+            path_params={"gateway_id": fake_gateway.id},
+            data={"oauth2_app_enabled": False},
+        )
+
+        assert resp.status_code == 204
+        fake_gateway.refresh_from_db()
+        assert fake_gateway.oauth2_app_enabled is False
 
     def test_destroy(self, request_view, fake_gateway):
         fake_gateway.status = GatewayStatusEnum.INACTIVE.value

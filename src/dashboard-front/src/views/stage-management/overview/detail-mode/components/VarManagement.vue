@@ -45,7 +45,7 @@
       class="w-740px!"
     >
       <BkTable
-        class="variable-table mt-15px"
+        class="variable-table mt-16px"
         :data="tableData"
         show-overflow-tooltip
         row-hover="auto"
@@ -62,7 +62,7 @@
           <template #default="{ row, index, column }">
             <span
               v-if="!row.isEdit"
-              v-bk-tooltips="{ content: row.name, disabled: !row.name }"
+              v-bk-tooltips="{ content: row.name ?? '', disabled: !row.name }"
               class="no-edit-value"
             >
               {{ row?.name }}
@@ -111,7 +111,7 @@
           <template #default="{ row, index, column }">
             <span
               v-show="!row.isEdit"
-              v-bk-tooltips="{ content: row.value, disabled: !row.value }"
+              v-bk-tooltips="{ content: row.value ?? '', disabled: !row.value }"
               class="no-edit-value"
             >
               {{ row?.value }}
@@ -191,7 +191,8 @@
 </template>
 
 <script setup lang="ts">
-import { type IStageListItem, getStageVars, putStageVars } from '@/services/source/stage';
+import { getStageVars, updateStageVars } from '@/services/source/gateway/stage';
+import type { IStageListItem } from '@/types/stage';
 import {
   InfoBox,
   Message,
@@ -428,7 +429,7 @@ const handleSave = async () => {
           data[item.name] = item.value;
         });
 
-        await putStageVars(gatewayId.value, stageId, { vars: data });
+        await updateStageVars(gatewayId.value, stageId, { vars: data });
         Message({
           theme: 'success',
           message: t('更新成功'),

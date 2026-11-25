@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import ClassVar, Dict, List
 
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from jsonfield import JSONField
 
@@ -48,10 +49,12 @@ from apigateway.core.constants import (
     PublishEventStatusEnum,
     PublishSourceEnum,
     ReleaseHistoryStatusEnum,
+    ReleaseStatusEnum,
     ResourceKindEnum,
     ResourceVersionSchemaEnum,
     StageStatusEnum,
 )
+from apigateway.core.gateway_name import GATEWAY_DISPLAY_NAME_MAX_LENGTH
 from apigateway.core.utils import get_path_display
 from apigateway.schema.models import Schema
 from apigateway.utils.crypto import get_crypto
@@ -73,6 +76,12 @@ class Gateway(TimestampedModelMixin, OperatorModelMixin):
     """
 
     name = models.CharField(max_length=64, unique=True)
+    display_name_i18n = I18nProperty(
+        models.CharField(max_length=GATEWAY_DISPLAY_NAME_MAX_LENGTH, unique=True, blank=True)
+    )
+    # 创建入口负责在未配置 display_name 时使用 name。
+    display_name = display_name_i18n.default_field(null=True, default=None)
+    display_name_en = display_name_i18n.field("en", null=True, default=None)
     description_i18n = I18nProperty(models.CharField(max_length=512, blank=True, null=True, default=None))
     description = description_i18n.default_field(default="")
     description_en = description_i18n.field("en")
@@ -106,6 +115,9 @@ class Gateway(TimestampedModelMixin, OperatorModelMixin):
 
     is_public = models.BooleanField(default=False)
     is_official = models.BooleanField(default=False)
+    # OAuth 应用通道：Bearer 入口是否接受用户委托 token 与应用 token；重新发布后在数据面生效
+    # db_default 保证回滚到旧版本代码后，不带该列的写入仍然成功
+    oauth2_app_enabled = models.BooleanField(default=True, db_default=True)
 
     # for lifecycle management, mark the gateway is deprecated before doing delete operation
     is_deprecated = models.BooleanField(default=False)
@@ -118,6 +130,11 @@ class Gateway(TimestampedModelMixin, OperatorModelMixin):
         verbose_name = "Gateway"
         verbose_name_plural = "Gateway"
         db_table = "core_api"
+
+    @property
+    def display_name_or_name(self) -> str:
+        """按当前语言展示；未配置展示名时使用 name。"""
+        return self.display_name_i18n or self.name
 
     @property
     def doc_maintainers(self) -> Dict:
@@ -258,12 +275,13 @@ class Resource(TimestampedModelMixin, OperatorModelMixin):
     # only one proxy is activated
     proxy_id = models.IntegerField(blank=False, null=False)
 
+    is_deprecated = models.BooleanField(default=False)
+    deprecated_note = models.CharField(max_length=2048, blank=True, default="")
+
     is_public = models.BooleanField(default=True)
     allow_apply_permission = models.BooleanField(default=True)
     oauth2_public_client_enabled = models.BooleanField(default=False)
     oauth2_personal_client_enabled = models.BooleanField(default=False)
-
-    objects: ClassVar[managers.ResourceManager] = managers.ResourceManager()
 
     def __str__(self):
         return f"<Resource: {self.pk}/{self.name}>"
@@ -399,8 +417,6 @@ class Backend(TimestampedModelMixin, OperatorModelMixin):
     )
     name = models.CharField(max_length=64)
     description = models.CharField(max_length=512, default="")
-
-    objects: ClassVar[managers.BackendManager] = managers.BackendManager()
 
     class Meta:
         unique_together = ("gateway", "name")
@@ -622,6 +638,9 @@ class ReleasedResource(TimestampedModelMixin):
     is_public = models.BooleanField(default=False)
     oauth2_public_client_enabled = models.BooleanField(default=False)
     oauth2_personal_client_enabled = models.BooleanField(default=False)
+    # 由资源认证配置推导，不含网关开关：用户委托 token 为 U && A，应用 token 为 !U && A
+    oauth2_app_delegated_enabled = models.BooleanField(default=False, db_default=False)
+    oauth2_app_only_enabled = models.BooleanField(default=False, db_default=False)
     data = JSONField(help_text="resource data in resource version")
 
     objects: ClassVar[managers.ReleasedResourceManager] = managers.ReleasedResourceManager()
@@ -653,6 +672,26 @@ class ReleasedResource(TimestampedModelMixin):
                     "resource_id",
                 ],
                 name="rr_oauth_personal_scope_idx",
+            ),
+            models.Index(
+                fields=[
+                    "oauth2_app_delegated_enabled",
+                    "is_public",
+                    "gateway",
+                    "resource_version_id",
+                    "resource_id",
+                ],
+                name="rr_oauth_app_dlg_scope_idx",
+            ),
+            models.Index(
+                fields=[
+                    "oauth2_app_only_enabled",
+                    "is_public",
+                    "gateway",
+                    "resource_version_id",
+                    "resource_id",
+                ],
+                name="rr_oauth_app_only_scope_idx",
             ),
         ]
         db_table = "core_released_resource"
@@ -689,6 +728,20 @@ class ReleaseHistory(TimestampedModelMixin, OperatorModelMixin):
         related_name="release_histories",
         help_text="The data plane this release was published to",
     )
+
+    def get_status(self, latest_event: "PublishEvent | None") -> str:
+        """Derive status without leaving an eventless publish pending forever.
+
+        Failure means that the publish result could not be confirmed, not that
+        the data plane necessarily failed to apply its configuration.
+        """
+        if latest_event is not None:
+            return latest_event.get_release_history_status()
+
+        if self.created_time and (timezone.now() - self.created_time).total_seconds() > EVENT_FAIL_INTERVAL_TIME:
+            return ReleaseHistoryStatusEnum.FAILURE.value
+
+        return ReleaseStatusEnum.PENDING.value
 
     def __str__(self):
         return f"<Release: {self.gateway}/{self.stage}/{self.resource_version}>"

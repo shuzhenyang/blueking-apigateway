@@ -23,7 +23,7 @@ dependencies = [
     "elasticsearch==7.17.13",
     "elasticsearch-dsl==7.4.1",
     "werkzeug==3.1.8",
-    "redis==8.1.0",
+    "redis==6.2.0",
     "ruamel.yaml==0.19.1",
     "pyyaml==6.0.3",
     "PyJWT==2.14.0",
@@ -35,6 +35,7 @@ dependencies = [
     "bkpaas-auth==4.4.0",
     "blue-krill==3.1.1",
     "bk-crypto-python-sdk[gm]==4.1.1",
+    "bk-kms-sdk==1.0.0",
     "cryptography==50.0.1",
     "apigw-manager==5.0.1",
     "bkapi-client-generator==0.1.30",
@@ -71,6 +72,7 @@ dependencies = [
     "sqlparse==0.6.0",
     "future==1.0.0",
     "openapi-spec-validator==0.9.0",
+    "jsonschema-path==0.5.0",
     "prance==26.7.19.0",
     "py-openapi-schema-to-json-schema==0.0.3",
     "faker==40.39.0",
@@ -83,8 +85,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "nose==1.3.7",
-    "django-nose==1.4.7",
     "coverage==7.16.1",
     "django-dynamic-fixture==4.0.1",
     "pytest-xdist==3.8.0",
@@ -100,7 +100,6 @@ dev = [
     "mypy==2.3.1",
     "rope==1.14.0",
     "watchdog==6.0.0",
-    "tox==4.61.4",
     "ipython==9.17.1",
     "fakeredis==2.38.0",
     "ruff==0.16.7",
@@ -146,7 +145,11 @@ module = [
 ignore_errors = true
 
 [tool.pytest.ini_options]
-addopts = "-p no:pastebin -p no:nose -p no:doctest -p no:warnings"
+addopts = "-p no:pastebin -p no:doctest -p no:warnings"
+markers = [
+    "no_meta_schema: test does not need automatic database access or meta-schema rows",
+    "migration: validates Django schema or data migrations; run with migrations enabled",
+]
 testpaths = [
     "apigateway/apigateway/tests"
 ]
@@ -169,7 +172,6 @@ exclude = [
     ".pytype",
     ".ruff_cache",
     ".svn",
-    ".tox",
     ".venv",
     "__pypackages__",
     "_build",
@@ -309,6 +311,10 @@ ignore_imports = [
     "apigateway.core.management.commands.* -> apigateway.biz.**",
     "apigateway.core.management.commands.update_jwt_key -> apigateway.service.gateway_jwt",
     "apigateway.apps.gateway.management.commands.revoke_gateways -> apigateway.biz.gateway",
+    "apigateway.apps.rbac.management.commands.sync_gateway_rbac_model_to_iam -> apigateway.biz.iam",
+    "apigateway.apps.rbac.management.commands.sync_gateway_rbac_auth_to_iam -> apigateway.biz.iam",
+    "apigateway.apps.rbac.management.commands.add_global_gateway_administrators -> apigateway.biz.gateway",
+    "apigateway.apps.rbac.management.commands.add_global_gateway_administrators -> apigateway.biz.iam",
     "apigateway.apps.gateway.management.commands.revoke_gateways -> apigateway.controller.publisher.publish",
     "apigateway.apps.gateway.management.commands.revoke_stage -> apigateway.controller.publisher.publish",
     "apigateway.apps.data_plane.management.commands.* -> apigateway.controller.tasks.*",
@@ -321,6 +327,8 @@ ignore_imports = [
     "apigateway.apps.permission.tasks -> apigateway.biz.permission",
     "apigateway.apps.gateway.tasks -> apigateway.components.*",
     "apigateway.apps.gateway.tasks -> apigateway.biz.gateway",
+    "apigateway.apps.rbac.tasks -> apigateway.biz.iam",
+    "apigateway.apps.rbac.tasks -> apigateway.components.bkiam",
     "apigateway.apps.monitor.tasks -> apigateway.service.alert_flow",
     "apigateway.apps.metrics.tasks -> apigateway.service.statistics",
     "apigateway.apps.support.task -> apigateway.biz.ai",
@@ -331,7 +339,6 @@ ignore_imports = [
     "apigateway.apps.esb.*.* -> apigateway.biz.*",
     "apigateway.apps.esb.*.* -> apigateway.biz.*.*",
     "apigateway.apps.esb.component.convertor -> apigateway.components.esb_components",
-    "apigateway.apps.esb.status.es_client -> apigateway.service.es",
     # 需要重构的依赖
 ]
 
@@ -401,6 +408,8 @@ forbidden_modules = [
     "apigateway.biz.ai.*.*",
     "apigateway.biz.gateway.*",
     "apigateway.biz.gateway.*.*",
+    "apigateway.biz.iam.*",
+    "apigateway.biz.iam.*.*",
     "apigateway.biz.mcp_server.*",
     "apigateway.biz.mcp_server.*.*",
     "apigateway.biz.mcp_server_log.*",
@@ -449,6 +458,8 @@ ignore_imports = [
     "apigateway.apps.permission.tasks -> apigateway.biz.permission",
     "apigateway.apps.gateway.tasks -> apigateway.components.*",
     "apigateway.apps.gateway.tasks -> apigateway.biz.gateway",
+    "apigateway.apps.rbac.tasks -> apigateway.biz.iam",
+    "apigateway.apps.rbac.tasks -> apigateway.components.bkiam",
     "apigateway.apps.monitor.tasks -> apigateway.service.alert_flow",
     "apigateway.apps.metrics.tasks -> apigateway.service.statistics",
     "apigateway.apps.support.task -> apigateway.biz.ai",
@@ -460,6 +471,10 @@ ignore_imports = [
     "apigateway.apps.*.management.commands.* -> apigateway.core.constants",
     "apigateway.core.management.commands.* -> apigateway.biz.gateway",
     "apigateway.apps.gateway.management.commands.revoke_gateways -> apigateway.biz.gateway",
+    "apigateway.apps.rbac.management.commands.sync_gateway_rbac_model_to_iam -> apigateway.biz.iam",
+    "apigateway.apps.rbac.management.commands.sync_gateway_rbac_auth_to_iam -> apigateway.biz.iam",
+    "apigateway.apps.rbac.management.commands.add_global_gateway_administrators -> apigateway.biz.gateway",
+    "apigateway.apps.rbac.management.commands.add_global_gateway_administrators -> apigateway.biz.iam",
     "apigateway.apps.gateway.management.commands.revoke_gateways -> apigateway.controller.publisher.publish",
     "apigateway.apps.gateway.management.commands.revoke_gateways -> apigateway.core.constants",
     "apigateway.apps.gateway.management.commands.revoke_stage -> apigateway.controller.publisher.publish",
@@ -476,7 +491,6 @@ ignore_imports = [
     "apigateway.apps.esb.*.* -> apigateway.biz.*",
     "apigateway.apps.esb.*.* -> apigateway.biz.*.*",
     "apigateway.apps.esb.*.* -> apigateway.components.*",
-    "apigateway.apps.esb.status.es_client -> apigateway.service.es",
 ]
 
 [[tool.importlinter.contracts]]

@@ -278,6 +278,11 @@ class AIBackendProviderEnum(StructuredEnum):
     OPENAI_COMPATIBLE = EnumField("openai-compatible", "OpenAI Compatible")
 
 
+class AIBackendFallbackStrategyEnum(StructuredEnum):
+    HTTP_429 = EnumField("http_429", "HTTP 429")
+    HTTP_5XX = EnumField("http_5xx", "HTTP 5xx")
+
+
 AI_BACKEND_BUILTIN_PROVIDERS = frozenset(("openai", "deepseek"))
 
 
@@ -294,6 +299,9 @@ class BackendTypeEnum(StructuredEnum):
 DEFAULT_STAGE_NAME = "prod"
 DEFAULT_LB_HOST_WEIGHT = 100
 DEFAULT_BACKEND_NAME = "default"
+
+# 与 apps.plugin.constants.PluginTypeCodeEnum.BK_ACCESS_TOKEN_SOURCE 相同；core 不能依赖 apps
+BK_ACCESS_TOKEN_SOURCE_PLUGIN_TYPE = "bk-access-token-source"
 
 # Stage
 STAGE_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,19}$")

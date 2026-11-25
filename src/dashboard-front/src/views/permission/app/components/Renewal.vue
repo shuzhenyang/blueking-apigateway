@@ -30,7 +30,7 @@
         label-position="right"
         label-width="100"
       >
-        <BkFormItem :label="t('蓝鲸应用ID')">
+        <BkFormItem :label="t('蓝鲸应用 ID')">
           <div>{{ curSelections?.[0]?.bk_app_code || "--" }}</div>
         </BkFormItem>
         <BkFormItem :label="t('资源名称')">
@@ -104,7 +104,7 @@
 import { usePermission } from '@/stores';
 import { t } from '@/locales';
 import { type IPermission } from '@/types/permission';
-import AgIcon from '@/components/ag-icon/Index.vue';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
 import ExpireDaySelector from '@/views/permission/app/components/ExpireDaySelector.vue';
 
 type IDialogParams = {

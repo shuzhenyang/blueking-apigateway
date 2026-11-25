@@ -240,8 +240,8 @@ func newDefaultConfig() *Config {
 			DefaultGateway: "-",
 			DefaultStage:   "global",
 
-			AgentEventsWaitingTimeWindow: 2 * time.Second,
-			AgentForceUpdateTimeWindow:   10 * time.Second,
+			AgentEventsWaitingTimeWindow: 5 * time.Second,
+			AgentForceUpdateTimeWindow:   30 * time.Second,
 			AgentCommitTimeWindow:        5 * time.Second,
 			AgentConcurrencyLimit:        4,
 			GatewaySyncConcurrency:       DefaultGatewaySyncConcurrency,
@@ -283,6 +283,9 @@ func Load(v *viper.Viper) (*Config, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, err
 	}
+	if err := cfg.applyKMS(); err != nil {
+		return nil, err
+	}
 
 	cfg.init()
 
@@ -304,7 +307,8 @@ func (c *Config) init() {
 	c.Apisix.Etcd.KeyPrefix = strings.TrimSuffix(c.Apisix.Etcd.KeyPrefix, "/")
 	c.Dashboard.Etcd.KeyPrefix = strings.TrimSuffix(c.Dashboard.Etcd.KeyPrefix, "/")
 
-	if c.Debug {
+	// Do not dump the decrypted configuration when KMS is enabled.
+	if c.Debug && !kmsEnabled() {
 		by, err := json.Marshal(c)
 		if err == nil {
 			fmt.Println(string(by))

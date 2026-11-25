@@ -17,69 +17,16 @@
  */
 import { defineStore } from 'pinia';
 import { t } from '@/locales';
-import router from '@/router';
+import type { DateValue } from '@blueking/date-picker';
+
+// @blueking/date-picker 的常用时间选项：id 为组件可直接解析的选择值
+interface ICommonDateOption {
+  name: string
+  id: DateValue
+}
 
 export const useAccessLog = defineStore('useAccessLog', {
   state: () => ({
-    // 是否展示今天选项
-    isEnabledToday: ['MCPServerObservability', 'MyApply', 'MyPending', 'MyHandled'].includes(router?.currentRoute?.value?.name as string),
-    // 日期选择快捷方式
-    baseDatepickerShortcuts: [
-      {
-        text: t('最近5分钟'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 5 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近1小时'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近6小时'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 6 * 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近12小时'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 12 * 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近1天'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 24 * 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近7天'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 3600 * 1000 * 24 * 7);
-          return [start, end];
-        },
-      },
-    ],
     // 业务组件-时间选择器的常用列表
     commonUseList: [
       {
@@ -166,55 +113,7 @@ export const useAccessLog = defineStore('useAccessLog', {
         name: t('上月（至今）'),
         id: ['now-1M/M', 'now'],
       },
-    ],
-    // 一天内的快捷方式
-    shortcutsInDay: [
-      {
-        text: t('最近5分钟'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 5 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近1小时'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近6小时'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 6 * 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近12小时'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 12 * 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-      {
-        text: t('最近1天'),
-        value() {
-          const end = new Date();
-          const start = new Date();
-          start.setTime(start.getTime() - 24 * 60 * 60 * 1000);
-          return [start, end];
-        },
-      },
-    ],
+    ] satisfies ICommonDateOption[],
     // 告警策略选项
     alarmStrategyOptions: {
       alarmType: [
@@ -225,7 +124,7 @@ export const useAccessLog = defineStore('useAccessLog', {
       ],
       alarmSubType: [
         {
-          name: t('后端响应状态码5xx'),
+          name: t('后端响应状态码 5xx'),
           value: 'status_code_5xx',
         },
         {
@@ -233,26 +132,26 @@ export const useAccessLog = defineStore('useAccessLog', {
           value: 'gateway_timeout',
         },
         {
-          name: t('请求后端502错误'),
+          name: t('请求后端 502 错误'),
           value: 'bad_gateway',
         },
       ],
       detectConfig: {
         duration: [
           {
-            name: t('5分钟'),
+            name: t('5 分钟'),
             value: 5 * 60,
           },
           {
-            name: t('10分钟'),
+            name: t('10 分钟'),
             value: 10 * 60,
           },
           {
-            name: t('30分钟'),
+            name: t('30 分钟'),
             value: 30 * 60,
           },
           {
-            name: t('60分钟'),
+            name: t('60 分钟'),
             value: 60 * 60,
           },
         ],
@@ -282,35 +181,35 @@ export const useAccessLog = defineStore('useAccessLog', {
       convergeConfig: {
         duration: [
           {
-            name: t('24小时'),
+            name: t('24 小时'),
             value: 1440 * 60,
           },
           {
-            name: t('12小时'),
+            name: t('12 小时'),
             value: 720 * 60,
           },
           {
-            name: t('6小时'),
+            name: t('6 小时'),
             value: 360 * 60,
           },
           {
-            name: t('1小时'),
+            name: t('1 小时'),
             value: 60 * 60,
           },
           {
-            name: t('30分钟'),
+            name: t('30 分钟'),
             value: 30 * 60,
           },
           {
-            name: t('15分钟'),
+            name: t('15 分钟'),
             value: 15 * 60,
           },
           {
-            name: t('5分钟'),
+            name: t('5 分钟'),
             value: 5 * 60,
           },
           {
-            name: t('0分钟'),
+            name: t('0 分钟'),
             value: 0,
           },
         ],
@@ -455,37 +354,6 @@ export const useAccessLog = defineStore('useAccessLog', {
     },
   }),
   getters: {
-    /**
-     * 获取日期选择快捷方式
-     * @param {Object} state - store 的状态对象
-     * @returns {Array} 日期选择快捷方式数组
-     */
-    datepickerShortcuts(state): Array<any> {
-      return computed(() => {
-        const routeName = router?.currentRoute?.value?.name as string;
-        const todayShortcut = {
-          text: t('今天'),
-          value() {
-            const end = new Date();
-            const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-            return [start, end];
-          },
-        };
-        // 满足路由条件则添加“今天”
-        if (routeName && state.isEnabledToday) {
-          return [todayShortcut, ...state.baseDatepickerShortcuts];
-        }
-        return [...state.baseDatepickerShortcuts];
-      }).value;
-    },
-    /**
-     * 获取一天内的快捷方式
-     * @param {Object} state - store 的状态对象
-     * @returns {Array} 一天内的快捷方式数组
-     */
-    getShortcutsInDay(state) {
-      return state.shortcutsInDay;
-    },
     /**
      * 获取告警策略选项
      * @param {Object} state - store 的状态对象

@@ -1,57 +1,55 @@
 # Core Module Guide
 
-This guide applies under `apigateway/apigateway/core/`. The dashboard and
-repository-root `AGENTS.md` files also apply.
+Keep model-local behavior in `models.py` and reusable single-model queries in
+`managers.py`. Core must not import API DTOs or controller models.
 
-## Module Ownership
+## Configuration ownership
 
-`core/` owns the central gateway domain model and normalized configuration:
-`Gateway`, `Stage`, `Resource`, `ResourceVersion`, `Release`, `Backend`,
-`BackendConfig`, and `Context`-related domain types.
+- `backend_config.py` defines normalized Pydantic configuration and validation;
+  `ai_backend.py` owns built-in provider metadata for adaptation, connectivity
+  and publication.
+- Persist AI configuration through `BackendConfig.config`: its setter encrypts
+  storage and its getter decrypts it. `_config` is the internal encrypted
+  representation. `get_config_for_display()` masks credential headers.
+- Provider changes must account for enum choices, registry entries, Web adapters,
+  connectivity, publication, tests and API documentation at their owning layers.
+  Verify each producer/consumer against this branch before changing the contract.
 
-- Keep rich behavior that concerns one model in `models.py`.
-- Keep reusable single-model queryset logic in `managers.py`.
-- Put multi-model queries or workflows in the appropriate `service/`, `biz/`,
-  or `controller/` layer; do not grow managers into business services.
-- Keep constants and stored enum values backward compatible with existing rows
-  and public payloads.
-- Do not import API serializers, Web DTOs, or controller models into `core/`.
+## OAuth2 app channel storage
 
-## Domain Names And Kinds
+- `Gateway.oauth2_app_enabled` (`db_default=True`) is the writable gateway
+  switch. `ReleasedResource.oauth2_app_delegated_enabled` (U && A) and
+  `oauth2_app_only_enabled` (!U && A) are projections with `db_default=False`.
+  Both are false when the snapshot's `plugins` bind `bk-access-token-source`
+  with any `source` or `allow_fallback`
+  (`released_resource_binds_access_token_source`). The controller derives
+  `support_app` from the same function. `core`
+  cannot import `apps`, so the plugin type lives in
+  `core.constants.BK_ACCESS_TOKEN_SOURCE_PLUGIN_TYPE`, pinned by a test.
+- The projection columns hold only values derived from the snapshot, never the
+  gateway switch: a `ReleasedResource` row is written once per resource version
+  and shared by every stage that releases it. Consumers AND the switch at query
+  time.
+- `get_released_resource_oauth2_app_flags` is shared by
+  `ReleasedResourceManager.save_released_resource`, the
+  `sync_released_resource --oauth2-app-flags` command and
+  `RouteConvertor._build_oauth2_plugins` (`support_app`). Migration `0059`
+  keeps its snapshot rules in the migration file.
+- The `db_default`s are what lets a rolled-back Dashboard keep `0059`; do not
+  drop them.
+- `0059` checks for each column and index before adding it. It is non-atomic so
+  the backfill commits batch by batch; the backfill pages by primary key and
+  reads only `id` and `data`.
+- After a rollback that kept `0059`, the old Dashboard writes new projections
+  with `false`. On the next upgrade, run
+  `sync_released_resource --all --oauth2-app-flags` (`--dry-run` first). It
+  refreshes rows in place and creates missing ones. Do not use `--force` for
+  this: it deletes rows before rebuilding, so scope and lookup briefly return
+  nothing.
 
-- `Gateway.kind` stores numeric `GatewayKindEnum` values. API names use
-  `GatewayKindNameEnum` conversion.
-- `Backend.kind` and `Resource.kind` store the string values `standard` and
-  `ai`.
-- Transport fields named `type` are not kind discriminators. Do not repurpose
-  them to select gateway, backend, or resource behavior.
+Migration tests (`tests/core/test_migration_*.py`) are excluded from
+`make test-fast`; run them with `make test-migrations` (see `TESTING.md`).
 
-## AI Backend Configuration
-
-Read the repository-root AI Gateway model and Web/storage/publish protocol
-documents listed in the dashboard guide before changing AI configuration.
-
-`core/backend_config.py` owns the normalized Pydantic storage contract.
-`core/ai_backend.py` owns the built-in provider registry used by Web adaptation,
-connectivity tests, and publishing.
-
-- Store built-in providers by product identity. APISIX-specific
-  `openai-compatible` conversion, endpoint overrides, and timeout conversion
-  belong at the controller publish boundary.
-- Keep Web-only input limits out of the core model. The normalized core config
-  may support shapes that a particular API surface does not expose.
-- A provider change must account for enum choices, registry entries, Web
-  adapter rules, connectivity behavior, publish conversion, tests, and API
-  documentation. Change each representation at its owning layer.
-- `BackendConfig.config` encrypts AI configuration at the ORM persistence
-  boundary. Do not bypass its model field or persistence helpers with raw
-  plaintext writes.
-
-## Verification
-
-- Add focused tests under `apigateway/apigateway/tests/core/` for model,
-  manager, kind, serialization, encryption, or masking behavior.
-- When a core contract changes, also run the focused tests for every API,
-  service, or controller consumer identified by call-site search.
-- Follow the dashboard guide for the exact pytest wrapper and final lint/test
-  gates.
+Tests mirror `tests/core/`. Cover model/manager constraints, kinds, configuration,
+encryption and masking as affected; changes to a core contract also need the
+identified API/service/controller consumer tests.

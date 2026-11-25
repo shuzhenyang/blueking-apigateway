@@ -27,6 +27,7 @@ from django.utils import translation
 
 from apigateway.apps.mcp_server.constants import (
     OFFICIAL_MCP_CATEGORY_NAME,
+    UNCATEGORIZED_MCP_CATEGORY_NAME,
     MCPServerAppPermissionApplyStatusEnum,
     MCPServerAppPermissionGrantTypeEnum,
     MCPServerExtendTypeEnum,
@@ -834,34 +835,6 @@ class TestMCPServerHandler:
         # 不应抛出异常
         MCPServerHandler.delete_prompts(mcp_server.id)
 
-    def test_get_prompts_count_empty(self, fake_gateway, fake_stage):
-        """测试获取 prompts 数量（无数据）"""
-        mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
-
-        result = MCPServerHandler.get_prompts_count(mcp_server.id)
-
-        assert result == 0
-
-    def test_get_prompts_count_with_data(self, fake_gateway, fake_stage):
-        """测试获取 prompts 数量（有数据）"""
-        mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
-        prompts = [
-            {"id": "prompt_001", "name": "代码审查助手"},
-            {"id": "prompt_002", "name": "API 文档生成器"},
-            {"id": "prompt_003", "name": "测试用例生成器"},
-        ]
-
-        G(
-            MCPServerExtend,
-            mcp_server=mcp_server,
-            type=MCPServerExtendTypeEnum.PROMPTS.value,
-            content=json.dumps(prompts),
-        )
-
-        result = MCPServerHandler.get_prompts_count(mcp_server.id)
-
-        assert result == 3
-
     def test_get_prompts_count_map_empty(self, fake_gateway, fake_stage):
         """测试批量获取 prompts 数量（无数据）"""
         mcp_server1 = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
@@ -1003,8 +976,14 @@ class TestMCPServerHandler:
 
         assert result == {}
 
-    def test_get_app_permission_risks_with_risky_tools(self, fake_gateway, fake_stage):
-        """oauth2 开启且工具需要应用认证时，返回风险工具"""
+    @pytest.mark.parametrize(
+        "public_enabled, personal_enabled, has_risk",
+        [(False, False, False), (True, False, True), (False, True, True), (True, True, True)],
+    )
+    def test_get_app_permission_risks_with_risky_tools(
+        self, fake_gateway, fake_stage, public_enabled, personal_enabled, has_risk
+    ):
+        """公开客户端或个人令牌开启时，返回需要应用认证的工具。"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
             [
@@ -1018,15 +997,14 @@ class TestMCPServerHandler:
             MCPServer,
             gateway=fake_gateway,
             stage=fake_stage,
-            oauth2_public_client_enabled=True,
+            oauth2_public_client_enabled=public_enabled,
+            oauth2_personal_client_enabled=personal_enabled,
             _resource_names="tool_a;tool_b",
         )
 
         result = MCPServerHandler.get_app_permission_risks([mcp_server])
 
-        assert mcp_server.id in result
-        assert "tool_a" in result[mcp_server.id]
-        assert "tool_b" not in result[mcp_server.id]
+        assert result == ({mcp_server.id: ["tool_a"]} if has_risk else {})
 
     def test_get_app_permission_risks_no_risk_when_all_tools_skip_app_auth(self, fake_gateway, fake_stage):
         """oauth2 开启但所有工具都不需要应用认证时无风险"""
@@ -1197,7 +1175,7 @@ class TestMCPServerHandler:
 
     # ========== 最低权限级别计算测试 ==========
 
-    def test_get_least_privileges_all_application(self, fake_gateway, fake_stage):
+    def test_get_least_privileges_by_server_all_application(self, fake_gateway, fake_stage):
         """所有工具都不需要用户认证时，应返回 APPLICATION"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
@@ -1210,12 +1188,12 @@ class TestMCPServerHandler:
 
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a;tool_b")
 
-        result = MCPServerHandler.get_least_privileges([mcp_server])
+        result = MCPServerHandler.get_least_privileges_by_server([mcp_server])
 
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert result[key] == MCPServerLeastPrivilegeEnum.APPLICATION.value
 
-    def test_get_least_privileges_has_user_required(self, fake_gateway, fake_stage):
+    def test_get_least_privileges_by_server_has_user_required(self, fake_gateway, fake_stage):
         """存在需要用户认证的工具时，应返回 APPLICATION_AND_USER"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
@@ -1228,12 +1206,12 @@ class TestMCPServerHandler:
 
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a;tool_b")
 
-        result = MCPServerHandler.get_least_privileges([mcp_server])
+        result = MCPServerHandler.get_least_privileges_by_server([mcp_server])
 
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert result[key] == MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value
 
-    def test_get_least_privileges_skip_auth_verification(self, fake_gateway, fake_stage):
+    def test_get_least_privileges_by_server_skip_auth_verification(self, fake_gateway, fake_stage):
         """skip_auth_verification=True 时即使 auth_verified_required=True 也视为不需要用户认证"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
@@ -1245,25 +1223,25 @@ class TestMCPServerHandler:
 
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a")
 
-        result = MCPServerHandler.get_least_privileges([mcp_server])
+        result = MCPServerHandler.get_least_privileges_by_server([mcp_server])
 
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert result[key] == MCPServerLeastPrivilegeEnum.APPLICATION.value
 
-    def test_get_least_privileges_empty(self):
+    def test_get_least_privileges_by_server_empty(self):
         """空列表应返回空字典"""
-        result = MCPServerHandler.get_least_privileges([])
+        result = MCPServerHandler.get_least_privileges_by_server([])
         assert result == {}
 
-    def test_get_least_privileges_no_release(self, fake_gateway, fake_stage):
-        """无 Release 记录时返回空字典"""
+    def test_get_least_privileges_by_server_no_release(self, fake_gateway, fake_stage):
+        """无 Release 记录时返回空权限，URL 使用原有默认入口"""
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a")
 
-        result = MCPServerHandler.get_least_privileges([mcp_server])
+        result = MCPServerHandler.get_least_privileges_by_server([mcp_server])
 
-        assert result == {}
+        assert result == {mcp_server.id: ""}
 
-    def test_get_least_privileges_only_checks_relevant_tools(self, fake_gateway, fake_stage):
+    def test_get_least_privileges_by_server_only_checks_relevant_tools(self, fake_gateway, fake_stage):
         """仅检查 MCP Server 关联的工具，不受其他资源影响"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
@@ -1276,12 +1254,12 @@ class TestMCPServerHandler:
 
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a")
 
-        result = MCPServerHandler.get_least_privileges([mcp_server])
+        result = MCPServerHandler.get_least_privileges_by_server([mcp_server])
 
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert result[key] == MCPServerLeastPrivilegeEnum.APPLICATION.value
 
-    def test_get_least_privileges_with_shared_releases(self, fake_gateway, fake_stage):
+    def test_get_least_privileges_by_server_with_shared_releases(self, fake_gateway, fake_stage):
         """传入预查询的 releases 参数，应复用而非重新查询"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
@@ -1292,13 +1270,47 @@ class TestMCPServerHandler:
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a")
 
         releases = MCPServerHandler._get_releases_for_mcp_servers([mcp_server])
-        result = MCPServerHandler.get_least_privileges([mcp_server], releases=releases)
+        result = MCPServerHandler.get_least_privileges_by_server([mcp_server], releases=releases)
 
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert result[key] == MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value
 
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_get_least_privileges_by_server_parses_each_release_once(self, fake_gateway, fake_stage, mocker, reverse):
+        rv = self._make_resource_version_with_data(
+            fake_gateway,
+            [
+                {"name": "tool_a", "auth_verified_required": False},
+                {"name": "tool_b", "auth_verified_required": True},
+            ],
+        )
+        other_rv = self._make_resource_version_with_data(
+            fake_gateway, [{"name": "tool_a", "auth_verified_required": True}]
+        )
+        other_stage = G(Stage, gateway=fake_gateway)
+        G(Release, gateway=fake_gateway, stage=fake_stage, resource_version=rv)
+        G(Release, gateway=fake_gateway, stage=other_stage, resource_version=other_rv)
+        app_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_a")
+        user_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage, _resource_names="tool_b")
+        other_server = G(MCPServer, gateway=fake_gateway, stage=other_stage, _resource_names="tool_a")
+        servers = [app_server, user_server, app_server, other_server]
+        if reverse:
+            servers.reverse()
+        releases = MCPServerHandler._get_releases_for_mcp_servers(servers)
+        loads = mocker.patch("apigateway.core.models.json.loads", wraps=json.loads)
+
+        result = MCPServerHandler.get_least_privileges_by_server(servers, releases=releases)
+
+        assert result == {
+            app_server.id: MCPServerLeastPrivilegeEnum.APPLICATION.value,
+            user_server.id: MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value,
+            other_server.id: MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value,
+        }
+        assert loads.call_args_list.count(mocker.call(rv._data)) == 1
+        assert loads.call_args_list.count(mocker.call(other_rv._data)) == 1
+
     def test_shared_releases_between_risks_and_privileges(self, fake_gateway, fake_stage):
-        """验证同一份 releases 可同时传给 get_app_permission_risks 和 get_least_privileges"""
+        """验证同一份 releases 可同时传给 get_app_permission_risks 和 get_least_privileges_by_server"""
         rv = self._make_resource_version_with_data(
             fake_gateway,
             [
@@ -1318,11 +1330,11 @@ class TestMCPServerHandler:
 
         releases = MCPServerHandler._get_releases_for_mcp_servers([mcp_server])
         risks = MCPServerHandler.get_app_permission_risks([mcp_server], releases=releases)
-        privileges = MCPServerHandler.get_least_privileges([mcp_server], releases=releases)
+        privileges = MCPServerHandler.get_least_privileges_by_server([mcp_server], releases=releases)
 
         assert mcp_server.id in risks
         assert "tool_a" in risks[mcp_server.id]
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert privileges[key] == MCPServerLeastPrivilegeEnum.APPLICATION_AND_USER.value
 
     # ========== validate_access 测试 ==========
@@ -1470,6 +1482,30 @@ class TestMCPServerHandler:
 
         with pytest.raises(Exception):
             MCPServerHandler.validate_access(mcp_server, check_public=True)
+
+    @pytest.mark.parametrize(("protocol_type", "url_suffix"), [("sse", "sse/"), ("streamable_http", "mcp/")])
+    @pytest.mark.parametrize(
+        ("public_enabled", "personal_enabled"), [(False, False), (False, True), (True, False), (True, True)]
+    )
+    @pytest.mark.parametrize("least_privilege", ["application", "application_and_user", ""])
+    def test_get_mcp_server_url(
+        self, settings, protocol_type, url_suffix, public_enabled, personal_enabled, least_privilege
+    ):
+        """OAuth2-enabled servers must use an endpoint that supports their authentication mode."""
+        settings.BK_API_URL_TMPL = "http://example.com/{api_name}"
+        server = MCPServer(
+            name="test-mcp",
+            protocol_type=protocol_type,
+            oauth2_public_client_enabled=public_enabled,
+            oauth2_personal_client_enabled=personal_enabled,
+        )
+        suffix = url_suffix
+        if not public_enabled and not personal_enabled and least_privilege == "application":
+            suffix = f"application/{url_suffix}"
+
+        assert MCPServerHandler.get_mcp_server_url(server, least_privilege) == (
+            f"http://example.com/bk-apigateway/prod/api/v2/mcp-servers/test-mcp/{suffix}"
+        )
 
     # ========== build_guideline 测试 ==========
 
@@ -1672,6 +1708,90 @@ class TestMCPServerHandler:
 
         assert result.count() == 0
 
+    def test_apply_category_filter_uncategorized(self, fake_gateway, fake_stage):
+        """未分类匹配没有任何启用常规分类的 MCPServer"""
+        MCPServerCategory.objects.all().delete()
+
+        official_cat = G(MCPServerCategory, name=OFFICIAL_MCP_CATEGORY_NAME, is_active=True)
+        uncategorized_cat = G(MCPServerCategory, name=UNCATEGORIZED_MCP_CATEGORY_NAME, is_active=True)
+        devops_cat = G(MCPServerCategory, name="DevOps", is_active=True)
+        inactive_cat = G(MCPServerCategory, name="InactiveCat", is_active=False)
+
+        server_none = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+
+        server_official_only = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_official_only.categories.add(official_cat)
+
+        server_inactive_only = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_inactive_only.categories.add(inactive_cat)
+
+        server_uncategorized = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_uncategorized.categories.add(uncategorized_cat)
+
+        # 显式关联未分类但同时属于常规分类，不算未分类
+        server_uncategorized_devops = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_uncategorized_devops.categories.add(uncategorized_cat, devops_cat)
+
+        server_devops = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_devops.categories.add(devops_cat)
+
+        queryset = MCPServer.objects.filter(gateway=fake_gateway)
+        uncategorized_ids = {
+            server_none.id,
+            server_official_only.id,
+            server_inactive_only.id,
+            server_uncategorized.id,
+        }
+
+        result = MCPServerHandler.apply_category_filter(queryset, [UNCATEGORIZED_MCP_CATEGORY_NAME])
+        assert set(result.values_list("id", flat=True)) == uncategorized_ids
+
+    def test_apply_category_filter_uncategorized_or_logic(self, fake_gateway, fake_stage):
+        """未分类与常规分类使用 OR 逻辑"""
+        MCPServerCategory.objects.all().delete()
+
+        G(MCPServerCategory, name=UNCATEGORIZED_MCP_CATEGORY_NAME, is_active=True)
+        devops_cat = G(MCPServerCategory, name="DevOps", is_active=True)
+        monitor_cat = G(MCPServerCategory, name="Monitoring", is_active=True)
+
+        server_none = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+
+        server_devops = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_devops.categories.add(devops_cat)
+
+        server_monitor = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_monitor.categories.add(monitor_cat)
+
+        queryset = MCPServer.objects.filter(gateway=fake_gateway)
+        result = MCPServerHandler.apply_category_filter(queryset, [UNCATEGORIZED_MCP_CATEGORY_NAME, "DevOps"])
+
+        result_ids = set(result.values_list("id", flat=True))
+        assert server_none.id in result_ids
+        assert server_devops.id in result_ids
+        assert server_monitor.id not in result_ids
+
+    def test_apply_category_filter_uncategorized_and_logic_with_special(self, fake_gateway, fake_stage):
+        """未分类与 Official 使用 AND 逻辑"""
+        MCPServerCategory.objects.all().delete()
+
+        official_cat = G(MCPServerCategory, name=OFFICIAL_MCP_CATEGORY_NAME, is_active=True)
+        devops_cat = G(MCPServerCategory, name="DevOps", is_active=True)
+
+        server_none = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+
+        server_official_only = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_official_only.categories.add(official_cat)
+
+        server_official_devops = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        server_official_devops.categories.add(official_cat, devops_cat)
+
+        queryset = MCPServer.objects.filter(gateway=fake_gateway)
+        result = MCPServerHandler.apply_category_filter(
+            queryset, [OFFICIAL_MCP_CATEGORY_NAME, UNCATEGORIZED_MCP_CATEGORY_NAME]
+        )
+
+        assert set(result.values_list("id", flat=True)) == {server_official_only.id}
+
     # ========== build_list_queryset 测试 ==========
 
     def test_build_list_queryset_basic(self, fake_gateway, fake_stage):
@@ -1784,6 +1904,39 @@ class TestMCPServerHandler:
         result_ids = set(result.values_list("id", flat=True))
         assert server_with_cat.id in result_ids
         assert server_no_cat.id not in result_ids
+
+    def test_build_list_queryset_with_category_uncategorized(self, fake_gateway, fake_stage):
+        """单分类筛选 Uncategorized 时按未分类语义匹配，而非显式关联"""
+        MCPServerCategory.objects.all().delete()
+
+        fake_gateway.status = GatewayStatusEnum.ACTIVE.value
+        fake_gateway.save()
+        fake_stage.status = StageStatusEnum.ACTIVE.value
+        fake_stage.save()
+
+        uncategorized_cat = G(MCPServerCategory, name=UNCATEGORIZED_MCP_CATEGORY_NAME, is_active=True)
+        devops_cat = G(MCPServerCategory, name="DevOps", is_active=True)
+
+        server_no_cat = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+        )
+
+        # 显式关联未分类但同时属于常规分类，不算未分类
+        server_uncategorized_devops = G(
+            MCPServer,
+            gateway=fake_gateway,
+            stage=fake_stage,
+            status=MCPServerStatusEnum.ACTIVE.value,
+        )
+        server_uncategorized_devops.categories.add(uncategorized_cat, devops_cat)
+
+        result = MCPServerHandler.build_list_queryset(category=UNCATEGORIZED_MCP_CATEGORY_NAME)
+        result_ids = set(result.values_list("id", flat=True))
+        assert server_no_cat.id in result_ids
+        assert server_uncategorized_devops.id not in result_ids
 
     def test_build_list_queryset_with_categories(self, fake_gateway, fake_stage):
         """按多个分类过滤"""
@@ -1973,7 +2126,7 @@ class TestMCPServerHandler:
         context = MCPServerHandler.build_list_context([mcp_server], include_least_privileges=True)
 
         assert "least_privileges" in context
-        key = (fake_gateway.id, fake_stage.id)
+        key = mcp_server.id
         assert key in context["least_privileges"]
 
     def test_build_list_context_empty(self, fake_gateway):
@@ -2162,7 +2315,9 @@ class TestMCPServerHandler:
         mock_sync.assert_called_once_with(mcp_server_id)
 
     def test_save_mcp_servers_with_categories(self, fake_gateway, fake_stage):
-        """创建时同步分类"""
+        """官方网关创建时同步特殊分类"""
+        fake_gateway.is_official = True
+        fake_gateway.save()
         MCPServerCategory.objects.get_or_create(name="Official", defaults={"display_name": "官方"})
 
         with (
@@ -2234,21 +2389,42 @@ class TestMCPServerHandler:
     def test_sync_mcp_server_categories_set(self, fake_gateway, fake_stage):
         """设置分类"""
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
-        MCPServerCategory.objects.get_or_create(name="Featured", defaults={"display_name": "精选"})
+        MCPServerCategory.objects.get_or_create(name="DevOps", defaults={"display_name": "运维"})
 
-        MCPServerHandler._sync_mcp_server_categories(mcp_server, ["Featured"])
+        MCPServerHandler._sync_mcp_server_categories(mcp_server, ["DevOps"])
 
-        assert list(mcp_server.categories.values_list("name", flat=True)) == ["Featured"]
+        assert list(mcp_server.categories.values_list("name", flat=True)) == ["DevOps"]
 
     def test_sync_mcp_server_categories_clear(self, fake_gateway, fake_stage):
         """传空列表清除分类"""
         mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
-        cat, _ = MCPServerCategory.objects.get_or_create(name="Official", defaults={"display_name": "官方"})
+        cat, _ = MCPServerCategory.objects.get_or_create(name="DevOps", defaults={"display_name": "运维"})
         mcp_server.categories.add(cat)
 
         MCPServerHandler._sync_mcp_server_categories(mcp_server, [])
 
         assert mcp_server.categories.count() == 0
+
+    @pytest.mark.parametrize(
+        "is_official, category_names, expected",
+        [
+            (False, ["Official", "DevOps"], {"DevOps"}),
+            (False, [], set()),
+            (True, ["Official", "DevOps"], {"Official", "DevOps"}),
+        ],
+    )
+    def test_sync_mcp_server_categories_special(self, fake_gateway, fake_stage, is_official, category_names, expected):
+        """非官方网关传入的特殊分类被忽略，已绑定的特殊分类按声明同步移除；官方网关按声明写入"""
+        fake_gateway.is_official = is_official
+        fake_gateway.save()
+        mcp_server = G(MCPServer, gateway=fake_gateway, stage=fake_stage)
+        for name in ["Official", "Featured", "DevOps"]:
+            MCPServerCategory.objects.get_or_create(name=name, defaults={"display_name": name})
+        mcp_server.categories.add(MCPServerCategory.objects.get(name="Featured"))
+
+        MCPServerHandler._sync_mcp_server_categories(mcp_server, category_names)
+
+        assert set(mcp_server.categories.values_list("name", flat=True)) == expected
 
     def test_sync_mcp_server_categories_none_noop(self, fake_gateway, fake_stage):
         """传 None 不操作"""

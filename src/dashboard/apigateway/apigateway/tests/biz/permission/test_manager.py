@@ -37,6 +37,7 @@ from apigateway.biz.permission import (
     PermissionDimensionManager,
     ResourcePermissionDimensionManager,
 )
+from apigateway.common.error_codes import APIError
 from apigateway.core.models import Resource
 
 pytestmark = pytest.mark.django_db
@@ -53,6 +54,65 @@ class TestPermissionDimensionManager:
     def test_get_manager(self, grant_dimension, expected):
         manager = PermissionDimensionManager.get_manager(grant_dimension)
         assert isinstance(manager, expected)
+
+    def test_apply_permission_creates_record_and_schedules_mail(self, mocker, fake_gateway):
+        manager = ResourcePermissionDimensionManager()
+        mocker.patch.object(manager, "allow_apply_permission", return_value=(True, ""))
+        record = mock.Mock(id=1, itsm_ticket_id="")
+        create_apply_record = mocker.patch.object(manager, "create_apply_record", return_value=record)
+        apply_async_on_commit = mocker.patch("apigateway.biz.permission.manager.apply_async_on_commit")
+
+        result = manager.apply_permission(
+            bk_app_code="test-app",
+            gateway=fake_gateway,
+            resource_ids=[1],
+            grant_dimension=GrantDimensionEnum.RESOURCE.value,
+            reason="reason",
+            expire_days=180,
+            username="admin",
+        )
+
+        assert result is record
+        create_apply_record.assert_called_once()
+        apply_async_on_commit.assert_called_once()
+
+    def test_apply_permission_does_not_send_mail_when_itsm_ticket_exists(self, mocker, fake_gateway):
+        manager = ResourcePermissionDimensionManager()
+        mocker.patch.object(manager, "allow_apply_permission", return_value=(True, ""))
+        record = mock.Mock(id=1, itsm_ticket_id="ticket-1")
+        mocker.patch.object(manager, "create_apply_record", return_value=record)
+        apply_async_on_commit = mocker.patch("apigateway.biz.permission.manager.apply_async_on_commit")
+
+        result = manager.apply_permission(
+            bk_app_code="test-app",
+            gateway=fake_gateway,
+            resource_ids=[1],
+            grant_dimension=GrantDimensionEnum.RESOURCE.value,
+            reason="reason",
+            expire_days=180,
+            username="admin",
+        )
+
+        assert result is record
+        apply_async_on_commit.assert_not_called()
+
+    def test_apply_permission_rejects_conflict(self, mocker, fake_gateway):
+        manager = ResourcePermissionDimensionManager()
+        mocker.patch.object(manager, "allow_apply_permission", return_value=(False, "conflict"))
+        create_apply_record = mocker.patch.object(manager, "create_apply_record")
+
+        with pytest.raises(APIError):
+            manager.apply_permission(
+                bk_app_code="test-app",
+                gateway=fake_gateway,
+                resource_ids=[1],
+                grant_dimension=GrantDimensionEnum.RESOURCE.value,
+                reason="reason",
+                expire_days=180,
+                username="admin",
+            )
+
+        create_apply_record.assert_not_called()
 
 
 class TestGatewayPermissionDimensionManager:
@@ -523,7 +583,7 @@ class TestPermissionDimensionManagerItsmIntegration:
         assert helper.create_permission_apply_ticket.call_args.kwargs["callback_token"] == "cb-token-001"
         assert helper.create_permission_apply_ticket.call_args.kwargs["apply_reason"] == "reason"
 
-    def test_create_apply_record_with_itsm_ticket_prefers_operators(
+    def test_create_apply_record_with_itsm_ticket_includes_permission_approvers(
         self, settings, mocker, fake_gateway, fake_resource
     ):
         settings.ENABLE_ITSM4_PERMISSION_APPLY = True
@@ -550,7 +610,7 @@ class TestPermissionDimensionManagerItsmIntegration:
             "admin",
         )
 
-        assert helper.create_permission_apply_ticket.call_args.kwargs["approvers"] == ["operator"]
+        assert helper.create_permission_apply_ticket.call_args.kwargs["approvers"] == ["admin", "operator"]
 
     def test_create_apply_record_with_itsm_ticket_fallback_applicant(
         self, settings, mocker, fake_gateway, fake_resource
@@ -581,7 +641,8 @@ class TestPermissionDimensionManagerItsmIntegration:
         get_app_maintainers.assert_called_once_with("test-app")
         assert helper.create_permission_apply_ticket.call_args.kwargs["applied_by"] == "app-owner"
 
-    def test_create_apply_record_with_itsm_not_ready(self, settings, mocker, fake_gateway, fake_resource):
+    def test_create_apply_record_with_itsm_not_ready(self, settings, mocker, fake_gateway, fake_resource, caplog):
+        caplog.set_level("WARNING", logger="apigateway.biz.permission.manager")
         settings.ENABLE_ITSM4_PERMISSION_APPLY = True
 
         helper = mocker.MagicMock()
@@ -602,9 +663,11 @@ class TestPermissionDimensionManagerItsmIntegration:
         record.refresh_from_db()
         assert record.itsm_ticket_id == ""
         helper.create_permission_apply_ticket.assert_not_called()
+        assert "Skip creating ITSM ticket for permission apply" in caplog.text
+        assert f"record_id={record.id}, gateway_id={fake_gateway.id}, bk_app_code=test-app" in caplog.text
 
     def test_create_apply_record_persists_callback_token_before_ticket_id(
-        self, settings, mocker, fake_gateway, fake_resource
+        self, settings, mocker, fake_gateway, fake_resource, caplog
     ):
         settings.ENABLE_ITSM4_PERMISSION_APPLY = True
 
@@ -632,3 +695,5 @@ class TestPermissionDimensionManagerItsmIntegration:
         assert record.itsm_ticket_id == ""
         assert apply.itsm_ticket_id == ""
         assert apply.itsm_callback_token == "cb-token-001"
+        assert f"record_id={record.id}, gateway_id={fake_gateway.id}, bk_app_code=test-app" in caplog.text
+        assert "cb-token-001" not in caplog.text

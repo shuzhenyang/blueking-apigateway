@@ -28,7 +28,7 @@
         <div class="approval-detail-slider">
           <div class="item">
             <div class="key">
-              {{ t("蓝鲸应用ID：") }}
+              {{ t("蓝鲸应用 ID：") }}
             </div>
             <div class="value">
               {{ approvalDetail?.bk_app_code }}
@@ -143,8 +143,8 @@
 import { t } from '@/locales';
 import { useFeatureFlag } from '@/stores';
 import { APPROVAL_HISTORY_STATUS_MAP, APPROVAL_STATUS_MAP } from '@/enums';
-import type { IMCPServerAppPermissionApplyListOutput } from '@/services/types/responses/gateways.ts';
-import type { IPersonalWorkbenchListResponse } from '@/services/types/responses/personal-workbench.ts';
+import type { IMCPServerAppPermissionApplyListOutput } from '@/services/types/gateway/mcp-server/permission.ts';
+import type { IPersonalWorkbenchListResponse } from '@/services/types/me/workbench.ts';
 
 type IMaybeApproval
   = | Partial<IPersonalWorkbenchListResponse>

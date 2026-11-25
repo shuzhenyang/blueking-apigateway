@@ -95,7 +95,7 @@
                           />
                         </div>
                         <div class="icon-wrapper">
-                          <CopyButton
+                          <AgCopyButton
                             class="mr-8px"
                             :source="stageDetail.repo_info.repo_url"
                           />
@@ -221,15 +221,12 @@
 
 <script lang="ts" setup>
 import dayjs from 'dayjs';
-import {
-  type IStageListItem,
-  getStageList,
-} from '@/services/source/stage';
+import type { IStageListItem } from '@/types/stage';
 import {
   deployReleases,
   getProgrammableStageDetail,
   getStageNextVersion,
-} from '@/services/source/programmable';
+} from '@/services/source/gateway/programmable';
 import {
   useRoute,
   useRouter,
@@ -317,7 +314,6 @@ const stageDetail = ref<IPaasInfo>({
 });
 
 const deployId = ref('');
-const stageList = ref<IStageListItem[]>([]);
 const semVerType = ref('minor');
 const currentCommitInfo = ref<ICommitInfo>({
   commit_id: '',
@@ -364,7 +360,6 @@ watch(isShow, async (val: boolean) => {
   if (val) {
     try {
       isLoading.value = true;
-      await fetchStageList();
       stageDetail.value = await getProgrammableStageDetail(apigwId.value, currentStage?.id as number);
       const { version } = await getVersion();
       formData.value.version = version;
@@ -394,10 +389,6 @@ watch(isShow, async (val: boolean) => {
 watchEffect(() => {
   localStage.value = cloneDeep(currentStage);
 });
-
-const fetchStageList = async () => {
-  stageList.value = await getStageList(apigwId.value);
-};
 
 const showPublishDia = () => {
   usePopInfoBox({

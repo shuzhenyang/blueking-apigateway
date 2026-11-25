@@ -55,7 +55,11 @@ class AppliedTimeRangeFilterMixin(TimeRangeFilterMixin):
 
 class KeywordFilterMixin:
     def keyword_filter(self, queryset, name, value):
-        return queryset.filter(Q(bk_app_code__icontains=value) | Q(gateway__name__icontains=value))
+        return queryset.filter(
+            Q(bk_app_code__icontains=value)
+            | Q(gateway__name__icontains=value)
+            | Q(gateway__display_name__icontains=value)
+        )
 
 
 class MCPKeywordFilterMixin:
@@ -65,32 +69,6 @@ class MCPKeywordFilterMixin:
             | Q(mcp_server__name__icontains=value)
             | Q(mcp_server__title__icontains=value)
         )
-
-
-class WorkbenchGatewayPermissionApplyFilter(CreatedTimeRangeFilterMixin, KeywordFilterMixin, filters.FilterSet):
-    """个人工作台 - API 网关权限申请筛选器"""
-
-    bk_app_code = filters.CharFilter(lookup_expr="icontains")
-    applied_by = filters.CharFilter(lookup_expr="icontains")
-    gateway_id = filters.NumberFilter(field_name="gateway_id")
-    grant_dimension = filters.ChoiceFilter(choices=GrantDimensionEnum.get_choices())
-    status = filters.ChoiceFilter(choices=ApplyStatusEnum.get_choices())
-    time_start = filters.NumberFilter(method="filter_created_time_start")
-    time_end = filters.NumberFilter(method="filter_created_time_end")
-    keyword = filters.CharFilter(method="keyword_filter")
-
-    class Meta:
-        model = AppPermissionApply
-        fields = [
-            "bk_app_code",
-            "applied_by",
-            "gateway_id",
-            "grant_dimension",
-            "status",
-            "time_start",
-            "time_end",
-            "keyword",
-        ]
 
 
 class WorkbenchGatewayPendingPermissionApplyFilter(CreatedTimeRangeFilterMixin, KeywordFilterMixin, filters.FilterSet):

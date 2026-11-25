@@ -83,8 +83,8 @@ class ItsmApprovalTask(BaseModel):
     USER_OPERATOR_TYPE: ClassVar[str] = "user"
 
     status: str = ""
-    operator: str = ""
-    operator_type: str = ""
+    operator: Optional[str] = None
+    operator_type: Optional[str] = None
 
 
 class ItsmApprovalTaskList(BaseModel):
@@ -104,7 +104,7 @@ class ItsmApprovalTaskList(BaseModel):
         if last_approved.operator_type != ItsmApprovalTask.USER_OPERATOR_TYPE:
             return ""
 
-        return last_approved.operator.strip()
+        return (last_approved.operator or "").strip()
 
 
 def _call_bkitsm_api(
@@ -293,6 +293,36 @@ def create_ticket(
         more_headers=more_headers,
         timeout=settings.BK_ITSM4_API_TIMEOUT,
     )
+
+
+def cancel_ticket(
+    system_id: str,
+    ticket_id: str,
+    system_token: str = "",
+) -> bool:
+    """
+    撤销 ITSM 工单
+
+    调用接口: tickets_revoked (POST)
+    路径: /api/v1/tickets/revoked/
+    """
+    more_headers = {}
+    if system_token:
+        more_headers["SYSTEM-TOKEN"] = system_token
+    elif settings.BK_ITSM4_SYSTEM_TOKEN:
+        more_headers["SYSTEM-TOKEN"] = settings.BK_ITSM4_SYSTEM_TOKEN
+
+    resp = _call_bkitsm_api(
+        http_post,
+        "/api/v1/tickets/revoked/",
+        {
+            "system_id": system_id,
+            "ticket_id": ticket_id,
+        },
+        more_headers=more_headers,
+        timeout=settings.BK_ITSM4_API_TIMEOUT,
+    )
+    return bool(resp and resp.get("result"))
 
 
 def list_approval_tasks(ticket_id: str) -> ItsmApprovalTaskList:

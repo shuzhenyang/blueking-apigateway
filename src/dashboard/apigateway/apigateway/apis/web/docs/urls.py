@@ -23,14 +23,18 @@ urlpatterns = [
     path("sdks/", include("apigateway.apis.web.docs.gateway.sdk.urls")),
     # 网关
     path("gateways/", include("apigateway.apis.web.docs.gateway.gateway.urls")),
+    path(
+        "gateways/<slug:gateway_name>/permissions/",
+        include("apigateway.apis.web.docs.gateway.permission.urls"),
+    ),
     path("gateways/<slug:gateway_name>/resources/", include("apigateway.apis.web.docs.gateway.resource.urls")),
     path("gateways/<slug:gateway_name>/stages/", include("apigateway.apis.web.docs.gateway.stage.urls")),
     path("gateways/<slug:gateway_name>/sdks/", include("apigateway.apis.web.docs.gateway.gateway_sdk.urls")),
 ]
 
 
-# 非多租户模式才会有 esb 相关的接口
-if not settings.ENABLE_MULTI_TENANT_MODE:
+# 仅启用 ESB 时注册相关接口
+if settings.ESB_ENABLED:
     urlpatterns += [
         # esb
         path("esb/boards/<slug:board>/systems/", include("apigateway.apis.web.docs.esb.system.urls")),

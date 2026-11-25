@@ -17,8 +17,10 @@
  */
 
 <template>
-  <div class="docs-main">
-    <!--  顶部 网关 / 组件 Tab  -->
+  <div
+    class="docs-main"
+    :class="{ 'has-page-tabs': !featureFlagStore.isTenantMode }"
+  >
     <header
       v-if="!featureFlagStore.isTenantMode"
       class="page-tabs"
@@ -40,47 +42,36 @@
         </section>
       </nav>
     </header>
-    <!--  正文  -->
-    <main
-      :class="[{ 'pt-24px': featureFlagStore.isTenantMode}, routerViewWrapperClass]"
-      class="docs-main-content"
-    >
+    <div class="docs-container">
+      <header
+        v-if="curTab === 'gateway'"
+        class="title-container"
+      >
+        <BkInput
+          v-model="filterData.keyword"
+          class="flex-grow-1"
+          type="search"
+          :placeholder="t('请输入网关展示名、ID 或描述')"
+          clearable
+        />
+        <div class="plugin-filter">
+          <BkCheckbox v-model="filterData.show_plugin_gateway">
+            {{ t('展示插件网关') }}
+          </BkCheckbox>
+        </div>
+      </header>
       <!--  当选中 网关API文档 时  -->
       <div
         v-if="curTab === 'gateway'"
         class="content-of-apigw"
       >
-        <!--  搜索栏和 SDK使用说明  -->
-        <header class="flex items-center justify-between mb-16px">
-          <div>
-            <BkCheckbox v-model="filterData.show_plugin_gateway">
-              {{ t('展示插件网关') }}
-            </BkCheckbox>
-          </div>
-          <div>
-            <BkInput
-              v-model="filterData.keyword"
-              type="search"
-              :placeholder="t('请输入网关名称或描述')"
-              clearable
-              style="width: 400px"
-            />
-            <BkLink
-              theme="primary"
-              class="text-12px ml-24px"
-              @click.prevent="isSdkInstructionSliderShow = true"
-            >
-              <AgIcon name="document" />
-              {{ t('SDK 使用说明') }}
-            </BkLink>
-          </div>
-        </header>
-        <!--  网关列表  -->
         <main class="docs-list">
           <AgTable
             ref="tableRef"
+            cache-identifier="ApiDocs"
             show-settings
             resizable
+            default-row-size="large"
             :api-method="getTableData"
             :columns="columns"
             @clear-filter="handleClearFilterKey"
@@ -173,7 +164,7 @@
           </article>
         </main>
         <!--  右侧导航目录  -->
-        <BkAffix :offset-top="128">
+        <BkAffix :offset-top="152">
           <aside class="component-nav-list">
             <BkCollapse
               v-model="navPanelNamesList"
@@ -218,7 +209,7 @@
           </aside>
         </BkAffix>
       </div>
-    </main>
+    </div>
     <!--  SDK使用说明 Slider  -->
     <SDKInstructionSlider v-model="isSdkInstructionSliderShow" />
     <!--  网关/组件 SDK 地址 dialog  -->
@@ -227,35 +218,39 @@
       :sdks="curSdks"
       :languages="curTab === 'component' ? ['python'] : undefined"
       :target-name="curTargetName"
-      :maintainers="curTargetMaintainers"
+      :board="curSdkBoard"
     />
   </div>
 </template>
 
 <script lang="tsx" setup>
-import {
-  getComponentSystemList,
-  getESBSDKList,
-} from '@/services/source/docs-esb';
-import { getGatewaysDocs } from '@/services/source/docs';
+import { getComponentSystemList, getESBSDKList } from '@/services/source/docs/esb';
+import { getDocsGatewayList } from '@/services/source/docs/gateway';
 import SDKInstructionSlider from './components/SDKInstructionSlider.vue';
 import SDKDetailDialog from './components/SDKDetailDialog.vue';
 import ComponentSearcher from './components/ComponentSearcher.vue';
 import type {
-  IApiGatewayBasics,
-  IBoard,
-  ICategory,
-  IComponentSdk,
-  ISdk,
-  ISystem,
-  TabType,
-} from './types.d.ts';
+  IDocsEsbBoardsSdksListResponse,
+  IDocsEsbBoardsSystemsListResponse,
+  ISystemCategorySLZ,
+  ISystemSLZ,
+} from '@/services/types/docs/esb.ts';
+import type { IDocsGatewaysListResponse } from '@/services/types/docs/gateway.ts';
+import type { ISdkItem } from './components/DocSdkSection.vue';
+import { type DocTab, docTabKey } from './utils/doc-context';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
 import { useTemplateRefsList } from '@vueuse/core';
 import { TENANT_MODE_TEXT_MAP } from '@/enums';
 import { useFeatureFlag } from '@/stores';
-import type { PrimaryTableProps } from '@blueking/tdesign-ui';
-import AgTable from '@/components/ag-table/Index.vue';
+import AgTable, { type IAgTableInstance, type ITableColumn } from '@/components/base/ag-table';
+import { getGatewayDisplayName, getGatewayFullName, hasDistinctDisplayName } from '@/utils/gateway-name';
+
+interface ICategory extends ISystemCategorySLZ { _navId: string }
+
+interface IBoard extends IDocsEsbBoardsSystemsListResponse {
+  categories: ICategory[]
+  sdk?: IDocsEsbBoardsSdksListResponse & { language: string }
+}
 
 const { t } = useI18n();
 const route = useRoute();
@@ -267,12 +262,13 @@ const filterData = ref({
   show_plugin_gateway: false,
 });
 
-const tableRef = ref();
+const tableRef = useTemplateRef<IAgTableInstance<IDocsGatewaysListResponse>>('tableRef');
+
 // 组件分类模板引用列表
 const categoryRefs = useTemplateRefsList<HTMLElement>();
 
 // 当前展示的是 网关 | 组件 相关内容
-const curTab = ref<TabType>('gateway');
+const curTab = ref<DocTab>('gateway');
 const curTargetName = ref('');
 const board = ref('default');
 const curCategoryNavId = ref('');
@@ -280,55 +276,70 @@ const navPanelNamesList = ref<string[]>([]);
 const isSdkInstructionSliderShow = ref(false);
 const isSdkDetailDialogShow = ref(false);
 const componentSystemList = ref<IBoard[]>([]); // 组件系统列表
-const curSdks = ref<ISdk[]>([]);
-const curTargetMaintainers = ref<string[]>([]);
+const curSdks = ref<ISdkItem[]>([]);
+const curSdkBoard = ref('default');
 
 // 提供当前 tab 的值
-// 注入时请使用：const curTab = inject<Ref<TabType>>('curTab');
-provide('curTab', curTab);
+provide(docTabKey, curTab);
 
-const columns = computed<PrimaryTableProps['columns']>(() => [
+const columns = computed<ITableColumn<IDocsGatewaysListResponse>[]>(() => [
   {
     colKey: 'name',
-    title: t('网关名称'),
-    width: 200,
-    cell: (h: any, { row }: any) => {
+    title: t('网关'),
+    width: 280,
+    cell: (_h, { row }) => {
       if (!row?.name) {
         return '--';
       }
+      const gatewayIconConfig = row.kind === 2
+        ? { name: 'apiwendang-ai',
+          color: '#6228FF',
+          bgColor: 'rgba(98, 40, 255, 0.12)' }
+        : row.kind === 1
+          ? { name: 'apiwendang-biancheng',
+            color: '#0E3377',
+            bgColor: 'rgba(14, 51, 119, 0.12)' }
+          : { name: 'apiwendang-wangguan',
+            color: '#3A84FF',
+            bgColor: 'rgba(58, 132, 255, 0.12)' };
+
       return (
         <div class="flex-row items-center">
           <div
+            class="flex items-center justify-center rounded-4px w-32px h-32px mr-8px"
+            style={{ backgroundColor: gatewayIconConfig.bgColor }}
+          >
+            <ag-icon
+              svg
+              name={gatewayIconConfig.name}
+              size="32"
+              color={gatewayIconConfig.color}
+            />
+          </div>
+          <div
             v-bk-tooltips={{
-              content: row.name,
+              content: getGatewayFullName(row),
               placement: 'top',
               disabled: !row.isOverflow,
               extCls: 'max-w-480px',
             }}
-            class="truncate color-#3a84ff cursor-pointer mr-4px"
+            class="min-w-0 cursor-pointer mr-4px"
             onMouseenter={(e: MouseEvent) => tableRef.value?.handleCellEnter({
               e,
               row,
             })}
-            onMouseleave={(e: MouseEvent) => tableRef.value?.handleCellLeave({
-              e,
-              row,
-            })}
-            onClick={() => gotoDetails(row as IApiGatewayBasics)}
+            onMouseleave={() => tableRef.value?.handleCellLeave({ row })}
+            onClick={() => gotoDetails(row)}
           >
-            { row.name }
+            <div class="truncate color-#3a84ff font-bold">
+              { getGatewayDisplayName(row) }
+            </div>
+            {
+              hasDistinctDisplayName(row)
+                ? <div class="truncate text-12px color-#979ba5 font-normal">{ row.name }</div>
+                : ''
+            }
           </div>
-          {
-            row.kind === 2
-              ? (
-                <ag-icon
-                  name={row.kind === 1 ? 'square-program' : 'AIwangguan'}
-                  size="16"
-                  class="ml-4px color-#3a84ff"
-                />
-              )
-              : ''
-          }
           {
             row.is_official
               ? (
@@ -343,7 +354,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
               ? (
                 <bk-tag
                   v-bk-tooltips={{
-                    content: row.deprecated_note,
+                    content: row.deprecated_note ?? '',
                     placement: 'top',
                     disabled: !row.deprecated_note,
                     extCls: 'max-w-200px',
@@ -366,23 +377,22 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
         title: t('租户模式'),
         width: 120,
         ellipsis: true,
-        cell: (h: any, { row }: any) => <span>{ TENANT_MODE_TEXT_MAP[row.tenant_mode as string] || '--' }</span>,
+        cell: (_h, { row }) => <span>{ TENANT_MODE_TEXT_MAP[row.tenant_mode || ''] || '--' }</span>,
       },
       {
         colKey: 'tenant_id',
         title: t('租户 ID'),
         width: 120,
         ellipsis: true,
-        cell: (h: any, { row }: any) => <span>{ row.tenant_id || '--' }</span>,
+        cell: (_h, { row }) => <span>{ row.tenant_id || '--' }</span>,
       },
-    ]
+    ] satisfies ITableColumn<IDocsGatewaysListResponse>[]
     : []),
   {
     colKey: 'description',
     title: t('网关描述'),
     ellipsis: true,
-    cell: (h: any, { row }: any) =>
-      <span>{ row.description || '--' }</span>,
+    cell: (_h, { row }) => <span>{ row.description || '--' }</span>,
   },
   ...(!featureFlagStore.isTenantMode
     ? [
@@ -390,7 +400,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
         colKey: 'maintainers',
         title: t('网关负责人'),
         width: 180,
-        cell: (h: any, { row }: any) => (
+        cell: (_h, { row }) => (
           row.maintainers?.length
             ? (
               <div
@@ -405,10 +415,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
                   e,
                   row,
                 })}
-                onMouseleave={(e: any) => tableRef.value?.handleCellLeave({
-                  e,
-                  row,
-                })}
+                onMouseleave={() => tableRef.value?.handleCellLeave({ row })}
               >
                 {
                   !featureFlagStore.isEnableDisplayName
@@ -420,10 +427,8 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
                     : (
                       <span>
                         {
-                          row.maintainers.map((maintainer: any, index: number) => (
-                            <span
-                              key={maintainer.login_name}
-                            >
+                          row.maintainers.map((maintainer, index) => (
+                            <span key={`${row.id}-${maintainer}`}>
                               <bk-user-display-name userId={maintainer} />
                               {
                                 index !== (row.maintainers.length - 1)
@@ -439,35 +444,36 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
               </div>
             )
             : '--'
-
         ),
       },
-    ]
+    ] satisfies ITableColumn<IDocsGatewaysListResponse>[]
     : []),
   {
     colKey: 'is_plugin_gateway',
-    displayTitle: t('是否为插件网关'),
-    width: 180,
+    displayTitle: t('插件网关'),
+    width: 100,
     title: () => {
       return (
         <div
           v-bk-tooltips={{ content: t('由蓝鲸应用插件自动创建的网关') }}
           class="underline decoration-dashed underline-offset-4"
         >
-          {t('是否为插件网关')}
+          {t('插件网关')}
         </div>
       );
     },
-    cell: (h: any, { row }: any) => (
-      row.is_plugin_gateway ? t('是') : t('否')
+    cell: (_h, { row }) => (
+      <span class={row.is_plugin_gateway ? undefined : 'color-#c4c6cc'}>
+        {row.is_plugin_gateway ? t('是') : t('否')}
+      </span>
     ),
   },
   {
     colKey: 'actions',
     title: t('操作'),
-    width: 120,
+    width: 100,
     fixed: 'right',
-    cell: (h: any, { row }: any) => (
+    cell: (_h, { row }) => (
       <bk-button
         v-bk-tooltips={{
           content: t('SDK未生成，可联系负责人生成SDK'),
@@ -476,7 +482,7 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
         text
         theme="primary"
         disabled={!row.sdks?.length}
-        onClick={() => handleSdkDetailClick(row as IApiGatewayBasics)}
+        onClick={() => handleSdkDetailClick(row)}
       >
         {t('查看 SDK')}
       </bk-button>
@@ -484,21 +490,10 @@ const columns = computed<PrimaryTableProps['columns']>(() => [
   },
 ]);
 
-const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
-
-const routerViewWrapperClass = computed(() => {
-  const initClass = 'default-header-view';
-  const displayBkuiTable = ['ApiDocs'].includes(route.name as string) ? 'need-bkui-table-wrapper' : '';
-  if (isShowNoticeAlert.value) {
-    return `${initClass} show-notice ${displayBkuiTable}`;
-  }
-  return `${initClass} ${displayBkuiTable}`;
-});
-
 watch(
   filterData,
   () => {
-    tableRef.value!.fetchData(filterData.value, { resetPage: true });
+    tableRef.value?.fetchData(filterData.value, { resetPage: true });
   },
   { deep: true },
 );
@@ -506,13 +501,12 @@ watch(
 const getTableData = async (params: {
   offset?: number
   limit?: number
-} = {},
-) => getGatewaysDocs({
+} = {}) => getDocsGatewayList({
   ...params,
   show_plugin_gateway: filterData.value.show_plugin_gateway,
 });
 
-const gotoDetails = (row: IApiGatewayBasics | ISystem, systemBoard?: string) => {
+const gotoDetails = (row: IDocsGatewaysListResponse | ISystemSLZ, systemBoard?: string) => {
   const params = {
     targetName: row.name,
     curTab: curTab.value,
@@ -529,30 +523,32 @@ const gotoDetails = (row: IApiGatewayBasics | ISystem, systemBoard?: string) => 
 };
 
 const handleClearFilterKey = () => {
-  filterData.value = Object.assign(filterData.value, {
+  filterData.value = {
     keyword: '',
     show_plugin_gateway: false,
-  });
+  };
 };
 
 const fetchComponentSystemList = async () => {
   try {
-    const systemList = await getComponentSystemList(board.value) as IBoard[];
+    const systemList = await getComponentSystemList(board.value);
     // esb 的 sdk 语言，目前只有 python
     const language = 'python';
-    const sdkResponse = await getESBSDKList(board.value, { language }) as IComponentSdk[];
-    const sdkList = sdkResponse || [];
-    sdkList.forEach((sdk) => {
-      sdk.language = language;
-    });
+    const sdkResponse = await getESBSDKList(board.value, { language });
+    const sdkList = (sdkResponse || []).map(sdk => ({
+      ...sdk,
+      language,
+    }));
     systemList.forEach((system) => {
-      // 给组件分类添加一个跳转用的 _navId
-      system.categories.forEach((category) => {
-        category._navId = `${system.board}-${category.id}`;
+      // 分类导航 ID 和 SDK 是页面展示数据，不属于接口响应。
+      componentSystemList.value.push({
+        ...system,
+        categories: system.categories.map(category => ({
+          ...category,
+          _navId: `${system.board}-${category.id}`,
+        })),
+        sdk: sdkList.find(sdk => sdk.board_label === system.board_label),
       });
-      // 找到组件的 sdk
-      system.sdk = sdkList.find(sdk => sdk.board_label === system.board_label);
-      componentSystemList.value.push(system);
       navPanelNamesList.value.push(system.board);
     });
   }
@@ -570,17 +566,17 @@ const handleNavClick = (cat: ICategory) => {
   }
 };
 
-const handleSdkDetailClick = (row: IApiGatewayBasics) => {
+const handleSdkDetailClick = (row: IDocsGatewaysListResponse) => {
   curTargetName.value = row.name;
   curSdks.value = row.sdks ?? [];
+  curSdkBoard.value = 'default';
   isSdkDetailDialogShow.value = true;
-  curTargetMaintainers.value = row.maintainers || [];
 };
 
 const handleESBSdkDetailClick = (board: IBoard) => {
   curTargetName.value = board.sdk?.board_label ?? '';
   curSdks.value = board.sdk ? [board.sdk] : [];
-  curTargetMaintainers.value = [];
+  curSdkBoard.value = board.board;
   isSdkDetailDialogShow.value = true;
 };
 
@@ -597,7 +593,7 @@ onBeforeMount(() => {
     return;
   }
   // 记录返回到此页时选中的 tab
-  curTab.value = params.curTab as TabType || 'gateway';
+  curTab.value = params.curTab === 'component' ? 'component' : 'gateway';
 });
 
 onMounted(async () => {
@@ -606,21 +602,21 @@ onMounted(async () => {
     await fetchComponentSystemList();
   }
 });
-
 </script>
 
 <style lang="scss" scoped>
 $primary-color: #3a84ff;
 
 .docs-main {
+  min-height: calc(100vh - 52px);
+  background: #f5f7fa;
 
   .page-tabs {
     position: sticky;
     top: 0;
-    z-index: 2;
+    z-index: 10;
     display: flex;
     height: 52px;
-    margin-bottom: 24px;
     background: #fff;
     box-shadow: 0 3px 4px 0 #0000000a;
     justify-content: center;
@@ -652,268 +648,313 @@ $primary-color: #3a84ff;
     }
   }
 
-  .docs-main-content {
-    width: 1280px;
-    margin: auto;
+  .docs-container {
+    width: 80%;
+    min-width: 1200px;
+    padding-bottom: 24px;
+    margin: 0 auto;
+  }
 
-    .content-of-component {
-      display: flex;
-      padding-bottom: 12px;
+  .title-container {
+    position: sticky;
+    top: 0;
+    z-index: 9;
+    display: flex;
+    width: 100%;
+    padding: 24px 0 16px;
+    background-color: #f5f7fa;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
 
-      .category-list {
-        width: 1000px;
-        height: calc(100vh - 128px);
-        overflow-y: scroll;
+  &.has-page-tabs {
 
-        &::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
+    .title-container {
+      top: 52px;
+    }
+  }
 
-        &::-webkit-scrollbar-thumb {
-          background-color: #dcdee5;
-          border-radius: 3px;
-        }
+  .plugin-filter {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    line-height: 20px;
+    color: #63656e;
+    white-space: nowrap;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #c4c6cc;
+    border-radius: 2px;
 
-        &::-webkit-scrollbar-track {
-          background-color: transparent;
-          border-radius: 3px;
-        }
+    &:hover {
+      border-color: #979ba5;
+    }
 
-        .category-wrap {
-          margin-bottom: 4px;
+    &:has(.is-checked) {
+      color: #3a84ff;
+      background: #f0f5ff;
+      border-color: #3a84ff;
 
-          .top-bar {
+      :deep(.bk-checkbox-label) {
+        color: #3a84ff;
+      }
+    }
+
+    :deep(.bk-checkbox) {
+      display: inline-flex;
+      align-items: center;
+      margin: 0;
+      font-size: 12px;
+      line-height: 20px;
+    }
+
+    :deep(.bk-checkbox-label) {
+      font-size: 12px;
+      line-height: 20px;
+      color: #63656e;
+    }
+  }
+
+  .content-of-apigw {
+
+    .docs-list {
+      min-height: calc(100vh - 220px);
+    }
+  }
+
+  .content-of-component {
+    display: flex;
+    padding-top: 24px;
+    padding-bottom: 12px;
+
+    .category-list {
+      width: 1000px;
+      height: calc(100vh - 152px);
+      overflow-y: scroll;
+
+      &::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        background-color: #dcdee5;
+        border-radius: 3px;
+      }
+
+      &::-webkit-scrollbar-track {
+        background-color: transparent;
+        border-radius: 3px;
+      }
+
+      .category-wrap {
+        margin-bottom: 4px;
+
+        .top-bar {
+          display: flex;
+          height: 32px;
+          margin-bottom: 16px;
+          justify-content: space-between;
+          align-items: center;
+
+          .bar-title {
             display: flex;
-            height: 32px;
-            margin-bottom: 16px;
-            justify-content: space-between;
             align-items: center;
+            gap: 24px;
 
-            .bar-title {
-              display: flex;
-              align-items: center;
-              gap: 24px;
-
-              .title {
-                font-size: 16px;
-                font-weight: 700;
-                line-height: 24px;
-                letter-spacing: 0;
-                color: #313238;
-              }
-            }
-
-            .bar-aside {
-              display: flex;
-              align-items: center;
-              gap: 12px;
+            .title {
+              font-size: 16px;
+              font-weight: 700;
+              line-height: 24px;
+              letter-spacing: 0;
+              color: #313238;
             }
           }
 
-          .components-wrap {
-            max-height: calc(100vh - 200px);
-            padding-bottom: 16px;
-            overflow-y: auto;
+          .bar-aside {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+          }
+        }
 
-            &::-webkit-scrollbar {
-              width: 6px;
-              height: 6px;
-            }
+        .components-wrap {
+          max-height: calc(100vh - 200px);
+          padding-bottom: 16px;
+          overflow-y: auto;
 
-            &::-webkit-scrollbar-thumb {
-              background-color: #dcdee5;
-              border-radius: 3px;
-            }
+          &::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+          }
 
-            &::-webkit-scrollbar-track {
-              background-color: transparent;
-              border-radius: 3px;
-            }
+          &::-webkit-scrollbar-thumb {
+            background-color: #dcdee5;
+            border-radius: 3px;
+          }
 
-            .component-group {
+          &::-webkit-scrollbar-track {
+            background-color: transparent;
+            border-radius: 3px;
+          }
+
+          .component-group {
+            margin-bottom: 16px;
+            scroll-margin-top: 68px;
+
+            .group-title {
+              display: flex;
+              height: 32px;
               margin-bottom: 16px;
-              scroll-margin-top: 68px;
+              background: #eaebf0;
+              border-radius: 2px;
+              padding-inline: 16px;
+              align-items: center;
 
-              .group-title {
-                display: flex;
-                height: 32px;
-                margin-bottom: 16px;
-                background: #eaebf0;
-                border-radius: 2px;
-                padding-inline: 16px;
-                align-items: center;
-
-                .name {
-                  margin-right: 8px;
-                  font-size: 14px;
-                  color: #313238;
-                }
-
-                .count {
-                  color: #979ba5;
-                }
+              .name {
+                margin-right: 8px;
+                font-size: 14px;
+                color: #313238;
               }
 
-              .group-items {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 16px;
+              .count {
+                color: #979ba5;
+              }
+            }
 
-                .item {
-                  position: relative;
-                  width: 238px;
-                  height: 80px;
-                  padding: 16px;
-                  background: #fff;
-                  border-radius: 2px;
-                  box-shadow: 0 2px 4px 0 #1919290d;
-                  transition: box-shadow .2s ease-in-out;
+            .group-items {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 16px;
+
+              .item {
+                position: relative;
+                width: 238px;
+                height: 80px;
+                padding: 16px;
+                background: #fff;
+                border-radius: 2px;
+                box-shadow: 0 2px 4px 0 #1919290d;
+                transition: box-shadow .2s ease-in-out;
+
+                .title {
+
+                  .name,
+                  .name-en {
+                    font-size: 14px;
+                    line-height: 22px;
+                    letter-spacing: 0;
+                  }
+
+                  .name {
+                    margin-bottom: 5px;
+                    color: #313238;
+                    transition: color .2s ease-in-out;
+                  }
+
+                  .name-en {
+                    color: #c4c6cc;
+                  }
+                }
+
+                .background-image {
+                  position: absolute;
+                  top: 20px;
+                  right: 16px;
+                  display: flex;
+                  width: 40px;
+                  height: 40px;
+                  font-size: 40px;
+                  color: #f0f5ff;
+                  align-items: center;
+                }
+
+                &:hover {
+                  cursor: pointer;
+                  box-shadow: 0 2px 4px 0 #0000001a, 0 2px 4px 0 #1919290d;
 
                   .title {
 
-                    .name,
-                    .name-en {
-                      font-size: 14px;
-                      line-height: 22px;
-                      letter-spacing: 0;
-                    }
-
                     .name {
-                      margin-bottom: 5px;
-                      color: #313238;
-                      transition: color .2s ease-in-out;
-                    }
-
-                    .name-en {
-                      color: #c4c6cc;
-                    }
-                  }
-
-                  .background-image {
-                    position: absolute;
-                    top: 20px;
-                    right: 16px;
-                    display: flex;
-                    width: 40px;
-                    height: 40px;
-                    font-size: 40px;
-                    color: #f0f5ff;
-                    align-items: center;
-                  }
-
-                  &:hover {
-                    cursor: pointer;
-                    box-shadow: 0 2px 4px 0 #0000001a, 0 2px 4px 0 #1919290d;
-
-                    .title {
-
-                      .name {
-                        color: $primary-color;
-                      }
+                      color: $primary-color;
                     }
                   }
                 }
               }
-            }
-          }
-        }
-      }
-
-      .component-nav-list {
-        width: 187px;
-        padding-left: 24px;
-
-        :deep(.collapse-cls) {
-
-          .bk-collapse-item {
-            box-shadow: none;
-          }
-        }
-
-        :deep(.bk-collapse-content) {
-          padding: 0 !important;
-          font-size: 14px;
-        }
-
-        .panel-header {
-          display: flex;
-          padding-bottom: 7px;
-          padding-left: 9px;
-          cursor: pointer;
-          border-left: 1px solid #dcdee5;
-          align-items: center;
-
-          .title {
-            height: 22px;
-          }
-
-          .panel-header-show {
-            transform: rotate(0deg);
-            transition: .2s;
-          }
-
-          .panel-header-hide {
-            transform: rotate(-90deg);
-            transition: .2s;
-          }
-        }
-
-        .panel-content {
-
-          .panel-content-cat-item {
-            padding-left: 40px;
-            line-height: 22px;
-            cursor: pointer;
-            border-left: 1px solid #dcdee5;
-            padding-block: 7px;
-
-            &:hover {
-              color: $primary-color;
-            }
-
-            &.active {
-              border-color: $primary-color;
             }
           }
         }
       }
     }
 
-    &.default-header-view {
-      height: calc(100vh - 105px);
-      overflow: hidden;
+    .component-nav-list {
+      width: 187px;
+      padding-left: 24px;
 
-      &.show-notice {
-        height: calc(100vh - 145px);
+      :deep(.collapse-cls) {
 
-        .components-wrap {
-          max-height: calc(100vh - 200px);
+        .bk-collapse-item {
+          box-shadow: none;
         }
       }
 
-      &.need-bkui-table-wrapper {
-        overflow-y: hidden;
+      :deep(.bk-collapse-content) {
+        padding: 0 !important;
+        font-size: 14px;
+      }
 
-        :deep(.bk-table-body) {
+      .panel-header {
+        display: flex;
+        padding-bottom: 7px;
+        padding-left: 9px;
+        cursor: pointer;
+        border-left: 1px solid #dcdee5;
+        align-items: center;
 
-          &.bk-scrollbar {
+        .title {
+          height: 22px;
+        }
 
-            .bk__rail-x,
-            .bk__rail-y {
-              display: none !important;
-            }
+        .panel-header-show {
+          transform: rotate(0deg);
+          transition: .2s;
+        }
+
+        .panel-header-hide {
+          transform: rotate(-90deg);
+          transition: .2s;
+        }
+      }
+
+      .panel-content {
+
+        .panel-content-cat-item {
+          padding-left: 40px;
+          line-height: 22px;
+          cursor: pointer;
+          border-left: 1px solid #dcdee5;
+          padding-block: 7px;
+
+          &:hover {
+            color: $primary-color;
+          }
+
+          &.active {
+            border-color: $primary-color;
           }
         }
       }
     }
   }
-}
 
-.docs-list {
+  :deep(.t-table__body) {
 
-  :deep(.t-table__content) {
-    max-height: 652px !important;
+    tr > td {
+      padding: 7.5px 16px;
+    }
   }
 }
 </style>

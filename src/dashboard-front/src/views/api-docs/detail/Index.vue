@@ -27,286 +27,314 @@
           class="icon apigateway-icon icon-ag-return-small"
           @click="handleGoBack"
         />
-        {{ curTab === 'gateway' ? curTargetName : curTargetBasics?.description ?? '' }}
-        <!--  组件系统下拉菜单  -->
-        <aside
-          v-if="curTab === 'component'"
-          class="system-dropdown-wrap"
+        <div
+          v-if="curTab === 'gateway'"
+          class="gateway-header-name"
         >
-          <BkDropdown :popover-options="{ boundary: 'body', placement: 'bottom-start' }">
-            <div class="dropdown-trigger-btn">
-              <span>{{ curTargetName }}</span>
-              <i class="ag-doc-icon doc-down-shape apigateway-icon icon-ag-down-shape" />
-            </div>
-            <template #content>
-              <BkDropdownMenu class="dropdown-trigger-content bk-dropdown-list">
-                <BkDropdownItem
-                  v-for="system in allSystemList"
-                  :key="system.name"
-                  :title="system.description"
-                  @click="() => handleSystemChange(system)"
-                >
-                  <span class="text-14px">
-                    <span class="mr-5px">{{ system.description }}</span>
-                    ({{ system.name }})
-                  </span>
-                </BkDropdownItem>
-              </BkDropdownMenu>
-            </template>
-          </BkDropdown>
-        </aside>
+          <span class="display-name">{{ gatewayHeaderName }}</span>
+          <span
+            v-if="curTargetName"
+            class="sub-title"
+          >
+            ({{ curTargetName }})
+          </span>
+        </div>
+        <template v-else>
+          {{ curTargetBasics?.description ?? '' }}
+        </template>
+        <!--  组件系统下拉菜单  -->
+        <template v-if="curTab === 'component'">
+          <BkDivider direction="vertical" />
+          <aside class="system-dropdown-wrap">
+            <BkDropdown :popover-options="{ boundary: 'body', placement: 'bottom-start' }">
+              <div class="dropdown-trigger-btn">
+                <span>{{ curTargetName }}</span>
+                <i class="ag-doc-icon doc-down-shape apigateway-icon icon-ag-down-shape" />
+              </div>
+              <template #content>
+                <BkDropdownMenu class="dropdown-trigger-content bk-dropdown-list">
+                  <BkDropdownItem
+                    v-for="system in allSystemList"
+                    :key="system.name"
+                    :title="system.description ?? undefined"
+                    @click="() => handleSystemChange(system)"
+                  >
+                    <span class="text-12px">
+                      <span class="mr-5px">{{ system.description }}</span>
+                      ({{ system.name }})
+                    </span>
+                  </BkDropdownItem>
+                </BkDropdownMenu>
+              </template>
+            </BkDropdown>
+          </aside>
+        </template>
       </main>
     </header>
     <!--  正文  -->
     <main class="page-content">
       <BkResizeLayout
-        placement="right"
+        class="detail-resize-layout"
+        placement="left"
+        initial-divide="288px"
+        :max="400"
+        :min="288"
         :border="false"
-        collapsible
-        initial-divide="392px"
-        :max="480"
-        :min="393"
-        style="flex-grow: 1;"
       >
-        <template #main>
-          <BkResizeLayout
-            placement="left"
-            style="margin-left: 40px;"
-            initial-divide="288px"
-            :max="400"
-            :min="288"
-            :border="false"
-          >
-            <!--  左栏，API 列表  -->
-            <template #aside>
-              <div class="left">
-                <div class="left-aside-wrap">
-                  <!--  筛选器  -->
-                  <header class="left-aside-header">
-                    <header class="title">
-                      {{ curTab === 'gateway' ? t('资源列表') : t('API列表') }}
-                      <aside
-                        v-if="apiList.length"
-                        class="sub-title"
-                      >
-                        {{ filteredApiList.length }}
-                      </aside>
-                    </header>
-                    <main class="nav-filters">
-                      <article v-if="curTab === 'gateway'">
-                        <BkSelect
-                          v-model="curStageName"
-                          :clearable="false"
-                          filterable
-                          :input-search="false"
-                          :prefix="t('环境')"
-                          @change="handleStageChange"
-                        >
-                          <BkOption
-                            v-for="option in stageList"
-                            :key="option.id"
-                            :value="option.name"
-                            :label="option.name"
-                          />
-                        </BkSelect>
-                      </article>
-                      <article>
-                        <BkInput
-                          v-model="keyword"
-                          type="search"
-                          :placeholder="searchPlaceholder"
-                          clearable
-                        />
-                      </article>
-                    </main>
-                  </header>
-                  <!--  API 列表  -->
-                  <main class="resource-list custom-scroll-bar">
-                    <template v-if="filteredApiList.length">
-                      <BkCollapse
-                        v-model="activeGroupPanelNames"
-                        class="api-group-collapse"
-                      >
-                        <BkCollapsePanel
-                          v-for="group of apiGroupList"
-                          :key="group.id"
-                          :name="group.name"
-                        >
-                          <template #header>
-                            <div class="api-group-collapse-header">
-                              <AngleUpFill
-                                class="menu-header-icon"
-                                :class="{ fold: !activeGroupPanelNames.includes(group.name) }"
-                              />
-                              <div class="api-group-collapse-title">
-                                {{ group.name }}
-                              </div>
-                            </div>
-                          </template>
-                          <template #content>
-                            <article
-                              v-for="api in group.apiList"
-                              :key="api.id"
-                              class="resource-item"
-                              :class="{ active: api.id === curApi?.id }"
-                              @click="() => handleApiClick(api.id, api.name)"
-                            >
-                              <div class="flex items-center">
-                                <header
-                                  :ref="(el: any) => setNameRef(el, api.id)"
-                                  v-bk-xss-html="getHighlightedHtml(api.name)"
-                                  v-bk-tooltips="{ content: api.name, disabled: !overflowMap[api.id]?.name }"
-                                  class="res-item-name mr-8px"
-                                />
-                                <BkTag
-                                  v-if="curTargetBasics?.kind === 2"
-                                  theme="info"
-                                >
-                                  {{ t('模型代理 API') }}
-                                </BkTag>
-                                <BkTag
-                                  v-if="curTargetBasics?.is_deprecated"
-                                  theme="danger"
-                                >
-                                  deprecated
-                                </BkTag>
-                              </div>
-                              <main
-                                :ref="(el: any) => setDescRef(el, api.id)"
-                                v-bk-xss-html="getHighlightedHtml(api.description)"
-                                v-bk-tooltips="{ content: api.description, disabled: !overflowMap[api.id]?.desc }"
-                                class="res-item-desc"
-                              />
-                            </article>
-                          </template>
-                        </BkCollapsePanel>
-                      </BkCollapse>
-                    </template>
-                    <template v-else-if="keyword">
-                      <TableEmpty
-                        :empty-type="!!keyword ? 'searchEmpty' : 'empty'"
-                        @clear-filter="keyword = ''"
-                      />
-                    </template>
-                  </main>
-                </div>
-              </div>
-            </template>
-            <!--  中间栏，当前 API 文档内容  -->
-            <template #main>
-              <div class="main-content-wrap">
-                <DocDetailMainContent
-                  v-if="apiList.length && curApi"
-                  v-bkloading="{ loading: isLoading }"
-                  :api="curApi"
-                  :basics="curTargetBasics"
-                  :nav-list="navList"
-                  :markdown-html="curApiMarkdownHtml"
-                  :updated-time="updatedTime"
-                  @show-sdk-instruction="isSdkInstructionSliderShow = true"
-                />
-                <TableEmpty
-                  v-else
-                  empty-type="empty"
-                  class="empty-wrapper"
-                />
-              </div>
-            </template>
-          </BkResizeLayout>
-        </template>
-        <!--  右栏，网关/组件主要信息和SDK  -->
+        <!--  左栏，API 列表  -->
         <template #aside>
-          <aside class="aside-right">
-            <main class="apigw-desc-wrap custom-scroll-bar">
-              <DocDetailSideContent
-                v-if="curTargetBasics"
-                :basics="curTargetBasics"
-                :sdks="sdks"
-              />
-            </main>
-          </aside>
+          <div class="left">
+            <div class="left-aside-wrap">
+              <!--  筛选器  -->
+              <header class="left-aside-header">
+                <header class="title">
+                  {{ curTab === 'gateway' ? t('资源列表') : t('API列表') }}
+                  <aside
+                    v-if="apiList.length"
+                    class="sub-title"
+                  >
+                    {{ filteredApiList.length }}
+                  </aside>
+                </header>
+                <main class="nav-filters">
+                  <article v-if="curTab === 'gateway'">
+                    <BkSelect
+                      v-model="curStageName"
+                      :clearable="false"
+                      filterable
+                      :input-search="false"
+                      :prefix="t('环境')"
+                      @change="handleStageChange"
+                    >
+                      <BkOption
+                        v-for="option in stageList"
+                        :key="option.id"
+                        :value="option.name"
+                        :label="option.name"
+                      />
+                    </BkSelect>
+                  </article>
+                  <article>
+                    <BkInput
+                      v-model="keyword"
+                      type="search"
+                      :placeholder="searchPlaceholder"
+                      clearable
+                    />
+                  </article>
+                </main>
+              </header>
+              <!--  API 列表  -->
+              <main class="resource-list custom-scroll-bar">
+                <template v-if="filteredApiList.length">
+                  <BkCollapse
+                    v-model="activeGroupPanelNames"
+                    class="api-group-collapse"
+                  >
+                    <BkCollapsePanel
+                      v-for="group of apiGroupList"
+                      :key="group.id"
+                      :name="group.name"
+                    >
+                      <template #header>
+                        <div class="api-group-collapse-header">
+                          <AngleUpFill
+                            class="menu-header-icon"
+                            :class="{ fold: !activeGroupPanelNames.includes(group.name) }"
+                          />
+                          <div class="api-group-collapse-title">
+                            {{ group.name }}
+                          </div>
+                        </div>
+                      </template>
+                      <template #content>
+                        <article
+                          v-for="api in group.apiList"
+                          :key="api.id"
+                          class="resource-item"
+                          :class="{ active: api.id === curApi?.id }"
+                          @click="() => handleApiClick(api.id, api.name)"
+                        >
+                          <div class="flex items-center">
+                            <header
+                              :ref="(el) => setNameRef(el, api.id)"
+                              v-bk-xss-html="getHighlightedHtml(api.name)"
+                              v-bk-tooltips="{ content: api.name ?? '', disabled: !overflowMap[api.id]?.name }"
+                              class="res-item-name mr-8px"
+                            />
+                            <BkTag
+                              v-if="curTargetBasics?.kind === 2"
+                              theme="info"
+                            >
+                              {{ t('模型代理 API') }}
+                            </BkTag>
+                            <BkTag
+                              v-if="curTargetBasics?.is_deprecated || api.is_deprecated"
+                              theme="danger"
+                            >
+                              deprecated
+                            </BkTag>
+                          </div>
+                          <main
+                            :ref="(el) => setDescRef(el, api.id)"
+                            v-bk-xss-html="getHighlightedHtml(api.description ?? '')"
+                            v-bk-tooltips="{ content: api.description ?? '', disabled: !overflowMap[api.id]?.desc }"
+                            class="res-item-desc"
+                          />
+                        </article>
+                      </template>
+                    </BkCollapsePanel>
+                  </BkCollapse>
+                </template>
+                <template v-else-if="keyword">
+                  <AgTableEmpty
+                    :empty-type="!!keyword ? 'searchEmpty' : 'empty'"
+                    @clear-filter="keyword = ''"
+                  />
+                </template>
+              </main>
+            </div>
+          </div>
+        </template>
+        <!--  中间栏，当前 API 文档内容  -->
+        <template #main>
+          <div class="main-content-wrap">
+            <DocDetailMainContent
+              v-if="apiList.length && curApi"
+              v-bkloading="{ loading: isLoading }"
+              :api="curApi"
+              :basics="curTargetBasics"
+              :nav-list="navList"
+              :markdown-html="curApiMarkdownHtml"
+              :auth-markdown-html="authMarkdownHtml"
+              :updated-time="updatedTime"
+              :method="curMethod"
+              :resource-url="resourceUrl"
+              @show-gateway-detail="handleShowGatewayDetail"
+              @show-apply-permission="handleShowApplyPermission"
+            />
+            <AgTableEmpty
+              v-else
+              empty-type="empty"
+              class="empty-wrapper"
+            />
+          </div>
         </template>
       </BkResizeLayout>
     </main>
-    <!--  SDK使用说明 Slider  -->
-    <SDKInstructionSlider v-model="isSdkInstructionSliderShow" />
+    <BkSideslider
+      v-model:is-show="isGatewayDetailSliderShow"
+      :width="720"
+      :title="curTab === 'gateway' ? t('网关详情') : t('组件详情')"
+      ext-cls="gateway-detail-sideslider"
+      quick-close
+    >
+      <div class="gateway-detail-slider">
+        <DocDetailSideContent
+          v-if="curTargetBasics"
+          :basics="curTargetBasics"
+          :sdks="sdks"
+          :board="board"
+        />
+      </div>
+    </BkSideslider>
+    <ApplyPermissionDialog
+      v-if="curApi"
+      v-model:is-show="isApplyDialogShow"
+      :gateway-name="curTargetName"
+      :resource-name="curApi.name"
+    />
   </div>
 </template>
 
 <script lang="ts" setup>
 import { refDebounced } from '@vueuse/core';
 import {
-  getApigwResourceDocDocs,
-  getApigwResourcesDocs,
-  getApigwStagesDocs,
-  getGatewaysDetailsDocs,
-} from '@/services/source/docs';
+  getDocsGatewayDetail,
+  getDocsResourceDoc,
+  getDocsResourceList,
+  getDocsStageList,
+} from '@/services/source/docs/gateway';
 import {
   getComponentSystemDetail,
   getComponentSystemList,
   getESBSDKDetail,
   getSystemAPIList,
   getSystemComponentDoc,
-} from '@/services/source/docs-esb.ts';
-import type {
-  IApiGatewayBasics,
-  IApiGatewaySdkDoc,
-  IBoard,
-  IComponent,
-  IComponentSdk,
-  INavItem,
-  IResource,
-  IStage,
-  ISystem,
-  ISystemBasics,
-  TabType,
-} from '../types.d.ts';
-import MarkdownIt from 'markdown-it';
-import DocDetailMainContent from '../components/DocDetailMainContent.vue';
-import DocDetailSideContent from '../components/DocDetailSideContent.vue';
-import SDKInstructionSlider from '../components/SDKInstructionSlider.vue';
-import TableEmpty from '@/components/table-empty/Index.vue';
+} from '@/services/source/docs/esb';
+import type { ComponentPublicInstance } from 'vue';
+import type { IDocsEsbBoardsSystemsListResponse as IBoard, ISystemSLZ as ISystem } from '@/services/types/docs/esb.ts';
+import type { IDocsGatewaysStagesListResponse as IStage } from '@/services/types/docs/gateway.ts';
+import type { INavItem } from '../components/DocDetailSideNav.vue';
+import type { ISdkItem } from '../components/DocSdkSection.vue';
+import { type DocTab, docTabKey } from '../utils/doc-context';
+import { createMarkdownRenderer } from '@/utils/markdown';
+import DocDetailMainContent, { type IDocApi, type IDocContent } from '../components/DocDetailMainContent.vue';
+import DocDetailSideContent, { type IDocBasics } from '../components/DocDetailSideContent.vue';
+import ApplyPermissionDialog from '../components/ApplyPermissionDialog.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
 import { AngleUpFill } from 'bkui-vue/lib/icon';
-import hljs from 'highlight.js';
+import { useEnv } from '@/stores';
+import { buildResourceUrl } from '../utils/compose-doc';
+import { getGatewayDisplayName } from '@/utils/gateway-name';
+
+interface IApiGroup {
+  id: number
+  name: string
+  apiList: IDocApi[]
+}
+
+type TemplateElement = Element | ComponentPublicInstance | null;
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const envStore = useEnv();
 
-const curTab = ref<TabType>('gateway');
+const curTab = ref<DocTab>('gateway');
 const board = ref('default');
 // 提供当前 tab 的值
-// 注入时请使用：const curTab = inject<Ref<TabType>>('curTab');
-provide('curTab', curTab);
+provide(docTabKey, curTab);
 
 const stageList = ref<IStage[]>([]);
 const curStageName = ref('');
 
 // 当前的网关或组件被命名为 target
 const curTargetName = ref(''); // 当前文档所属的网关或组件名称
-const curTargetBasics = ref<IApiGatewayBasics & ISystemBasics | null>(null); // 当前文档所属的target主要信息
-const apiList = ref<(IResource & IComponent)[]>([]); // 当前target下的所有api
+const curTargetBasics = ref<IDocBasics | null>(null); // 当前文档所属的target主要信息
+const apiList = ref<IDocApi[]>([]); // 当前target下的所有api
 const boardList = ref<IBoard[]>([]);
 const curComponentApiName = ref(''); // 当前组件api名称，路由用
-const curApi = ref<IResource & IComponent | null>(null); // 当前选中的 api
+const curApi = ref<IDocApi | null>(null); // 当前选中的 api
+const curDoc = ref<IDocContent | null>(null);
 const curApiMarkdownHtml = ref('');
+const authMarkdownHtml = ref('');
 const updatedTime = ref<string | null>(null);
-const sdks = ref<IApiGatewaySdkDoc[] & IComponentSdk[]>([]);
-const isSdkInstructionSliderShow = ref(false);
+const sdks = ref<ISdkItem[]>([]);
+const isGatewayDetailSliderShow = ref(false);
+const isApplyDialogShow = ref(false);
 const navList = ref<INavItem[]>([]);
+
+const handleShowGatewayDetail = () => {
+  isApplyDialogShow.value = false;
+  isGatewayDetailSliderShow.value = true;
+};
+
+const handleShowApplyPermission = () => {
+  isGatewayDetailSliderShow.value = false;
+  isApplyDialogShow.value = true;
+};
+
+watch(curApi, () => {
+  isApplyDialogShow.value = false;
+});
 const isLoading = ref(false);
 const keyword = ref(''); // 筛选器输入框的搜索关键字
 const debouncedKeyword = refDebounced(keyword, 500);
 const activeGroupPanelNames = ref<string[]>([]); // API分类 collapse 展开的 panel
 
 const searchPlaceholder = computed(() => {
-  return t(
-    '在{resourceLength}个{type}中搜索...',
-    {
-      resourceLength: apiList.value.length,
-      type: curTab.value === 'gateway' ? t('资源') : 'API',
-    },
-  );
+  return curTab.value === 'gateway' ? t('搜索资源名称、资源描述') : t('搜索 API 名称、API 描述');
 });
 
 const filteredApiList = computed(() => {
@@ -314,51 +342,78 @@ const filteredApiList = computed(() => {
   if (!keyword) {
     return apiList.value;
   }
-  return apiList.value.filter((api: IResource & IComponent) =>
+  return apiList.value.filter(api =>
     api.name?.toLowerCase().includes(keyword) || api.description?.toLowerCase().includes(keyword),
   );
 });
+const defaultApiCategory = computed(() => ({
+  id: -1,
+  name: t('默认分类'),
+}));
 
-// API 分类列表
+// API 分类列表：资源挂多个标签时，在每个所属标签的分组下都会展示
 const apiGroupList = computed(() => {
-  return filteredApiList.value.reduce((groupList: {
-    id: number
-    name: string
-    apiList: typeof apiList.value
-  }[], api: IResource & IComponent) => {
-    const { id, name } = api.labels[0];
-    const group = groupList.find((item: any) => item.id === id);
-
-    if (group) {
+  const groups: IApiGroup[] = [];
+  const labelIdToGroup = new Map<number, IApiGroup>();
+  filteredApiList.value.forEach((api) => {
+    const labels = api.labels?.length ? api.labels : [defaultApiCategory.value];
+    labels.forEach(({ id, name }) => {
+      let group = labelIdToGroup.get(id);
+      if (!group) {
+        group = {
+          id,
+          name,
+          apiList: [],
+        };
+        labelIdToGroup.set(id, group);
+        groups.push(group);
+      }
       group.apiList.push(api);
-    }
-    else {
-      groupList.push({
-        id,
-        name,
-        apiList: [api],
-      });
-    }
-    return groupList;
-  }, [] as {
-    id: number
-    name: string
-    apiList: typeof apiList.value
-  }[]);
+    });
+  });
+  return groups;
 });
 
 const allSystemList = computed(() => {
   const curBoard = boardList.value.find((item: IBoard) => item.board === board.value);
   const systems: ISystem[] = [];
   if (curBoard) {
-    curBoard.categories.forEach((cat: any) => cat.systems.forEach((system: ISystem) => systems.push(system)));
+    curBoard.categories.forEach(cat => cat.systems.forEach((system: ISystem) => systems.push(system)));
   }
   return systems;
 });
 
+const gatewayHeaderName = computed(() => getGatewayDisplayName({
+  name: curTargetName.value,
+  display_name: curTargetBasics.value?.display_name,
+}));
+
+// 请求方法，优先取接口返回，兜底用资源自身的方法
+const curMethod = computed(() => (curDoc.value?.method || curApi.value?.method || '').toUpperCase());
+
+// 调用地址，优先取接口返回的完整地址，兜底用环境模板拼接
+const resourceUrl = computed(() => {
+  if (!curApi.value || curTab.value !== 'gateway') {
+    return '';
+  }
+  if (curDoc.value?.resource_url) {
+    return curDoc.value.resource_url;
+  }
+  const urlTemplate = envStore.env.BK_API_RESOURCE_URL_TMPL;
+  if (!urlTemplate) {
+    return '';
+  }
+  return buildResourceUrl(
+    urlTemplate,
+    curTargetName.value,
+    curStageName.value,
+    curApi.value.path || '',
+  );
+});
+
 // 分类列表变化时更新 collapse 展开状态
 watch(apiGroupList, () => {
-  activeGroupPanelNames.value = apiGroupList.value.map((item: any) => item.name);
+  activeGroupPanelNames.value = apiGroupList.value.map(item => item.name);
 });
 
 watch([filteredApiList, debouncedKeyword], async () => {
@@ -368,14 +423,14 @@ watch([filteredApiList, debouncedKeyword], async () => {
 
 watch(() => route.query, async () => {
   if (route.query?.stage) {
-    curStageName.value = route.query.stage as string;
+    curStageName.value = String(route.query.stage);
     await fetchApiList();
   }
 
-  const apiName = route.query?.apiName as string;
+  const apiName = String(route.query.apiName ?? '');
   if (apiName) {
     curComponentApiName.value = apiName;
-    curApi.value = apiList.value.find((api: IResource & IComponent) => api.name === curComponentApiName.value) ?? null;
+    curApi.value = apiList.value.find(api => api.name === curComponentApiName.value) ?? null;
     navList.value = [];
 
     if (curApi.value) {
@@ -387,12 +442,12 @@ watch(() => route.query, async () => {
 const fetchTargetBasics = async () => {
   try {
     if (curTab.value === 'gateway') {
-      const { sdks: sdksResponse, ...restResponse } = await getGatewaysDetailsDocs(curTargetName.value);
-      curTargetBasics.value = restResponse as any;
-      sdks.value = sdksResponse as any;
+      const { sdks: sdksResponse, ...restResponse } = await getDocsGatewayDetail(curTargetName.value);
+      curTargetBasics.value = restResponse;
+      sdks.value = Array.isArray(sdksResponse) ? sdksResponse : [];
     }
     else if (curTab.value === 'component') {
-      curTargetBasics.value = await getComponentSystemDetail(board.value, curTargetName.value) as any;
+      curTargetBasics.value = await getComponentSystemDetail(board.value, curTargetName.value);
     }
   }
   catch {
@@ -409,7 +464,7 @@ const fetchEsbSdks = async () => {
     sdks.value = [{
       language: 'python',
       ...response,
-    }] as any;
+    }];
   }
   catch {
     sdks.value = [];
@@ -423,7 +478,7 @@ const fetchApigwStages = async () => {
       offset: 0,
     };
 
-    stageList.value = await getApigwStagesDocs(curTargetName.value, query) as IStage[];
+    stageList.value = await getDocsStageList(curTargetName.value, query);
 
     const requestedStage = stageList.value.find((stage: IStage) => stage.name === route.query?.stage);
     if (requestedStage) {
@@ -441,7 +496,7 @@ const fetchApigwStages = async () => {
 
 const fetchApiList = async () => {
   try {
-    let res: (IResource & IComponent)[] = [];
+    let res: IDocApi[] = [];
     navList.value = [];
     if (curTab.value === 'gateway') {
       const query = {
@@ -449,28 +504,25 @@ const fetchApiList = async () => {
         offset: 0,
         stage_name: curStageName.value,
       };
-      res = await getApigwResourcesDocs(curTargetName.value, query) as unknown as (IResource & IComponent)[];
+      res = await getDocsResourceList(curTargetName.value, query);
     }
     else if (curTab.value === 'component') {
-      res = await getSystemAPIList(board.value, curTargetName.value) as unknown as (IResource & IComponent)[];
+      res = await getSystemAPIList(board.value, curTargetName.value);
     }
     apiList.value = res ?? [];
     // 为 api 添加默认分类
-    apiList.value.forEach((api: IResource & IComponent) => {
+    apiList.value.forEach((api) => {
       if (!api.labels?.length) {
-        api.labels = [{
-          id: -1,
-          name: t('默认分类'),
-        }];
+        api.labels = [{ ...defaultApiCategory.value }];
       }
     });
 
     if (route.query?.apiName) {
-      curComponentApiName.value = route.query.apiName as string;
+      curComponentApiName.value = String(route.query.apiName);
     }
 
     if (curComponentApiName.value) {
-      curApi.value = apiList.value.find((api: IResource & IComponent) => api.name === curComponentApiName.value)
+      curApi.value = apiList.value.find(api => api.name === curComponentApiName.value)
         ?? null;
     }
     else {
@@ -498,66 +550,64 @@ const handleApiClick = (resId: number, apiName: string) => {
   });
 };
 
-const md = new MarkdownIt({
-  linkify: false,
-  html: true,
-  breaks: true,
-  highlight(str: string, lang: string) {
-    try {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(str, {
-          language: lang,
-          ignoreIllegals: true,
-        }).value;
-      }
-    }
-    catch {
-      return str;
-    }
-    return str;
-  },
-});
-
-// markdown 解析器自定义规则，用于给 ### 标题添加 id，导航要用
-md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
-  const curToken = tokens[idx];
-  const nextToken = tokens[idx + 1];
-  let count = 2;
-  // 找到 ### 标题，并且只包含一行文本的 token
-  if (curToken.markup === '###' && nextToken?.type === 'inline') {
-    let headingText = nextToken.content;
-    if (navList.value.find((item: INavItem) => item.name === headingText)) {
-      headingText = `${headingText}${count}`;
-      count = count + 1;
-    }
-    // 给标题元素ID一个前缀，便于导航目录识别
-    const idPrefix = 'doc-heading-';
-    curToken.attrPush([
-      'id',
-      `${idPrefix}${headingText}`,
-    ]);
-    navList.value.push({
-      id: `${idPrefix}${headingText}`,
-      name: headingText,
-    });
-  }
-  return self.renderToken(tokens, idx, options);
-};
+// 统一 Markdown 渲染：代码块带复制按钮、链接新窗口打开、### 标题收集导航
+const { renderMarkdown } = createMarkdownRenderer({ withHeadingIds: true });
 
 const getApigwResourceDoc = async () => {
   try {
     isLoading.value = true;
-    let res: any;
+    const api = curApi.value;
+    if (!api) {
+      return;
+    }
+    let res: IDocContent | undefined;
     if (curTab.value === 'gateway') {
       const query = { stage_name: curStageName.value };
-      res = await getApigwResourceDocDocs(curTargetName.value, curApi.value!.name, query);
+      res = await getDocsResourceDoc(curTargetName.value, api.name, query);
     }
     else if (curTab.value === 'component') {
-      res = await getSystemComponentDoc(board.value, curTargetName.value, curApi.value!.name);
+      res = await getSystemComponentDoc(board.value, curTargetName.value, api.name);
     }
-    const { content, updated_time } = res;
-    curApiMarkdownHtml.value = md.render(content);
-    updatedTime.value = updated_time;
+    const {
+      content,
+      updated_time,
+      auth_content,
+      body_content,
+      resource_url,
+    } = res || {};
+    curDoc.value = res ?? null;
+    updatedTime.value = updated_time ?? null;
+    navList.value = [];
+
+    if (curTab.value === 'gateway' && (auth_content || body_content || resource_url)) {
+      // 拆分后的资源文档：调用地址、认证方式、正文分别展示，不再渲染完整 content
+      const renderedAuth = renderMarkdown(auth_content || '');
+      const renderedBody = renderMarkdown(body_content || '');
+      authMarkdownHtml.value = renderedAuth.html;
+      curApiMarkdownHtml.value = renderedBody.html;
+      navList.value = [
+        {
+          id: 'doc-heading-调用地址',
+          name: t('调用地址'),
+        },
+        ...(auth_content
+          ? [
+            {
+              id: 'doc-heading-认证方式',
+              name: t('认证方式'),
+            },
+          ]
+          : []),
+        ...renderedBody.headings,
+      ];
+    }
+    else {
+      // 组件文档或后端未升级时，仍按完整文档渲染
+      const renderedMarkdown = renderMarkdown(content || '');
+      authMarkdownHtml.value = '';
+      curApiMarkdownHtml.value = renderedMarkdown.html;
+      navList.value = renderedMarkdown.headings;
+    }
   }
   finally {
     isLoading.value = false;
@@ -614,14 +664,14 @@ type IOverflow = {
 const overflowMapRef = ref<Record<number, IOverflow>>({});
 const overflowMap = computed(() => overflowMapRef.value);
 
-const toHTMLElement = (el: any): HTMLElement | null => {
+const toHTMLElement = (el: TemplateElement): HTMLElement | null => {
   if (!el) return null;
   if (el instanceof HTMLElement) return el;
-  if (el?.$el instanceof HTMLElement) return el.$el;
+  if ('$el' in el && el.$el instanceof HTMLElement) return el.$el;
   return null;
 };
 
-const setNameRef = (el: any, id: number) => {
+const setNameRef = (el: TemplateElement, id: number) => {
   const node = toHTMLElement(el);
   if (!node) {
     nameRefs.delete(id);
@@ -630,7 +680,7 @@ const setNameRef = (el: any, id: number) => {
   nameRefs.set(id, node);
 };
 
-const setDescRef = (el: any, id: number) => {
+const setDescRef = (el: TemplateElement, id: number) => {
   const node = toHTMLElement(el);
   if (!node) {
     descRefs.delete(id);
@@ -664,7 +714,7 @@ const checkOverflow = () => {
 
 const fetchBoardList = async () => {
   try {
-    boardList.value = await getComponentSystemList(board.value) as IBoard[];
+    boardList.value = await getComponentSystemList(board.value);
   }
   catch {
     boardList.value = [];
@@ -708,18 +758,24 @@ const handleGoBack = () => {
 
 onBeforeMount(() => {
   const { params } = route;
-  curTab.value = params.curTab as TabType || 'gateway';
-  curTargetName.value = params.targetName as string ?? '';
-  curComponentApiName.value = params.componentName as string ?? '';
-  keyword.value = route.query?.apiName as string ?? '';
-  board.value = params.board as string || 'default';
+  curTab.value = params.curTab === 'component' ? 'component' : 'gateway';
+  curTargetName.value = String(params.targetName ?? '');
+  curComponentApiName.value = String(params.componentName ?? '');
+  board.value = String(params.board || 'default');
   init();
 });
-
 </script>
 
 <style lang="scss" scoped>
 @use "sass:color";
+
+.page-wrap {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
 
 .page-header {
   position: sticky;
@@ -733,6 +789,7 @@ onBeforeMount(() => {
   padding-inline: 24px;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 
   .header-main {
     display: flex;
@@ -749,17 +806,45 @@ onBeforeMount(() => {
       cursor: pointer;
     }
 
+    .gateway-header-name {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+
+      .display-name,
+      .sub-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .display-name {
+        flex-shrink: 0;
+        line-height: 22px;
+      }
+
+      .sub-title {
+        font-size: 12px;
+        line-height: 20px;
+        color: #979ba5;
+      }
+    }
+
     .system-dropdown-wrap {
       display: flex;
       align-items: center;
-      margin-left: 8px;
 
       .dropdown-trigger-btn {
+        display: flex;
         height: 30px;
         font-size: 12px;
         line-height: 28px;
-        color: #63656E;
+        color: #3a84ff;
         padding-inline: 6px;
+        gap: 4px;
+        align-items: center;
+        cursor: pointer;
       }
 
       .dropdown-trigger-content {
@@ -798,40 +883,63 @@ onBeforeMount(() => {
 
 .page-content {
   display: flex;
+  width: 100%;
+  min-height: 0;
+  padding: 16px 0;
   margin: 0 auto;
+  box-sizing: border-box;
+  flex: 1;
+
+  .detail-resize-layout {
+    height: 100%;
+    min-height: 0;
+    margin-left: 40px;
+    flex-grow: 1;
+  }
 
   .left {
-    padding: 16px 8px 0 0;
+    height: 100%;
+    padding-right: 8px;
+    box-sizing: border-box;
   }
 
   .left-aside-wrap {
+    display: flex;
     width: auto;
+    height: 100%;
     min-width: 280px;
+    min-height: 0;
     background-color: #fff;
     border-radius: 2px;
     box-shadow: 0 2px 4px 0 #1919290d;
+    flex-direction: column;
 
     .left-aside-header {
-      padding: 16px 24px 12px;
+      flex-shrink: 0;
+      padding: 16px 16px 12px;
 
       .title {
         display: flex;
         margin-bottom: 12px;
         font-size: 14px;
+        font-weight: 700;
         line-height: 22px;
         letter-spacing: 0;
         color: #313238;
         align-items: center;
 
         .sub-title {
-          display: flex;
-          width: 30px;
+          display: inline-flex;
           height: 16px;
+          min-width: 16px;
+          padding: 0 5px;
           margin-left: 8px;
           font-size: 12px;
+          font-weight: 400;
+          line-height: 16px;
           color: #979ba5;
           background: #f0f1f5;
-          border-radius: 2px;
+          border-radius: 8px;
           justify-content: center;
           align-items: center;
         }
@@ -840,20 +948,36 @@ onBeforeMount(() => {
       .nav-filters {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px;
+
+        :deep(.bk-select),
+        :deep(.bk-input) {
+          width: 100%;
+        }
       }
     }
 
     .resource-list {
-      height: calc(100vh - 282px);
-      overflow-y: scroll;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
 
       .api-group-collapse {
         max-height: 100%;
         overflow: auto;
 
         :deep(.bk-collapse-item) {
-          margin-bottom: 12px;
+          margin-bottom: 4px;
+          background: transparent;
+          border: none;
+          box-shadow: none;
+        }
+
+        :deep(.bk-collapse-header) {
+          height: auto;
+          padding: 0;
+          line-height: 22px;
+          background: transparent !important;
         }
 
         :deep(.icon-angle-right) {
@@ -880,13 +1004,15 @@ onBeforeMount(() => {
 
         .api-group-collapse-header {
           display: flex;
-          padding: 4px 6px;
+          padding: 6px 16px;
           cursor: pointer;
           align-items: center;
 
           .api-group-collapse-title {
             margin-left: 4px;
-            font-weight: bold;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 20px;
             color: #63656e;
           }
 
@@ -902,7 +1028,7 @@ onBeforeMount(() => {
         }
 
         :deep(.bk-collapse-content) {
-          padding: 2px 0;
+          padding: 0;
         }
 
         .component-list {
@@ -951,8 +1077,8 @@ onBeforeMount(() => {
 
       .resource-item {
         display: flex;
-        height: 52px;
-        padding-left: 24px;
+        min-height: 48px;
+        padding: 8px 16px 8px 32px;
         cursor: pointer;
         background: #fff;
         flex-direction: column;
@@ -991,16 +1117,19 @@ onBeforeMount(() => {
   }
 
   .main-content-wrap {
-    padding-top: 16px;
+    height: 100%;
+    min-height: 0;
     padding-right: 8px;
+    box-sizing: border-box;
   }
 
   .empty-wrapper {
-    height: calc(100vh - 144px);
+    height: 100%;
   }
 
   .aside-right {
     padding-top: 16px;
+
     .apigw-desc-wrap {
       height: calc(100vh - 144px);
       overflow-y: scroll;
@@ -1034,6 +1163,11 @@ onBeforeMount(() => {
   }
 }
 
+.gateway-detail-slider {
+  padding: 0;
+  background: #f5f7fa;
+}
+
 .custom-scroll-bar {
 
   &::-webkit-scrollbar {
@@ -1049,6 +1183,17 @@ onBeforeMount(() => {
 
   &::-webkit-scrollbar-track {
     background: transparent;
+  }
+}
+</style>
+
+<style lang="scss">
+.gateway-detail-sideslider {
+
+  .bk-sideslider-title {
+    display: flex;
+    width: 100%;
+    padding-right: 0;
   }
 }
 </style>

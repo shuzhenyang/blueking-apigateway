@@ -33,7 +33,7 @@
       <div class="guide-opt">
         <BkButton
           theme="primary"
-          class="mr8"
+          class="mr-8px"
           @click="toCreate"
         >
           {{ t('新建网关') }}
@@ -111,7 +111,7 @@
         <BkInput
           v-model="filterData.keyword"
           class="mx-8px flex-grow-1"
-          :placeholder="t('请输入网关名称')"
+          :placeholder="t('请输入网关展示名或 ID')"
         />
         <BkSelect
           v-model="ordering"
@@ -141,7 +141,7 @@
       <section>
         <div class="table-header">
           <div class="flex-1 of2">
-            {{ t('网关名') }}
+            {{ t('网关') }}
           </div>
           <template v-if="featureFlagStore.isTenantMode">
             <div class="flex-1">
@@ -170,11 +170,14 @@
             {{ t('操作') }}
           </div>
         </div>
-        <div class="table-list">
+        <div
+          ref="tableListRef"
+          class="table-list"
+        >
           <template
             v-if="['searchEmpty', 'error'].includes(emptyType ?? '') && !gatewaysList.length && !loading"
           >
-            <TableEmpty
+            <AgTableEmpty
               background="#f5f7fa"
               :empty-type="emptyType"
               @clear-filter="handleClearFilter"
@@ -191,7 +194,9 @@
                 class="flex-1 flex items-center of2 overflow-hidden"
               >
                 <div
-                  :class="item.status ? '' : 'deact'"
+                  :class="[{
+                    'deact-name': !item.status
+                  }]"
                   class="name-logo"
                   @click.stop="() => handleGoPage('StageManagement', item)"
                 >
@@ -206,22 +211,31 @@
                       size="12"
                     />
                   </span>
-                  {{ item.name[0].toUpperCase() }}
+                  {{ getGatewayDisplayName(item)[0].toUpperCase() }}
                 </div>
-                <span
-                  :ref="(el: any) => setNameRef(el, item.id)"
+                <div
+                  :ref="(el) => setNameRef(el, item.id)"
                   v-bk-tooltips="{
-                    content: item.name,
-                    theme: 'light',
+                    content: getGatewayFullName(item),
                     placement: 'top',
                     disabled: !overflowMap[item.id]
                   }"
-                  :class="item.status ? '' : 'deact-name'"
-                  class="name"
+                  :class="[{
+                    'deact-name': !item.status
+                  }]"
+                  class="gateway-name"
                   @click.stop="() => handleGoPage('StageManagement', item)"
                 >
-                  {{ item.name }}
-                </span>
+                  <span class="truncate display-name">
+                    {{ getGatewayDisplayName(item) }}
+                  </span>
+                  <span
+                    v-if="hasDistinctDisplayName(item)"
+                    class="truncate gateway-id"
+                  >
+                    {{ item.name }}
+                  </span>
+                </div>
                 <BkTag
                   v-if="item.is_official"
                   theme="info"
@@ -230,6 +244,12 @@
                 </BkTag>
                 <BkTag v-if="item.status === 0">
                   {{ t('已停用') }}
+                </BkTag>
+                <BkTag
+                  v-if="item.is_deprecated"
+                  theme="danger"
+                >
+                  deprecated
                 </BkTag>
               </div>
               <template v-if="featureFlagStore.isTenantMode">
@@ -260,7 +280,8 @@
                       display:
                         index < (visibleTagCountMap[item.id] ?? DEFAULT_VISIBLE)
                           ? 'inline-block'
-                          : 'none'
+                          : 'none',
+                      'flex-shrink': '0',
                     }"
                   >
                     <BkTag
@@ -397,33 +418,12 @@
     class="footer-container "
     :class="{'empty': shouldShowGuide}"
   >
-    <p class="contact">
-      <BkLink
-        class="text-12px color-#3a84ff!"
-        :href="contacts[0].link"
-        target="_blank"
-      >
-        {{ contacts[0].text }}
-      </BkLink>
-      |
-      <BkLink
-        class="text-12px color-#3a84ff!"
-        :href="contacts[1].link"
-        target="_blank"
-      >
-        {{ contacts[1].text }}
-      </BkLink>
-      |
-      <BkLink
-        class="text-12px color-#3a84ff!"
-        :href="contacts[2].link"
-        target="_blank"
-      >
-        {{ contacts[2].text }}
-      </BkLink>
-    </p>
+    <p
+      v-bk-xss-html="platformConfigStore.footerInfoHTML"
+      class="contact"
+    />
     <p class="copyright">
-      {{ copyright }}
+      {{ platformConfigStore.footerCopyright }}
     </p>
   </div>
 </template>
@@ -432,15 +432,17 @@
 import {
   useEnv,
   useFeatureFlag,
+  usePlatformConfig,
 } from '@/stores';
 import { TENANT_MODE_TEXT_MAP } from '@/enums';
-import { getGatewayList } from '@/services/source/gateway';
+import { getGatewayList } from '@/services/source/gateway/gateway';
 import { vIntersectionObserver } from '@vueuse/components';
-import AgIcon from '@/components/ag-icon/Index.vue';
+import AgIcon from '@/components/base/ag-icon/Index.vue';
 import GatewayEmpty from '@/images/gateway-empty.png';
 import GatewayEmpty2 from '@/images/gateway-empty2.png';
 import type { IExtractListApiResults } from '@/services/types/utils.ts';
-import TableEmpty from '@/components/table-empty/Index.vue';
+import AgTableEmpty from '@/components/base/ag-table-empty/Index.vue';
+import { getGatewayDisplayName, getGatewayFullName, hasDistinctDisplayName } from '@/utils/gateway-name';
 
 type GatewayType = IExtractListApiResults<typeof getGatewayList>;
 
@@ -456,6 +458,7 @@ const { t } = useI18n();
 const router = useRouter();
 const featureFlagStore = useFeatureFlag();
 const envStore = useEnv();
+const platformConfigStore = usePlatformConfig();
 
 const ordering = ref('updated_time');
 const filterData = ref({
@@ -469,6 +472,8 @@ const gatewaysList = ref<ConvertedGatewayType[]>([]);
 // 是否已初始化过网关列表数据
 const hasInitialized = ref(false);
 const loading = ref(false);
+// 无筛选条件下的网关总数量（用于判断是否需要展示创建引导页）
+const totalGatewayCount = ref(0);
 
 const pagination = ref({
   current: 1,
@@ -501,9 +506,13 @@ const setNameRef = (el: any, id: number) => {
   nameRefs.set(id, node);
 };
 
+const isTextOverflow = (el?: HTMLElement | null) => Boolean(el && el.scrollWidth > el.clientWidth);
+
 const checkOverflow = () => {
   nameRefs.forEach((el, id) => {
-    overflowMap[id] = el.scrollWidth > el.clientWidth;
+    const displayNameEl = el.querySelector<HTMLElement>('.display-name');
+    const gatewayIdEl = el.querySelector<HTMLElement>('.gateway-id');
+    overflowMap[id] = isTextOverflow(displayNameEl) || isTextOverflow(gatewayIdEl);
   });
 };
 
@@ -512,6 +521,27 @@ let filterTimer: number | null = null;
 
 // 防抖处理窗口大小变化
 let resizeTimer: number | null = null;
+
+// 列表容器：观测其宽度变化。
+// 拖动窗口高度时滚动条出现/消失会改变可用宽度，window.resize 之后布局可能尚未稳定，
+// 用 ResizeObserver 直接观测容器宽度最可靠
+const tableListRef = ref<HTMLElement | null>(null);
+let envResizeObserver: ResizeObserver | null = null;
+let lastObservedWidth = 0;
+
+const setupEnvResizeObserver = () => {
+  if (typeof ResizeObserver === 'undefined' || !tableListRef.value) return;
+  envResizeObserver?.disconnect();
+  envResizeObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.contentRect?.width ?? 0;
+    // 仅宽度真正变化时才重算，避免无意义的重复计算
+    if (Math.abs(width - lastObservedWidth) < 1) return;
+    lastObservedWidth = width;
+    calculateVisibleTags();
+    checkOverflow();
+  });
+  envResizeObserver.observe(tableListRef.value);
+};
 
 const gatewayTypes = [
   {
@@ -544,21 +574,6 @@ const orderingOptions = [
   {
     value: 'name',
     label: t('字母 A-Z'),
-  },
-];
-
-const contacts = [
-  {
-    text: t('技术支持'),
-    link: 'https://wpa1.qq.com/KziXGWJs?_type=wpa&qidian=true',
-  },
-  {
-    text: t('社区论坛'),
-    link: 'https://bk.tencent.com/s-mart/community/',
-  },
-  {
-    text: t('产品官网'),
-    link: 'https://bk.tencent.com/index/',
   },
 ];
 
@@ -604,8 +619,6 @@ const filteredSteps = computed(() => {
 
 const isShowNoticeAlert = computed(() => featureFlagStore.isEnabledNotice);
 
-const copyright = computed(() => `Copyright © 2012-${new Date().getFullYear()} Tencent BlueKing. All Rights Reserved. V${envStore.env.BK_APIGATEWAY_VERSION}`);
-
 const progressImg = computed(() => {
   if (envStore.env.EDITION === 'te') {
     return GatewayEmpty;
@@ -620,7 +633,7 @@ const enableGatewayOperationStatus = computed(() => {
 
 const shouldShowGuide = computed(() => {
   const hasNoFilters = Object.values(filterData.value).filter(item => (item !== '' && item !== 'all')).length === 0;
-  return hasNoFilters && hasInitialized.value && !gatewaysList.value.length;
+  return hasNoFilters && hasInitialized.value && totalGatewayCount.value === 0;
 });
 
 watch(gatewaysList, () => {
@@ -702,6 +715,11 @@ const fetchGatewayList = async () => {
     gatewaysList.value = current === 1 ? convertedData : [...gatewaysList.value, ...convertedData];
 
     const count = response.count || 0;
+    // 无筛选条件时记录网关总数量，仅在“用户从未创建过网关”时展示创建引导页
+    const hasNoFilters = !filterData.value.keyword && filterData.value.kind === 'all';
+    if (hasNoFilters) {
+      totalGatewayCount.value = count;
+    }
     pagination.value = {
       ...pagination.value,
       count,
@@ -836,26 +854,63 @@ const handleResize = () => {
   }
   resizeTimer = window.setTimeout(() => {
     calculateVisibleTags();
+    checkOverflow();
   }, 100);
 };
 
+// 原地测量元素宽度：元素保持在 DOM 原位置，确保 scoped 样式（.table-item 作用域）生效；
+// 早期 clone 到 document.body 会丢失作用域样式，导致隐藏标签测量偏小
 const measureElementWidth = (el?: HTMLElement | null) => {
   if (!el) return 0;
+  if (el.offsetWidth > 0) return el.offsetWidth;
   try {
-    if (el.offsetWidth && el.offsetWidth > 0) return el.offsetWidth;
-    const clone = el.cloneNode(true) as HTMLElement;
-    clone.style.visibility = 'hidden';
-    clone.style.position = 'absolute';
-    clone.style.display = 'inline-block';
-    clone.style.left = '-9999px';
-    clone.style.top = '-9999px';
-    document.body.appendChild(clone);
-    const w = clone.offsetWidth;
-    document.body.removeChild(clone);
+    const prev = {
+      display: el.style.display,
+      visibility: el.style.visibility,
+      position: el.style.position,
+      left: el.style.left,
+      top: el.style.top,
+    };
+    el.style.visibility = 'hidden';
+    el.style.position = 'absolute';
+    el.style.display = 'inline-block';
+    el.style.left = '-9999px';
+    el.style.top = '-9999px';
+    const w = el.offsetWidth;
+    el.style.display = prev.display;
+    el.style.visibility = prev.visibility;
+    el.style.position = prev.position;
+    el.style.left = prev.left;
+    el.style.top = prev.top;
     return w || 0;
   }
   catch {
     return el.offsetWidth || 0;
+  }
+};
+
+// 测量 "+X" 宽度：按「最坏情况」（只展示 1 个标签时数字最大）预留。
+// 使预留宽度恒定，切断「+X 数字变化 → 宽度变化 → 可见数量变化」的自反馈，
+// 否则同一宽度会因上一次状态不同而落到不同结果（表现为时好时坏）
+const measureMoreTagWidth = (el: HTMLElement | null | undefined, total: number) => {
+  if (!el) return 30;
+  const fallback = el.offsetWidth || 30;
+  try {
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.innerText = `+${Math.max(total - 1, 0)}`;
+    clone.style.visibility = 'hidden';
+    clone.style.position = 'absolute';
+    clone.style.left = '-9999px';
+    clone.style.top = '-9999px';
+    const parent = el.parentNode;
+    if (!parent) return fallback;
+    parent.appendChild(clone);
+    const w = clone.offsetWidth;
+    parent.removeChild(clone);
+    return w || fallback;
+  }
+  catch {
+    return fallback;
   }
 };
 
@@ -874,13 +929,15 @@ const calculateVisibleTags = () => {
       return;
     }
 
-    const containerWidth = container.offsetWidth;
+    const containerStyle = window.getComputedStyle(container);
+    // 内容区宽度：扣除 padding，再预留 8px 缓冲，避免标签贴到下一列
+    const containerWidth = container.clientWidth - parseFloat(containerStyle.paddingLeft || '0') - parseFloat(containerStyle.paddingRight || '0') - 8;
 
     // 测量每个标签的真实宽度（包含 margin 估算）
     const rawMeasuredWidths = tagEls.map((el: HTMLElement | undefined) => el ? measureElementWidth(el) : 0);
     const measuredWidths = rawMeasuredWidths.slice(0, MAX_VISIBLE_TAGS);
-    // 估计 +X 的宽度
-    const measuredMoreWidth = moreEl ? measureElementWidth(moreEl) : 30;
+    // 按最坏情况预留 "+X" 的宽度（恒定，不随当前显示的数字变化）
+    const measuredMoreWidth = measureMoreTagWidth(moreEl, tagEls.length);
 
     let totalTagWidth = 0;
     let fitNoPlus = 0;
@@ -925,18 +982,27 @@ const calculateVisibleTags = () => {
   });
 };
 
-onMounted(async () => {
+onMounted(() => {
   pagination.value.limit = calcPageLimit();
   window.addEventListener('resize', handleResize);
   nextTick(() => {
     calculateVisibleTags();
-    setTimeout(() => calculateVisibleTags(), 100);
-    setTimeout(() => calculateVisibleTags(), 300);
+    checkOverflow();
+    setupEnvResizeObserver();
   });
+  // 字体加载完成后文本/标签宽度会变化，重新测量一次；已加载则立即触发
+  if (typeof document !== 'undefined' && 'fonts' in document) {
+    document.fonts.ready.then(() => {
+      calculateVisibleTags();
+      checkOverflow();
+    });
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize);
+  envResizeObserver?.disconnect();
+  envResizeObserver = null;
   if (resizeTimer) {
     window.clearTimeout(resizeTimer);
     resizeTimer = null;
@@ -977,7 +1043,7 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: space-between;
     width: 100%;
-    padding: 28px 0;
+    padding: 24px 0;
     background-color: #f5f7fa;
 
     .left {
@@ -1034,7 +1100,7 @@ onBeforeUnmount(() => {
 
     .table-header {
       position: sticky;
-      top: 88px;
+      top: 80px;
       z-index: 990;
       display: flex;
       width: 100%;
@@ -1059,6 +1125,7 @@ onBeforeUnmount(() => {
 
         .name-logo {
           position: relative;
+          flex-shrink: 0;
           width: 48px;
           height: 48px;
           margin-right: 10px;
@@ -1077,31 +1144,53 @@ onBeforeUnmount(() => {
             left: 0;
             font-size: 12px;
             line-height: 12px;
-            color: #3A84FF;
-          }
-        }
-
-        .name {
-          min-width: 0;
-          margin-right: 10px;
-          overflow: hidden;
-          font-weight: 700;
-          color: #313238;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          cursor: pointer;
-
-          &:hover {
             color: #3a84ff;
           }
         }
 
+        .gateway-name {
+          display: flex;
+          min-width: 0;
+          margin-right: 10px;
+          cursor: pointer;
+          flex-direction: column;
+
+          &:hover {
+
+            .display-name {
+              color: #3a84ff;
+            }
+          }
+
+          .display-name {
+            font-weight: 700;
+            line-height: 22px;
+            color: #4d4f56;
+          }
+
+          .gateway-id {
+            font-size: 12px;
+            line-height: 20px;
+            color: #979ba5;
+          }
+        }
+
         .env {
+          padding-right: 8px;
           overflow: hidden;
+        }
+
+        .environment-tag,
+        .tag-cls {
+          flex-shrink: 0;
         }
 
         .environment-tag {
           margin-right: 8px;
+        }
+
+        .tag-cls {
+          min-width: 40px;
         }
       }
 
@@ -1144,10 +1233,10 @@ onBeforeUnmount(() => {
 
   .deact {
     color: #fff !important;
-    background: #EAEBF0 !important;
+    background: #eaebf0 !important;
 
     .deact-name {
-      color: #979BA5 !important;
+      color: #979ba5 !important;
     }
   }
 
@@ -1200,6 +1289,16 @@ onBeforeUnmount(() => {
     height: 58px;
     padding-top: 8px;
     background: #FFF;
+  }
+
+  // 页脚链接由平台配置的 markdown 转换而来，通过 v-bk-xss-html 渲染
+
+  .contact :deep(a) {
+    color: #3a84ff;
+
+    &:hover {
+      color: #699df4;
+    }
   }
 }
 

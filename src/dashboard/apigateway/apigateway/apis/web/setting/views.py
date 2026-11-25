@@ -26,7 +26,7 @@ from rest_framework import generics, status
 from apigateway.apps.data_plane.models import DataPlane
 from apigateway.apps.feature.models import UserFeatureFlag
 from apigateway.common.django.translation import get_current_language_code
-from apigateway.conf.utils import get_doc_links
+from apigateway.conf.utils import get_cli_function_overview, get_doc_links
 from apigateway.utils.responses import OKJsonResponse
 
 
@@ -42,8 +42,13 @@ class EnvVarListApi(generics.ListAPIView):
     def list(self, request, *args, **kwargs):
         env_vars = copy.copy(settings.ENV_VARS_FOR_FRONTEND)
 
-        lang = "EN" if get_current_language_code() == "en" else "ZH"
+        language_code = get_current_language_code()
+        lang = "EN" if language_code == "en" else "ZH"
         env_vars["DOC_LINKS"] = get_doc_links(settings.BK_APIGATEWAY_VERSION, settings.BK_DOCS_URL_PREFIX, lang)
+        env_vars["CLI"] = {
+            **env_vars.get("CLI", {}),
+            "OVERVIEW": get_cli_function_overview(lang),
+        }
 
         env_vars["BK_DATA_PLANE_API_URL_TMPL_MAP"] = {
             dp.name: dp.bk_api_url_tmpl for dp in DataPlane.objects.get_active_data_planes() if dp.bk_api_url_tmpl
@@ -64,23 +69,6 @@ class FeatureFlagListApi(generics.ListAPIView):
     def list(self, request, *args, **kwargs):
         """获取特性开关列表"""
         feature_flags = copy.copy(settings.DEFAULT_FEATURE_FLAG)
-
-        # 多租户模式下，没有 esb 相关的页面：组件管理 + 组件 API 文档
-        if settings.ENABLE_MULTI_TENANT_MODE:
-            feature_flags.update(
-                {
-                    "MENU_ITEM_ESB_API": False,
-                    "MENU_ITEM_ESB_API_DOC": False,
-                }
-            )
-        # 非多租户模式才会有 esb 相关的页面：组件管理 + 组件 API 文档
-        else:
-            feature_flags.update(
-                {
-                    "MENU_ITEM_ESB_API": feature_flags.get("MENU_ITEM_ESB_API", False) and request.user.is_superuser,
-                    # "MENU_ITEM_ESB_API_DOC": feature_flags.get("MENU_ITEM_ESB_API_DOC", False),
-                }
-            )
 
         user_feature_flags = UserFeatureFlag.objects.get_feature_flags(request.user.username)
         feature_flags.update(user_feature_flags)

@@ -50,7 +50,7 @@ def test_list_gateway_administrators(fake_gateway):
     assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin"]
 
 
-def test_list_gateway_approvers_prefers_operators(fake_gateway):
+def test_list_gateway_approvers_includes_members_with_approve_permission(fake_gateway):
     G(
         GatewayMember,
         gateway=fake_gateway,
@@ -58,10 +58,10 @@ def test_list_gateway_approvers_prefers_operators(fake_gateway):
         role=GatewayRoleEnum.OPERATOR.value,
     )
 
-    assert GatewayMember.objects.list_gateway_approvers(fake_gateway.id) == ["operator"]
+    assert GatewayMember.objects.list_gateway_approvers(fake_gateway.id) == ["admin", "operator"]
 
 
-def test_list_gateway_approvers_falls_back_to_administrators(fake_gateway):
+def test_list_gateway_approvers_includes_administrators(fake_gateway):
     assert GatewayMember.objects.list_gateway_approvers(fake_gateway.id) == ["admin"]
 
 
@@ -74,7 +74,9 @@ def test_build_gateway_member_maps(fake_gateway):
     )
 
     assert GatewayMember.objects.build_gateway_administrators_map([fake_gateway.id]) == {fake_gateway.id: ["admin"]}
-    assert GatewayMember.objects.build_gateway_approvers_map([fake_gateway.id]) == {fake_gateway.id: ["operator"]}
+    assert GatewayMember.objects.build_gateway_approvers_map([fake_gateway.id]) == {
+        fake_gateway.id: ["admin", "operator"]
+    }
 
 
 def test_gateway_member_maps_use_one_query_for_multiple_gateways(django_assert_num_queries, fake_gateway):
@@ -117,7 +119,7 @@ def test_list_gateway_ids_by_username(fake_gateway):
     assert operator_gateway_ids == []
 
 
-def test_list_gateway_ids_by_approver_prefers_operators(fake_gateway):
+def test_list_gateway_ids_by_approver_includes_administrators_and_operators(fake_gateway):
     G(
         GatewayMember,
         gateway=fake_gateway,
@@ -125,11 +127,11 @@ def test_list_gateway_ids_by_approver_prefers_operators(fake_gateway):
         role=GatewayRoleEnum.OPERATOR.value,
     )
 
-    assert GatewayMember.objects.list_gateway_ids_by_approver("admin") == []
+    assert GatewayMember.objects.list_gateway_ids_by_approver("admin") == [fake_gateway.id]
     assert GatewayMember.objects.list_gateway_ids_by_approver("operator") == [fake_gateway.id]
 
 
-def test_list_gateway_ids_by_approver_falls_back_to_administrators(fake_gateway):
+def test_list_gateway_ids_by_approver_includes_administrators(fake_gateway):
     assert GatewayMember.objects.list_gateway_ids_by_approver("admin") == [fake_gateway.id]
 
 
@@ -195,10 +197,11 @@ def test_add_gateway_members_creates_and_skips_existing(fake_gateway):
     )
 
 
-def test_update_gateway_member_role_keeps_expiry(fake_gateway):
+def test_update_gateway_member_role_refreshes_expiry(fake_gateway):
     GatewayMember.objects.add_gateway_administrators(fake_gateway.id, ["another-admin"], "operator-user")
     member = GatewayMember.objects.get(gateway=fake_gateway, username="admin")
     old_expires = member.expires
+    before = timezone.now()
 
     updated_member, previous_role, changed = GatewayMember.objects.update_gateway_member_role(
         fake_gateway.id,
@@ -210,7 +213,9 @@ def test_update_gateway_member_role_keeps_expiry(fake_gateway):
     assert changed
     assert previous_role == GatewayRoleEnum.ADMINISTRATOR.value
     assert updated_member.role == GatewayRoleEnum.OPERATOR.value
-    assert updated_member.expires == old_expires
+    assert updated_member.expires != old_expires
+    assert updated_member.expires is not None
+    assert updated_member.expires > before + timedelta(days=364)
 
 
 def test_update_gateway_member_role_rejects_last_administrator(fake_gateway):
@@ -257,3 +262,34 @@ def test_delete_gateway_member_rejects_member_from_another_gateway(fake_gateway)
 
     with pytest.raises(APIError):
         GatewayMember.objects.delete_gateway_member(fake_gateway.id, member.id)
+
+
+def test_delete_gateway_members_by_usernames_deletes_matches_and_skips_missing(fake_gateway):
+    GatewayMember.objects.add_gateway_administrators(fake_gateway.id, ["second-admin"], "operator-user")
+    operator = G(
+        GatewayMember,
+        gateway=fake_gateway,
+        username="operator",
+        role=GatewayRoleEnum.OPERATOR.value,
+    )
+
+    deleted = GatewayMember.objects.delete_gateway_members_by_usernames(
+        fake_gateway.id,
+        ["second-admin", "operator", "missing", "operator"],
+    )
+
+    assert [member.username for member in deleted] == ["operator", "second-admin"]
+    assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin"]
+    assert not GatewayMember.objects.filter(id=operator.id).exists()
+
+
+def test_delete_gateway_members_by_usernames_rejects_deleting_all_administrators(fake_gateway):
+    GatewayMember.objects.add_gateway_administrators(fake_gateway.id, ["second-admin"], "operator-user")
+
+    with pytest.raises(APIError):
+        GatewayMember.objects.delete_gateway_members_by_usernames(
+            fake_gateway.id,
+            ["admin", "second-admin"],
+        )
+
+    assert GatewayMember.objects.list_gateway_administrators(fake_gateway.id) == ["admin", "second-admin"]

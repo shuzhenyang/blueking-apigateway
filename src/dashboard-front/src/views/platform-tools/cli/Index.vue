@@ -1,15 +1,16 @@
 <template>
-  <div class="platform-tools-cli-page-content">
+  <div
+    class="platform-tools-cli-page-content"
+    :class="{ 'is-top-level': isTopLevel }"
+  >
     <!-- 顶部横幅 -->
     <div class="cli-banner">
       <div class="banner-left">
-        <div class="banner-icon">
-          <AgIcon
-            name="cli-o"
-            size="28"
-            color="#fff"
-          />
-        </div>
+        <img
+          class="banner-logo"
+          :src="mainLogo"
+          alt=""
+        >
         <div class="banner-info">
           <div class="banner-title">
             bk-cli
@@ -20,58 +21,59 @@
         </div>
       </div>
       <div class="banner-right">
-        <IconButton
+        <AgIconButton
+          class="banner-detail-button"
           theme="primary"
           icon="link"
           @click="openDetailUrl"
         >
           {{ t('查看详情') }}
-        </IconButton>
+        </AgIconButton>
       </div>
     </div>
 
     <!-- 特性卡片 -->
     <div class="feature-cards">
       <div class="feature-card">
-        <div class="feature-icon blue">
-          <AgIcon
-            name="roboto"
-            size="24"
-            color="#3A84FF"
-          />
-        </div>
-        <div class="feature-title">
-          {{ t('Agent 原生设计') }}
+        <div class="feature-heading">
+          <img
+            class="feature-icon"
+            :src="agentLogo"
+            alt=""
+          >
+          <div class="feature-title">
+            {{ t('Agent 原生设计') }}
+          </div>
         </div>
         <div class="feature-desc">
           {{ t('零交互、非阻塞、可预测。统一错误码和输出结构，Agent 可用固定逻辑解析所有响应') }}
         </div>
       </div>
       <div class="feature-card">
-        <div class="feature-icon green">
-          <AgIcon
-            name="cardd"
-            size="24"
-            color="#3A84FF"
-          />
-        </div>
-        <div class="feature-title">
-          {{ t('覆盖面广') }}
+        <div class="feature-heading">
+          <img
+            class="feature-icon"
+            :src="coverageLogo"
+            alt=""
+          >
+          <div class="feature-title">
+            {{ t('覆盖面广') }}
+          </div>
         </div>
         <div class="feature-desc">
           {{ t('覆盖 10+ 核心蓝鲸系统（配置平台、作业平台、蓝盾、蓝鲸监控等），一个工具打通所有蓝鲸能力') }}
         </div>
       </div>
       <div class="feature-card">
-        <div class="feature-icon orange">
-          <AgIcon
-            name="kuawangguan"
-            size="24"
-            color="#3A84FF"
-          />
-        </div>
-        <div class="feature-title">
-          {{ t('跨网关编排') }}
+        <div class="feature-heading">
+          <img
+            class="feature-icon"
+            :src="crossGatewayLogo"
+            alt=""
+          >
+          <div class="feature-title">
+            {{ t('跨网关编排') }}
+          </div>
         </div>
         <div class="feature-desc">
           {{ t('天然支持跨网关 API 发现和调用。查主机、跑脚本、看告警，一个 CLI 打通多个系统') }}
@@ -80,35 +82,38 @@
     </div>
 
     <!-- 安全与风险提示 -->
-    <div class="risk-notice">
-      <div class="notice-header">
-        <AgIcon
-          name="remind"
-          size="16"
-          color="#FF9C01"
-        />
-        <span class="notice-title">{{ t('安全与风险提示（使用前必读）') }}</span>
-      </div>
-      <div class="notice-list">
-        <div class="notice-item">
-          <span class="pr-4px color-#F59500 text-18px">•</span>
-          {{ t('本工具可供 AI Agent 调用以自动化操作蓝鲸所有平台，存在模型幻觉、执行不可控、提示词注入等固有风险') }}
+    <BkAlert
+      class="risk-notice"
+      theme="warning"
+      closable
+    >
+      <template #title>
+        <div class="notice-title">
+          {{ t('安全与风险提示（使用前必读）') }}
         </div>
-        <div class="notice-item">
-          <span class="pr-4px color-#F59500 text-18px">•</span>
-          {{ t('配置应用和用户凭证后，AI Agent 将以您的用户身份在授权范围内执行操作，可能导致敏感数据泄露、越权操作等高风险后果，请您谨慎操作和使用') }}
+        <div class="notice-list">
+          <div class="notice-item">
+            {{ t('本工具可供 AI Agent 调用以自动化操作蓝鲸所有平台，存在模型幻觉、执行不可控、提示词注入等固有风险') }}
+          </div>
+          <div class="notice-item">
+            {{ t('配置应用和用户凭证后，AI Agent 将以您的用户身份在授权范围内执行操作，可能导致敏感数据泄露、越权操作等高风险后果，请您谨慎操作和使用') }}
+          </div>
+          <div class="notice-item highlight">
+            {{ t('建议为 cli 申请单独的应用 ID 和 access_token，避免使用具有高权限的凭证') }}
+          </div>
         </div>
-        <div class="notice-item highlight">
-          <span class="pr-4px color-#F59500 text-18px">•</span>
-          {{ t('建议为 cli 申请单独的应用 ID 和 access_token，避免使用具有高权限的凭证') }}
-        </div>
-      </div>
-    </div>
+      </template>
+    </BkAlert>
 
-    <div class="tab-wrapper">
+    <div
+      ref="tabWrapperRef"
+      class="tab-wrapper"
+    >
       <BkTab
         v-model:active="activeTab"
+        class="main-tabs"
         type="unborder-card"
+        :label-height="42"
       >
         <BkTabPanel
           name="overview"
@@ -134,53 +139,104 @@
 </template>
 
 <script setup lang="ts">
+import AdvancedUsage from './components/AdvancedUsage.vue';
 import FunctionOverview from './components/FunctionOverview.vue';
 import QuickStart from './components/QuickStart.vue';
-import AdvancedUsage from './components/AdvancedUsage.vue';
+import agentLogo from '@/images/bk-cli/agent.png';
+import coverageLogo from '@/images/bk-cli/coverage.png';
+import crossGatewayLogo from '@/images/bk-cli/cross-gateway.png';
+import mainLogo from '@/images/bk-cli/main-logo.png';
 import { useEnv } from '@/stores/useEnv';
 
 const { t } = useI18n();
+const route = useRoute();
 const envStore = useEnv();
 
+const tabWrapperRef = useTemplateRef<HTMLElement>('tabWrapperRef');
+
 const activeTab = ref('overview');
+
+const isTopLevel = computed(() => route.name === 'BkCli');
 
 const openDetailUrl = () => {
   window.open(envStore.env.CLI.DETAIL_URL, '_blank');
 };
+
+// 查找最近的可滚动祖先元素（页面在不同入口下的滚动容器不同）
+const getScrollContainer = (el: HTMLElement) => {
+  let parent = el.parentElement;
+  while (parent) {
+    const { overflowY } = window.getComputedStyle(parent);
+    if (['auto', 'scroll', 'overlay'].includes(overflowY) && parent.scrollHeight > parent.clientHeight) {
+      return parent;
+    }
+    parent = parent.parentElement;
+  }
+  return null;
+};
+
+// tab 头已吸顶时，切换 tab 后滚回 tab 区域起点，保证新内容从头开始展示
+const scrollToTabTop = () => {
+  const wrapper = tabWrapperRef.value;
+  if (!wrapper) {
+    return;
+  }
+  const container = getScrollContainer(wrapper);
+  if (!container) {
+    return;
+  }
+  const offset = wrapper.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  if (offset < 0) {
+    container.scrollTop += offset;
+  }
+};
+
+watch(activeTab, scrollToTabTop, { flush: 'post' });
+
 </script>
 
 <style lang="scss" scoped>
-
 .platform-tools-cli-page-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
   padding: 24px;
+  box-sizing: border-box;
+
+  &.is-top-level {
+    width: 80%;
+    min-width: 1200px;
+    padding: 16px 0 32px;
+    margin: 0 auto;
+  }
 
   .cli-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    height: 108px;
     padding: 24px;
     background: #fff;
-    border-radius: 2px;
-    box-shadow: 0 2px 6px 0 rgb(0 0 0 / 10%);
+    border-radius: 4px;
+    box-shadow: 0 2px 4px 0 #1919290d;
 
     .banner-left {
       display: flex;
       align-items: center;
-      gap: 16px;
+      min-width: 0;
+      gap: 12px;
     }
 
-    .banner-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: #3A84FF;
-      border-radius: 4px;
+    .banner-logo {
+      display: block;
+      width: 64px;
+      height: 64px;
       flex-shrink: 0;
     }
 
     .banner-info {
+      min-width: 0;
 
       .banner-title {
         font-size: 16px;
@@ -193,7 +249,7 @@ const openDetailUrl = () => {
         margin-top: 4px;
         font-size: 12px;
         line-height: 20px;
-        color: #979ba5;
+        color: #4d4f56;
       }
     }
 
@@ -201,43 +257,42 @@ const openDetailUrl = () => {
       flex-shrink: 0;
       margin-left: 24px;
     }
+
+    .banner-detail-button {
+      width: 110px;
+    }
   }
 
   .feature-cards {
     display: flex;
     gap: 16px;
-    margin-top: 16px;
 
     .feature-card {
+      display: flex;
       flex: 1;
+      flex-direction: column;
+      justify-content: flex-start;
+      min-width: 0;
+      min-height: 152px;
       padding: 24px;
       background: #fff;
-      border-radius: 2px;
-      box-shadow: 0 2px 6px 0 rgb(0 0 0 / 10%);
+      border-radius: 4px;
+      box-shadow: 0 2px 4px 0 #1919290d;
 
-      .feature-icon {
+      .feature-heading {
         display: flex;
         align-items: center;
-        justify-content: center;
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
+        gap: 16px;
+      }
 
-        &.blue {
-          background: #e1ecff;
-        }
-
-        &.green {
-          background: #e1ecff;
-        }
-
-        &.orange {
-          background: #e1ecff;
-        }
+      .feature-icon {
+        display: block;
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
       }
 
       .feature-title {
-        margin-top: 16px;
         font-size: 14px;
         font-weight: 700;
         line-height: 22px;
@@ -245,69 +300,99 @@ const openDetailUrl = () => {
       }
 
       .feature-desc {
-        margin-top: 8px;
+        margin-top: 16px;
         font-size: 12px;
         line-height: 20px;
-        color: #979ba5;
+        color: #4d4f56;
       }
     }
   }
 
   .risk-notice {
-    margin-top: 16px;
-    background: #FDF4E8;
-    border: 1px solid #F9D090;
-    border-radius: 2px;
+    color: #f59500;
+    background: #fdf4e8;
+    border-color: #fce5c0;
+    border-radius: 4px;
+    box-shadow: 0 2px 2px 0 #1919290d;
 
-    .notice-header {
-      display: flex;
-      height: 38px;
-      padding: 8px;
-      border-bottom: 1px solid #F9D090;
-      align-items: center;
-      gap: 8px;
+    :deep(.bk-alert-wraper) {
+      align-items: flex-start;
+      padding: 16px;
+    }
 
-      .notice-title {
-        font-size: 14px;
-        font-weight: 700;
-        line-height: 22px;
-        color: #ff9c01;
-      }
+    :deep(.bk-alert-icon-info) {
+      margin-top: 2px;
+      color: #f59500;
+    }
+
+    :deep(.bk-alert-title) {
+      line-height: 20px;
+    }
+
+    :deep(.bk-alert-close) {
+      color: #f59500;
+    }
+
+    .notice-title {
+      font-weight: 700;
     }
 
     .notice-list {
       display: flex;
       flex-direction: column;
-      padding: 12px 24px;
-      gap: 8px;
+      gap: 10px;
+      margin-top: 10px;
+    }
 
-      .notice-item {
-        padding-left: 6px;
-        font-size: 12px;
-        line-height: 20px;
-        color: #8B4113;
+    .notice-item {
+      position: relative;
+      padding-left: 12px;
+      font-size: 12px;
+      line-height: 20px;
 
-        &.highlight {
-          padding-block: 4px;
-          font-weight: 700;
-          background: #FCE5C0;
-        }
+      &::before {
+        position: absolute;
+        top: 7px;
+        left: 0;
+        width: 6px;
+        height: 6px;
+        background: currentcolor;
+        border-radius: 50%;
+        content: '';
+      }
+
+      &.highlight {
+        font-weight: 700;
       }
     }
   }
 
   .tab-wrapper {
-    margin-top: 16px;
-    background: #FFF;
-    border-radius: 2px;
-    box-shadow: 0 0 8px 0 #374a641a;
+    background: #fff;
+    border-radius: 4px;
+    box-shadow: 0 2px 2px 0 #1919290d;
 
-    :deep(.bk-tab-header) {
-      padding-left: 24px;
+    :deep(.main-tabs > .bk-tab-header) {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 0 24px;
+      background: #fff;
+      border-radius: 4px 4px 0 0;
     }
 
-    :deep(.bk-tab-content) {
+    :deep(.main-tabs > .bk-tab-header .bk-tab-header-item) {
       padding: 0;
+      margin-right: 32px;
+      font-size: 14px;
+
+      &:last-child {
+        margin-right: 0;
+      }
+    }
+
+    :deep(.main-tabs > .bk-tab-content) {
+      padding: 16px 24px 24px;
     }
   }
 }

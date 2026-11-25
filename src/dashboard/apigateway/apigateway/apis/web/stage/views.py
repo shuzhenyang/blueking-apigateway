@@ -21,9 +21,9 @@ from django.utils.translation import gettext as _
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, status
 
-from apigateway.apis.web.ai_backend import serialize_ai_backend_config_for_web
 from apigateway.apps.audit.constants import OpTypeEnum
 from apigateway.apps.programmable_gateway.models import ProgrammableGatewayDeployHistory
+from apigateway.apps.rbac.constants import GatewayActionEnum
 from apigateway.biz.audit import Auditor
 from apigateway.biz.mcp_server import MCPServerHandler
 from apigateway.biz.programmable import ProgrammableGatewayReleaser
@@ -55,10 +55,7 @@ from .serializers import (
 def _get_backend_config_dict(instance: BackendConfig) -> dict:
     data = get_model_dict(instance)
     data.pop("_config")
-    if instance.backend.is_ai:
-        data["config"] = serialize_ai_backend_config_for_web(instance)
-    else:
-        data["config"] = instance.get_config_for_display()
+    data["config"] = instance.get_config_for_display()
     return data
 
 
@@ -86,6 +83,8 @@ class StageQuerySetMixin:
     ),
 )
 class StageListCreateApi(StageQuerySetMixin, generics.ListCreateAPIView):
+    gateway_action_map = {"GET": GatewayActionEnum.OPERATE_GATEWAY.value}
+
     queryset = Stage.objects.select_related("gateway").order_by("id")
 
     def list(self, request, *args, **kwargs):
@@ -396,8 +395,10 @@ class StageBackendRetrieveUpdateApi(BackendConfigQuerySetMixin, generics.Retriev
         slz.is_valid(raise_exception=True)
 
         data = slz.validated_data
-        instance.config = data
-        instance.save()
+        unchanged = instance.backend.is_ai and data == instance.config
+        if not unchanged:
+            instance.config = data
+            instance.save()
 
         Auditor.record_stage_backend_op_success(
             op_type=OpTypeEnum.MODIFY,
@@ -411,7 +412,8 @@ class StageBackendRetrieveUpdateApi(BackendConfigQuerySetMixin, generics.Retriev
 
         username = request.user.username
         # 触发环境发布
-        trigger_gateway_publish(PublishSourceEnum.BACKEND_UPDATE, username, instance.gateway_id, instance.stage_id)
+        if not unchanged:
+            trigger_gateway_publish(PublishSourceEnum.BACKEND_UPDATE, username, instance.gateway_id, instance.stage_id)
 
         return OKJsonResponse(status=status.HTTP_204_NO_CONTENT)
 
@@ -499,7 +501,7 @@ class ProgrammableStageDeployRetrieveApi(StageQuerySetMixin, generics.RetrieveUp
         }
         context_data.update(stage_deploy_result)
         output_slz = self.get_serializer(
-            instance=stage_deploy_result.get("last_deploy_history", ProgrammableGatewayDeployHistory()),
+            instance=stage_deploy_result.get("current_deploy_history", ProgrammableGatewayDeployHistory()),
             context=context_data,
         )
         return OKJsonResponse(data=output_slz.data)
